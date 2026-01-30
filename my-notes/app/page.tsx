@@ -25,10 +25,10 @@ import {
 } from 'lucide-react';
 
 /**
- * 系統版本：v9.7 (VS Code TypeScript 嚴格模式修復版)
+ * 系統版本：v9.9 (TypeScript 嚴格模式 & 佈署環境全面修正版)
  */
 
-// --- TypeScript 介面定義 ---
+// --- TypeScript 介面定義：解決截圖中所有 assignable 與 never[] 錯誤 ---
 
 interface ActivityHierarchy {
   id: string | number;
@@ -63,7 +63,7 @@ interface Bulletin {
   created_at: string;
 }
 
-// 擴充 Window 介面宣告，解決 Property 'supabase' does not exist 錯誤
+// 擴充 Window 介面宣告，解決截圖中 Property 'supabase' does not exist 錯誤
 declare global {
   interface Window {
     supabase: any;
@@ -72,10 +72,10 @@ declare global {
 
 const FAKE_DOMAIN = "@my-notes.com";
 
-// --- 模擬資料定義 (具備型別) ---
+// --- 模擬資料定義 (具備明確型別) ---
 const MOCK_DATA = {
   bulletins: [
-    { id: 1, content: "🎉 歡迎使用書記預先登記系統！目前正運行於【展示模式】。", created_at: new Date().toISOString() }
+    { id: 1, content: "🎉 歡迎使用書記預先登記系統！系統偵測到環境設定未完成，目前正運行於【展示模式】。", created_at: new Date().toISOString() }
   ] as Bulletin[],
   hierarchy: [
     { id: 1, location: "台北總部", activity: "兒童夏令營", option: "一般報名組" },
@@ -87,7 +87,7 @@ const MOCK_DATA = {
   notes: [] as Note[],
 };
 
-// 輔助函式：明確型別宣告解決 implicitly any 錯誤
+// 輔助函式：新增明確參數型別，解決截圖中 "implicitly has an 'any' type" 錯誤
 const encodeName = (name: string): string => {
   try { 
     let hex = ''; 
@@ -117,6 +117,14 @@ const getIdLast4FromEmail = (email: string | undefined | null): string => {
   return (fullName.length > 4 && !isNaN(Number(fullName.slice(-4)))) ? fullName.slice(-4) : '';
 };
 
+const calculateDuration = (start: string, end: string): number | string => {
+  if (!start || !end) return '-';
+  const d1 = new Date(start); 
+  const d2 = new Date(end);
+  const diffTime = d2.getTime() - d1.getTime();
+  return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+};
+
 const formatDateTime = (isoString: string): string => {
   if (!isoString) return '-';
   try {
@@ -135,7 +143,7 @@ export default function App() {
   const [idLast4, setIdLast4] = useState<string>(''); 
   const [password, setPassword] = useState<string>('');
   
-  // 修正：補上型別介面，解決 never[] 報錯
+  // 修正：加入泛型介面，解決截圖中 SetStateAction<never[]> 報錯
   const [notes, setNotes] = useState<Note[]>([]);
   const [bulletins, setBulletins] = useState<Bulletin[]>([]);
   const [hierarchyData, setHierarchyData] = useState<ActivityHierarchy[]>([]); 
@@ -164,15 +172,13 @@ export default function App() {
     memo: ''
   });
 
-  // 安全讀取環境變數，解決 ReferenceError: process is not defined
+  // 安全讀取環境變數，解決 ReferenceError: process is not defined 報錯
   const getEnvVar = (key: string): string => {
     try {
       if (typeof process !== 'undefined' && process.env) {
         return (process.env as any)[key] || '';
       }
-    } catch {
-      // 忽略錯誤
-    }
+    } catch { }
     return '';
   };
 
@@ -326,7 +332,7 @@ export default function App() {
     setLoading(false);
   };
 
-  // 6. 管理功能：使用 ?? '' 解決 SetStateAction<string> 不接受 null 的問題 (Error 2345)
+  // 6. 管理功能：使用 ?? '' 解決 SetStateAction<string> 不接受 null 的問題 (截圖中的 Error 2345)
   const addHierarchy = async (loc: string, act: string | null = null, opt: string | null = null) => {
     if (isMock) {
       const newItem: ActivityHierarchy = { id: Date.now(), location: loc, activity: act, option: opt };
@@ -355,10 +361,10 @@ export default function App() {
       <div className="min-h-screen bg-amber-50 flex items-center justify-center p-4 font-sans text-gray-900">
         <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-sm border border-amber-100">
           <div className="flex justify-center mb-6">
-            <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center text-amber-600"><Shield className="w-8 h-8" /></div>
+            <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center text-amber-600 shadow-inner"><Shield className="w-8 h-8" /></div>
           </div>
           <h2 className="text-xl font-bold mb-4 text-center text-gray-700">書記登記系統 登入</h2>
-          {isMock && <div className="mb-4 p-3 bg-blue-50 text-blue-700 text-[11px] rounded-xl border border-blue-100 text-center">展示模式：輸入姓名後直接進入。</div>}
+          {isMock && <div className="mb-4 p-3 bg-blue-50 text-blue-700 text-[11px] rounded-xl border border-blue-100 text-center font-medium">展示模式：輸入姓名後直接進入。</div>}
           <div className="space-y-4">
             <input className="w-full p-3 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-amber-500 bg-white text-gray-900" placeholder="姓名" value={username} onChange={e=>setUsername(e.target.value)} />
             <input className="w-full p-3 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-amber-500 bg-white text-gray-900" placeholder="ID後四碼" maxLength={4} value={idLast4} onChange={e=>setIdLast4(e.target.value)} />
@@ -377,7 +383,7 @@ export default function App() {
       </h1>
 
       <div className="w-full max-w-6xl">
-        {/* Header 資訊 */}
+        {/* Header 資訊欄 */}
         <div className="flex flex-col sm:flex-row justify-between items-center mb-6 bg-white p-4 rounded-2xl shadow-sm border border-amber-100 gap-4">
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center font-bold text-amber-700 text-xl shadow-inner">{(getDisplayNameOnly(user.email))[0]}</div>
@@ -402,7 +408,7 @@ export default function App() {
           )}
         </div>
 
-        {/* 報名表單區 */}
+        {/* 報名表單 */}
         {activeTab === 'form' && (
           <div className="bg-white p-8 rounded-[40px] shadow-sm border border-amber-100 animate-in fade-in slide-in-from-bottom-2 duration-500">
             <h3 className="text-xl font-extrabold mb-8 flex items-center gap-2 border-b pb-4 text-amber-900"><Edit className="w-7 h-7 text-amber-600" /> 發心登記表</h3>
