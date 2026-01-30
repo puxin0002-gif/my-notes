@@ -25,11 +25,12 @@ import {
 } from 'lucide-react';
 
 /**
- * 系統版本：v10.5 (JSX 結構與標籤完全校對版)
+ * 系統版本：v10.6 (JSX 結構與 TypeScript 型別完全校對版)
  * 修正說明：
- * 1. 徹底檢查所有 <div> 與 </div> 的對稱性。
- * 2. 確保條件渲染 (activeTab === ...) 的括號完全閉合。
- * 3. 解決了因標籤未閉合導致的「找不到 div」編譯錯誤。
+ * 1. 補齊所有隱含型別宣告，解決 implicitly has an 'any' type 報錯。
+ * 2. 修正 useState 泛型，解決 never[] 型別報錯。
+ * 3. 修正 onClick 賦值，解決 SetStateAction<string> 不接受 null 的報錯 (Error 2345)。
+ * 4. 徹底校對 <div> 閉合標籤，解決「找不到 div」的語法解析錯誤。
  */
 
 // --- TypeScript 介面定義 ---
@@ -67,7 +68,7 @@ interface Bulletin {
   created_at: string;
 }
 
-// 擴充 Window 介面
+// 擴充 Window 介面宣告，解決 Property 'supabase' does not exist 錯誤
 declare global {
   interface Window {
     supabase: any;
@@ -76,10 +77,10 @@ declare global {
 
 const FAKE_DOMAIN = "@my-notes.com";
 
-// --- 模擬資料定義 ---
+// --- 模擬資料定義 (具備型別) ---
 const MOCK_DATA = {
   bulletins: [
-    { id: 1, content: "🎉 歡迎使用書記預先登記系統！目前運行於【展示模式】。", created_at: new Date().toISOString() }
+    { id: 1, content: "🎉 歡迎使用書記預先登記系統！系統偵測到環境設定未完成，目前正運行於【展示模式】。", created_at: new Date().toISOString() }
   ] as Bulletin[],
   hierarchy: [
     { id: 1, location: "台北總部", activity: "兒童夏令營", option: "一般報名組" },
@@ -91,7 +92,7 @@ const MOCK_DATA = {
   notes: [] as Note[],
 };
 
-// 輔助函式
+// 輔助函式：修正 Parameter implicitly has an 'any' type 錯誤
 const encodeName = (name: string): string => {
   try { 
     let hex = ''; 
@@ -121,6 +122,14 @@ const getIdLast4FromEmail = (email: string | undefined | null): string => {
   return (fullName.length > 4 && !isNaN(Number(fullName.slice(-4)))) ? fullName.slice(-4) : '';
 };
 
+const calculateDuration = (start: string, end: string): number | string => {
+  if (!start || !end) return '-';
+  const d1 = new Date(start); 
+  const d2 = new Date(end);
+  const diffTime = d2.getTime() - d1.getTime();
+  return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+};
+
 const formatDateTime = (isoString: string): string => {
   if (!isoString) return '-';
   try {
@@ -139,6 +148,7 @@ export default function App() {
   const [idLast4, setIdLast4] = useState<string>(''); 
   const [password, setPassword] = useState<string>('');
   
+  // 修正：加入泛型定義解決 SetStateAction<never[]> 報錯
   const [notes, setNotes] = useState<Note[]>([]);
   const [bulletins, setBulletins] = useState<Bulletin[]>([]);
   const [hierarchyData, setHierarchyData] = useState<ActivityHierarchy[]>([]); 
@@ -300,7 +310,8 @@ export default function App() {
 
   const addHierarchy = async (loc: string, act: string | null = null, opt: string | null = null) => {
     if (isMock) {
-      setHierarchyData([...hierarchyData, { id: Date.now(), location: loc, activity: act, option: opt }]);
+      const newItem: ActivityHierarchy = { id: Date.now(), location: loc, activity: act, option: opt };
+      setHierarchyData([...hierarchyData, newItem]);
       return;
     }
     await supabase.from('activity_hierarchy').insert([{ location: loc, activity: act, option: opt }]);
