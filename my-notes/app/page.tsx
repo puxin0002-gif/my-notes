@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 
 /**
- * 系統版本：v10.0 (TypeScript 嚴格模式 & 佈署環境全面修復終極版)
+ * 系統版本：v10.1 (TypeScript 嚴格模式 & 佈署環境完全修復修正版)
  */
 
 // --- TypeScript 介面定義 ---
@@ -63,7 +63,7 @@ interface Bulletin {
   created_at: string;
 }
 
-// 擴充 Window 介面宣告，解決 Property 'supabase' does not exist 錯誤
+// 擴充 Window 介面，解決截圖中 Property 'supabase' does not exist 錯誤
 declare global {
   interface Window {
     supabase: any;
@@ -72,7 +72,7 @@ declare global {
 
 const FAKE_DOMAIN = "@my-notes.com";
 
-// --- 模擬資料定義 (具備明確型別) ---
+// --- 模擬資料定義 (具備型別) ---
 const MOCK_DATA = {
   bulletins: [
     { id: 1, content: "🎉 歡迎使用書記預先登記系統！系統偵測到環境設定未完成，目前正運行於【展示模式】。", created_at: new Date().toISOString() }
@@ -87,7 +87,7 @@ const MOCK_DATA = {
   notes: [] as Note[],
 };
 
-// 輔助函式：新增明確參數型別，解決 "implicitly has an 'any' type" 錯誤
+// 輔助函式：修正 Parameter implicitly has an 'any' type 錯誤
 const encodeName = (name: string): string => {
   try { 
     let hex = ''; 
@@ -143,7 +143,7 @@ export default function App() {
   const [idLast4, setIdLast4] = useState<string>(''); 
   const [password, setPassword] = useState<string>('');
   
-  // 為 useState 加入泛型介面，解決 SetStateAction<never[]> 報錯
+  // 為 useState 加入泛型定義，解決截圖中 SetStateAction<never[]> 報錯
   const [notes, setNotes] = useState<Note[]>([]);
   const [bulletins, setBulletins] = useState<Bulletin[]>([]);
   const [hierarchyData, setHierarchyData] = useState<ActivityHierarchy[]>([]); 
@@ -383,7 +383,6 @@ export default function App() {
       </h1>
 
       <div className="w-full max-w-6xl">
-        {/* Header 資訊欄 */}
         <div className="flex flex-col sm:flex-row justify-between items-center mb-6 bg-white p-4 rounded-2xl shadow-sm border border-amber-100 gap-4">
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center font-bold text-amber-700 text-xl shadow-inner">{(getDisplayNameOnly(user.email))[0]}</div>
@@ -395,7 +394,6 @@ export default function App() {
           <button onClick={handleLogout} className="bg-red-50 hover:bg-red-100 text-red-600 px-4 py-2 rounded-xl flex items-center gap-2 text-sm font-bold transition-all"><LogOut className="w-4 h-4" /> 登出</button>
         </div>
 
-        {/* 分頁選單 */}
         <div className="flex flex-wrap gap-2 mb-6 bg-amber-200/40 p-1.5 rounded-2xl backdrop-blur-sm">
           <button onClick={()=>setActiveTab('bulletin')} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl transition-all ${activeTab === 'bulletin' ? 'bg-white shadow-md text-amber-700 font-bold border border-amber-100 scale-105' : 'text-amber-600 hover:bg-amber-100'}`}><Bell className="w-4 h-4" /> 公告</button>
           <button onClick={()=>setActiveTab('form')} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl transition-all ${activeTab === 'form' ? 'bg-white shadow-md text-amber-700 font-bold border border-amber-100 scale-105' : 'text-amber-600 hover:bg-amber-100'}`}><Edit className="w-4 h-4" /> 報名</button>
@@ -408,7 +406,6 @@ export default function App() {
           )}
         </div>
 
-        {/* 報名表單 */}
         {activeTab === 'form' && (
           <div className="bg-white p-8 rounded-[40px] shadow-sm border border-amber-100 animate-in fade-in slide-in-from-bottom-2 duration-500">
             <h3 className="text-xl font-extrabold mb-8 flex items-center gap-2 border-b pb-4 text-amber-900"><Edit className="w-7 h-7 text-amber-600" /> 發心登記表</h3>
@@ -462,7 +459,6 @@ export default function App() {
           </div>
         )}
 
-        {/* 公告 */}
         {activeTab === 'bulletin' && (
           <div className="space-y-4">
             {bulletins.map(b => (
@@ -474,7 +470,6 @@ export default function App() {
           </div>
         )}
 
-        {/* 歷史紀錄 */}
         {activeTab === 'history' && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {notes.filter(n => n.user_id === (user?.id || 'mock')).map(n => (
