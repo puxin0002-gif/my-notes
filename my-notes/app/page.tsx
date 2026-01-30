@@ -25,10 +25,10 @@ import {
 } from 'lucide-react';
 
 /**
- * 系統版本：v9.9 (TypeScript 嚴格模式 & 佈署環境全面修正版)
+ * 系統版本：v10.0 (TypeScript 嚴格模式 & 佈署環境全面修復終極版)
  */
 
-// --- TypeScript 介面定義：解決截圖中所有 assignable 與 never[] 錯誤 ---
+// --- TypeScript 介面定義 ---
 
 interface ActivityHierarchy {
   id: string | number;
@@ -63,7 +63,7 @@ interface Bulletin {
   created_at: string;
 }
 
-// 擴充 Window 介面宣告，解決截圖中 Property 'supabase' does not exist 錯誤
+// 擴充 Window 介面宣告，解決 Property 'supabase' does not exist 錯誤
 declare global {
   interface Window {
     supabase: any;
@@ -87,7 +87,7 @@ const MOCK_DATA = {
   notes: [] as Note[],
 };
 
-// 輔助函式：新增明確參數型別，解決截圖中 "implicitly has an 'any' type" 錯誤
+// 輔助函式：新增明確參數型別，解決 "implicitly has an 'any' type" 錯誤
 const encodeName = (name: string): string => {
   try { 
     let hex = ''; 
@@ -143,7 +143,7 @@ export default function App() {
   const [idLast4, setIdLast4] = useState<string>(''); 
   const [password, setPassword] = useState<string>('');
   
-  // 修正：加入泛型介面，解決截圖中 SetStateAction<never[]> 報錯
+  // 為 useState 加入泛型介面，解決 SetStateAction<never[]> 報錯
   const [notes, setNotes] = useState<Note[]>([]);
   const [bulletins, setBulletins] = useState<Bulletin[]>([]);
   const [hierarchyData, setHierarchyData] = useState<ActivityHierarchy[]>([]); 
