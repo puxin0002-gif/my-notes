@@ -25,7 +25,12 @@ import {
 } from 'lucide-react';
 
 /**
- * 系統版本：v10.1 (TypeScript 嚴格模式 & 佈署環境完全修復修正版)
+ * 系統版本：v10.3 (TypeScript & 佈署環境全面修正終極版)
+ * 修正說明：
+ * 1. 為所有 Helper Function 加入明確參數型別 (解決 implicitly has an any type)。
+ * 2. 使用 declare global 擴充 Window 介面 (解決 Property supabase not exist)。
+ * 3. 為 useState 加入泛型註解 (解決 never[] 型別不符)。
+ * 4. 在賦值處使用 ?? '' 處理 null 情況 (解決 Error 2345: SetStateAction<string>)。
  */
 
 // --- TypeScript 介面定義 ---
@@ -63,7 +68,7 @@ interface Bulletin {
   created_at: string;
 }
 
-// 擴充 Window 介面，解決截圖中 Property 'supabase' does not exist 錯誤
+// 擴充 Window 介面宣告，解決截圖中 Property 'supabase' does not exist 錯誤
 declare global {
   interface Window {
     supabase: any;
@@ -143,7 +148,7 @@ export default function App() {
   const [idLast4, setIdLast4] = useState<string>(''); 
   const [password, setPassword] = useState<string>('');
   
-  // 為 useState 加入泛型定義，解決截圖中 SetStateAction<never[]> 報錯
+  // 修正：補上型別泛型，解決截圖中 SetStateAction<never[]> 報錯
   const [notes, setNotes] = useState<Note[]>([]);
   const [bulletins, setBulletins] = useState<Bulletin[]>([]);
   const [hierarchyData, setHierarchyData] = useState<ActivityHierarchy[]>([]); 
@@ -459,10 +464,11 @@ export default function App() {
           </div>
         )}
 
+        {/* 公告 */}
         {activeTab === 'bulletin' && (
           <div className="space-y-4">
             {bulletins.map(b => (
-              <div key={b.id} className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+              <div key={b.id} className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 animate-in fade-in slide-in-from-top-2">
                 <p className="text-gray-800 whitespace-pre-wrap leading-relaxed">{b.content}</p>
                 <p className="text-[10px] text-gray-400 mt-4 font-mono">{formatDateTime(b.created_at)}</p>
               </div>
@@ -470,6 +476,7 @@ export default function App() {
           </div>
         )}
 
+        {/* 歷史紀錄 */}
         {activeTab === 'history' && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {notes.filter(n => n.user_id === (user?.id || 'mock')).map(n => (
