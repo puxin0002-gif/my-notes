@@ -25,15 +25,15 @@ import {
 } from 'lucide-react';
 
 /**
- * 系統版本：v10.6 (JSX 結構與 TypeScript 型別完全校對版)
+ * 系統版本：v10.7 (TypeScript 嚴格檢查 & 佈署環境完全修復版)
  * 修正說明：
- * 1. 補齊所有隱含型別宣告，解決 implicitly has an 'any' type 報錯。
- * 2. 修正 useState 泛型，解決 never[] 型別報錯。
- * 3. 修正 onClick 賦值，解決 SetStateAction<string> 不接受 null 的報錯 (Error 2345)。
- * 4. 徹底校對 <div> 閉合標籤，解決「找不到 div」的語法解析錯誤。
+ * 1. 補齊所有隱含型別宣告，解決截圖中 "implicitly has an 'any' type" 報錯。
+ * 2. 修正 useState 泛型，解決 "never[]" 型別不符問題。
+ * 3. 解決 Error 2345：在所有賦值處使用 ?? '' 確保不將 null 傳給字串狀態。
+ * 4. 校對所有標籤閉合，解決 VS Code 解析導致「找不到 div」的問題。
  */
 
-// --- TypeScript 介面定義 ---
+// --- TypeScript 介面定義：確保資料結構嚴謹 ---
 
 interface ActivityHierarchy {
   id: string | number;
@@ -68,7 +68,7 @@ interface Bulletin {
   created_at: string;
 }
 
-// 擴充 Window 介面宣告，解決 Property 'supabase' does not exist 錯誤
+// 擴充 Window 介面，讓 TypeScript 認識動態加載的 supabase SDK
 declare global {
   interface Window {
     supabase: any;
@@ -92,7 +92,7 @@ const MOCK_DATA = {
   notes: [] as Note[],
 };
 
-// 輔助函式：修正 Parameter implicitly has an 'any' type 錯誤
+// 輔助函式：新增明確參數型別，解決 implicitly any 錯誤
 const encodeName = (name: string): string => {
   try { 
     let hex = ''; 
@@ -130,7 +130,7 @@ const calculateDuration = (start: string, end: string): number | string => {
   return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
 };
 
-const formatDateTime = (isoString: string): string => {
+const formatDateTime = (isoString: string | undefined | null): string => {
   if (!isoString) return '-';
   try {
     const d = new Date(isoString);
@@ -148,7 +148,7 @@ export default function App() {
   const [idLast4, setIdLast4] = useState<string>(''); 
   const [password, setPassword] = useState<string>('');
   
-  // 修正：加入泛型定義解決 SetStateAction<never[]> 報錯
+  // 使用泛型解決 never[] 賦值報錯
   const [notes, setNotes] = useState<Note[]>([]);
   const [bulletins, setBulletins] = useState<Bulletin[]>([]);
   const [hierarchyData, setHierarchyData] = useState<ActivityHierarchy[]>([]); 
