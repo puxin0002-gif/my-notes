@@ -25,7 +25,8 @@ import {
 } from 'lucide-react';
 
 /**
- * 系統版本：v9.4 (TypeScript & PowerShell 相容修復版)
+ * 系統版本：v9.6 (TypeScript 嚴格型別完全相容版)
+ * 修復重點：解決 SetStateAction<string> 不接受 null 的問題 (Error 2345)
  */
 
 // --- TypeScript 介面定義 ---
@@ -75,7 +76,7 @@ const FAKE_DOMAIN = "@my-notes.com";
 // --- 模擬資料定義 ---
 const MOCK_DATA = {
   bulletins: [
-    { id: 1, content: "🎉 歡迎使用書記預先登記系統！系統偵測到環境設定未完成，目前正運行於【展示模式】。", created_at: new Date().toISOString() }
+    { id: 1, content: "🎉 歡迎使用書記預先登記系統！系統目前正運行於【展示模式】。", created_at: new Date().toISOString() }
   ] as Bulletin[],
   hierarchy: [
     { id: 1, location: "台北總部", activity: "兒童夏令營", option: "一般報名組" },
@@ -143,7 +144,7 @@ export default function App() {
   const [idLast4, setIdLast4] = useState<string>(''); 
   const [password, setPassword] = useState<string>('');
   
-  // 修正：補上型別泛型，解決 SetStateAction<never[]> 報錯
+  // 使用泛型確保陣列型別正確
   const [notes, setNotes] = useState<Note[]>([]);
   const [bulletins, setBulletins] = useState<Bulletin[]>([]);
   const [hierarchyData, setHierarchyData] = useState<ActivityHierarchy[]>([]); 
@@ -196,7 +197,7 @@ export default function App() {
             setSupabase(client);
             setIsMock(false);
           } catch (err) {
-            console.warn("Supabase 初始化失敗，進入展示模式。");
+            console.warn("Supabase 初始化失敗。");
             setIsMock(true);
           }
         } else {
@@ -353,10 +354,10 @@ export default function App() {
       <div className="min-h-screen bg-amber-50 flex items-center justify-center p-4 font-sans text-gray-900">
         <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-sm border border-amber-100">
           <div className="flex justify-center mb-6">
-            <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center text-amber-600 shadow-inner"><Shield className="w-8 h-8" /></div>
+            <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center text-amber-600"><Shield className="w-8 h-8" /></div>
           </div>
           <h2 className="text-xl font-bold mb-4 text-center text-gray-700">書記登記系統 登入</h2>
-          {isMock && <div className="mb-4 p-3 bg-blue-50 text-blue-700 text-[11px] rounded-xl border border-blue-100 text-center font-medium">系統目前以展示模式運行，無需密碼即可進入。</div>}
+          {isMock && <div className="mb-4 p-3 bg-blue-50 text-blue-700 text-[11px] rounded-xl border border-blue-100 text-center font-medium">展示模式：無需密碼即可進入。</div>}
           <div className="space-y-4">
             <input className="w-full p-3 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-amber-500 bg-white text-gray-900" placeholder="姓名" value={username} onChange={e=>setUsername(e.target.value)} />
             <input className="w-full p-3 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-amber-500 bg-white text-gray-900" placeholder="ID後四碼" maxLength={4} value={idLast4} onChange={e=>setIdLast4(e.target.value)} />
@@ -455,7 +456,7 @@ export default function App() {
           <div className="space-y-4">
             {bulletins.map(b => (
               <div key={b.id} className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 animate-in fade-in slide-in-from-top-2">
-                <p className="text-gray-800 whitespace-pre-wrap leading-relaxed">{b.content}</p>
+                <p className="text-gray-800 whitespace-pre-wrap">{b.content}</p>
                 <p className="text-[10px] text-gray-400 mt-4 font-mono">{formatDateTime(b.created_at)}</p>
               </div>
             ))}
@@ -498,7 +499,7 @@ export default function App() {
                   {locations.map((loc, i) => (
                     <div key={i} className={`p-3 rounded-xl flex justify-between items-center text-sm cursor-pointer transition-all ${mgmtSelectedLoc === loc ? 'bg-blue-600 text-white shadow-md' : 'bg-gray-50 hover:bg-gray-100'}`} onClick={()=>{setMgmtSelectedLoc(loc);setMgmtSelectedAct('');}}>
                       <span className="font-bold">{loc}</span>
-                      <button onClick={(e)=>{e.stopPropagation(); const target = hierarchyData.find(h=>h.location===loc); if(target) deleteHierarchy(target.id);}} className="p-1 hover:bg-red-500 rounded transition-colors group"><Trash2 className={`w-4 h-4 ${mgmtSelectedLoc === loc ? 'text-white/60' : 'text-red-400'} group-hover:text-white`}/></button>
+                      <button onClick={(e)=>{e.stopPropagation(); const target = hierarchyData.find(h=>h.location===loc); if(target) deleteHierarchy(target.id);}} className="text-gray-400 hover:text-red-500"><Trash2 className="w-4 h-4"/></button>
                     </div>
                   ))}
                 </div>
@@ -513,7 +514,7 @@ export default function App() {
                   {hierarchyData.filter(h=>h.location===mgmtSelectedLoc && h.activity && !h.option).map(h=>(
                     <div key={h.id} className={`p-3 rounded-xl flex justify-between items-center text-sm cursor-pointer transition-all ${mgmtSelectedAct === h.activity ? 'bg-green-600 text-white shadow-md' : 'bg-gray-50 hover:bg-gray-100'}`} onClick={()=>setMgmtSelectedAct(h.activity ?? '')}>
                       <span className="font-bold">{h.activity}</span>
-                      <button onClick={(e)=>{e.stopPropagation(); deleteHierarchy(h.id);}} className="p-1 hover:bg-red-500 rounded transition-colors group"><Trash2 className={`w-4 h-4 ${mgmtSelectedAct === h.activity ? 'text-white/60' : 'text-red-400'} group-hover:text-white`}/></button>
+                      <button onClick={(e)=>{e.stopPropagation(); deleteHierarchy(h.id);}} className="text-gray-400 hover:text-red-500"><Trash2 className="w-4 h-4"/></button>
                     </div>
                   ))}
                 </div>
