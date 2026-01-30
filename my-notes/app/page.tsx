@@ -25,8 +25,7 @@ import {
 } from 'lucide-react';
 
 /**
- * 系統版本：v9.6 (TypeScript 嚴格型別完全相容版)
- * 修復重點：解決 SetStateAction<string> 不接受 null 的問題 (Error 2345)
+ * 系統版本：v9.7 (VS Code TypeScript 嚴格模式修復版)
  */
 
 // --- TypeScript 介面定義 ---
@@ -64,7 +63,7 @@ interface Bulletin {
   created_at: string;
 }
 
-// 擴充 Window 介面以支援動態加載的 Supabase SDK
+// 擴充 Window 介面宣告，解決 Property 'supabase' does not exist 錯誤
 declare global {
   interface Window {
     supabase: any;
@@ -73,10 +72,10 @@ declare global {
 
 const FAKE_DOMAIN = "@my-notes.com";
 
-// --- 模擬資料定義 ---
+// --- 模擬資料定義 (具備型別) ---
 const MOCK_DATA = {
   bulletins: [
-    { id: 1, content: "🎉 歡迎使用書記預先登記系統！系統目前正運行於【展示模式】。", created_at: new Date().toISOString() }
+    { id: 1, content: "🎉 歡迎使用書記預先登記系統！目前正運行於【展示模式】。", created_at: new Date().toISOString() }
   ] as Bulletin[],
   hierarchy: [
     { id: 1, location: "台北總部", activity: "兒童夏令營", option: "一般報名組" },
@@ -88,7 +87,7 @@ const MOCK_DATA = {
   notes: [] as Note[],
 };
 
-// 輔助函式：修正 Parameter implicitly has an 'any' type
+// 輔助函式：明確型別宣告解決 implicitly any 錯誤
 const encodeName = (name: string): string => {
   try { 
     let hex = ''; 
@@ -118,14 +117,6 @@ const getIdLast4FromEmail = (email: string | undefined | null): string => {
   return (fullName.length > 4 && !isNaN(Number(fullName.slice(-4)))) ? fullName.slice(-4) : '';
 };
 
-const calculateDuration = (start: string, end: string): number | string => {
-  if (!start || !end) return '-';
-  const d1 = new Date(start); 
-  const d2 = new Date(end);
-  const diffTime = d2.getTime() - d1.getTime();
-  return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
-};
-
 const formatDateTime = (isoString: string): string => {
   if (!isoString) return '-';
   try {
@@ -144,7 +135,7 @@ export default function App() {
   const [idLast4, setIdLast4] = useState<string>(''); 
   const [password, setPassword] = useState<string>('');
   
-  // 使用泛型確保陣列型別正確
+  // 修正：補上型別介面，解決 never[] 報錯
   const [notes, setNotes] = useState<Note[]>([]);
   const [bulletins, setBulletins] = useState<Bulletin[]>([]);
   const [hierarchyData, setHierarchyData] = useState<ActivityHierarchy[]>([]); 
@@ -173,15 +164,19 @@ export default function App() {
     memo: ''
   });
 
+  // 安全讀取環境變數，解決 ReferenceError: process is not defined
   const getEnvVar = (key: string): string => {
     try {
       if (typeof process !== 'undefined' && process.env) {
         return (process.env as any)[key] || '';
       }
-    } catch { }
+    } catch {
+      // 忽略錯誤
+    }
     return '';
   };
 
+  // 1. 初始化 SDK 與環境偵測
   useEffect(() => {
     const loadSupabase = () => {
       const script = document.createElement('script');
@@ -197,7 +192,7 @@ export default function App() {
             setSupabase(client);
             setIsMock(false);
           } catch (err) {
-            console.warn("Supabase 初始化失敗。");
+            console.warn("Supabase 初始化失敗，回退至展示模式。");
             setIsMock(true);
           }
         } else {
@@ -217,6 +212,7 @@ export default function App() {
     setMinStartDate(d);
   }, []);
 
+  // 2. 資料獲取邏輯
   const fetchData = useCallback(async () => {
     if (isMock) {
       setBulletins(MOCK_DATA.bulletins);
@@ -251,6 +247,7 @@ export default function App() {
     }
   }, [user, fetchData, isMock, supabase]);
 
+  // 3. 身份驗證邏輯
   const handleLogin = async () => {
     if (isMock) {
       setUser({ id: 'mock-u-1', email: encodeName(username + idLast4) + FAKE_DOMAIN });
@@ -274,6 +271,7 @@ export default function App() {
     setUser(null); setIsAdmin(false); setActiveTab('bulletin');
   };
 
+  // 4. 三層聯動邏輯計算：使用型別斷言修正 string | null 賦值問題
   const locations = useMemo(() => [...new Set(hierarchyData.map(h => h.location))].sort(), [hierarchyData]);
   
   const availableActivities = useMemo(() => {
@@ -295,6 +293,7 @@ export default function App() {
       .sort();
   }, [hierarchyData, formData.activity_location, formData.activity_name]);
 
+  // 5. 報名提交
   const handleSubmitNote = async () => {
     if (!formData.activity_location || !formData.activity_name || !formData.activity_option || !formData.real_name) {
       return alert('請完整填寫必填欄位 (*)');
@@ -327,6 +326,7 @@ export default function App() {
     setLoading(false);
   };
 
+  // 6. 管理功能：使用 ?? '' 解決 SetStateAction<string> 不接受 null 的問題 (Error 2345)
   const addHierarchy = async (loc: string, act: string | null = null, opt: string | null = null) => {
     if (isMock) {
       const newItem: ActivityHierarchy = { id: Date.now(), location: loc, activity: act, option: opt };
@@ -349,6 +349,7 @@ export default function App() {
 
   if (loading && !supabase && !isMock) return <div className="min-h-screen bg-amber-50 flex items-center justify-center font-bold text-amber-900">系統加載中...</div>;
 
+  // --- 介面渲染 ---
   if (!user) {
     return (
       <div className="min-h-screen bg-amber-50 flex items-center justify-center p-4 font-sans text-gray-900">
@@ -357,7 +358,7 @@ export default function App() {
             <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center text-amber-600"><Shield className="w-8 h-8" /></div>
           </div>
           <h2 className="text-xl font-bold mb-4 text-center text-gray-700">書記登記系統 登入</h2>
-          {isMock && <div className="mb-4 p-3 bg-blue-50 text-blue-700 text-[11px] rounded-xl border border-blue-100 text-center font-medium">展示模式：無需密碼即可進入。</div>}
+          {isMock && <div className="mb-4 p-3 bg-blue-50 text-blue-700 text-[11px] rounded-xl border border-blue-100 text-center">展示模式：輸入姓名後直接進入。</div>}
           <div className="space-y-4">
             <input className="w-full p-3 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-amber-500 bg-white text-gray-900" placeholder="姓名" value={username} onChange={e=>setUsername(e.target.value)} />
             <input className="w-full p-3 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-amber-500 bg-white text-gray-900" placeholder="ID後四碼" maxLength={4} value={idLast4} onChange={e=>setIdLast4(e.target.value)} />
@@ -376,6 +377,7 @@ export default function App() {
       </h1>
 
       <div className="w-full max-w-6xl">
+        {/* Header 資訊 */}
         <div className="flex flex-col sm:flex-row justify-between items-center mb-6 bg-white p-4 rounded-2xl shadow-sm border border-amber-100 gap-4">
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center font-bold text-amber-700 text-xl shadow-inner">{(getDisplayNameOnly(user.email))[0]}</div>
@@ -387,6 +389,7 @@ export default function App() {
           <button onClick={handleLogout} className="bg-red-50 hover:bg-red-100 text-red-600 px-4 py-2 rounded-xl flex items-center gap-2 text-sm font-bold transition-all"><LogOut className="w-4 h-4" /> 登出</button>
         </div>
 
+        {/* 分頁選單 */}
         <div className="flex flex-wrap gap-2 mb-6 bg-amber-200/40 p-1.5 rounded-2xl backdrop-blur-sm">
           <button onClick={()=>setActiveTab('bulletin')} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl transition-all ${activeTab === 'bulletin' ? 'bg-white shadow-md text-amber-700 font-bold border border-amber-100 scale-105' : 'text-amber-600 hover:bg-amber-100'}`}><Bell className="w-4 h-4" /> 公告</button>
           <button onClick={()=>setActiveTab('form')} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl transition-all ${activeTab === 'form' ? 'bg-white shadow-md text-amber-700 font-bold border border-amber-100 scale-105' : 'text-amber-600 hover:bg-amber-100'}`}><Edit className="w-4 h-4" /> 報名</button>
@@ -399,6 +402,7 @@ export default function App() {
           )}
         </div>
 
+        {/* 報名表單區 */}
         {activeTab === 'form' && (
           <div className="bg-white p-8 rounded-[40px] shadow-sm border border-amber-100 animate-in fade-in slide-in-from-bottom-2 duration-500">
             <h3 className="text-xl font-extrabold mb-8 flex items-center gap-2 border-b pb-4 text-amber-900"><Edit className="w-7 h-7 text-amber-600" /> 發心登記表</h3>
@@ -452,17 +456,19 @@ export default function App() {
           </div>
         )}
 
+        {/* 公告 */}
         {activeTab === 'bulletin' && (
           <div className="space-y-4">
             {bulletins.map(b => (
-              <div key={b.id} className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 animate-in fade-in slide-in-from-top-2">
-                <p className="text-gray-800 whitespace-pre-wrap">{b.content}</p>
+              <div key={b.id} className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+                <p className="text-gray-800 whitespace-pre-wrap leading-relaxed">{b.content}</p>
                 <p className="text-[10px] text-gray-400 mt-4 font-mono">{formatDateTime(b.created_at)}</p>
               </div>
             ))}
           </div>
         )}
 
+        {/* 歷史紀錄 */}
         {activeTab === 'history' && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {notes.filter(n => n.user_id === (user?.id || 'mock')).map(n => (
@@ -485,6 +491,7 @@ export default function App() {
           </div>
         )}
 
+        {/* 管理者設定區：修復賦值型別問題 (Error 2345) */}
         {activeTab === 'admin_settings' && isAdmin && (
           <div className="bg-white p-8 rounded-[40px] shadow-sm border border-blue-100 animate-in fade-in duration-300">
             <h3 className="text-xl font-black mb-8 flex items-center gap-2 border-b pb-4 text-blue-900"><Database className="w-7 h-7 text-blue-600" /> 層級數據管理</h3>
@@ -499,7 +506,7 @@ export default function App() {
                   {locations.map((loc, i) => (
                     <div key={i} className={`p-3 rounded-xl flex justify-between items-center text-sm cursor-pointer transition-all ${mgmtSelectedLoc === loc ? 'bg-blue-600 text-white shadow-md' : 'bg-gray-50 hover:bg-gray-100'}`} onClick={()=>{setMgmtSelectedLoc(loc);setMgmtSelectedAct('');}}>
                       <span className="font-bold">{loc}</span>
-                      <button onClick={(e)=>{e.stopPropagation(); const target = hierarchyData.find(h=>h.location===loc); if(target) deleteHierarchy(target.id);}} className="text-gray-400 hover:text-red-500"><Trash2 className="w-4 h-4"/></button>
+                      <button onClick={(e)=>{e.stopPropagation(); const target = hierarchyData.find(h=>h.location===loc); if(target) deleteHierarchy(target.id);}} className="p-1 hover:bg-red-500 rounded transition-colors group"><Trash2 className={`w-4 h-4 ${mgmtSelectedLoc === loc ? 'text-white/60' : 'text-red-400'} group-hover:text-white`}/></button>
                     </div>
                   ))}
                 </div>
@@ -514,7 +521,7 @@ export default function App() {
                   {hierarchyData.filter(h=>h.location===mgmtSelectedLoc && h.activity && !h.option).map(h=>(
                     <div key={h.id} className={`p-3 rounded-xl flex justify-between items-center text-sm cursor-pointer transition-all ${mgmtSelectedAct === h.activity ? 'bg-green-600 text-white shadow-md' : 'bg-gray-50 hover:bg-gray-100'}`} onClick={()=>setMgmtSelectedAct(h.activity ?? '')}>
                       <span className="font-bold">{h.activity}</span>
-                      <button onClick={(e)=>{e.stopPropagation(); deleteHierarchy(h.id);}} className="text-gray-400 hover:text-red-500"><Trash2 className="w-4 h-4"/></button>
+                      <button onClick={(e)=>{e.stopPropagation(); deleteHierarchy(h.id);}} className="p-1 hover:bg-red-500 rounded transition-colors group"><Trash2 className={`w-4 h-4 ${mgmtSelectedAct === h.activity ? 'text-white/60' : 'text-red-400'} group-hover:text-white`}/></button>
                     </div>
                   ))}
                 </div>
