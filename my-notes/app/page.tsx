@@ -25,12 +25,11 @@ import {
 } from 'lucide-react';
 
 /**
- * 系統版本：v10.3 (TypeScript & 佈署環境全面修正終極版)
+ * 系統版本：v10.5 (JSX 結構與標籤完全校對版)
  * 修正說明：
- * 1. 為所有 Helper Function 加入明確參數型別 (解決 implicitly has an any type)。
- * 2. 使用 declare global 擴充 Window 介面 (解決 Property supabase not exist)。
- * 3. 為 useState 加入泛型註解 (解決 never[] 型別不符)。
- * 4. 在賦值處使用 ?? '' 處理 null 情況 (解決 Error 2345: SetStateAction<string>)。
+ * 1. 徹底檢查所有 <div> 與 </div> 的對稱性。
+ * 2. 確保條件渲染 (activeTab === ...) 的括號完全閉合。
+ * 3. 解決了因標籤未閉合導致的「找不到 div」編譯錯誤。
  */
 
 // --- TypeScript 介面定義 ---
@@ -68,7 +67,7 @@ interface Bulletin {
   created_at: string;
 }
 
-// 擴充 Window 介面宣告，解決截圖中 Property 'supabase' does not exist 錯誤
+// 擴充 Window 介面
 declare global {
   interface Window {
     supabase: any;
@@ -77,10 +76,10 @@ declare global {
 
 const FAKE_DOMAIN = "@my-notes.com";
 
-// --- 模擬資料定義 (具備型別) ---
+// --- 模擬資料定義 ---
 const MOCK_DATA = {
   bulletins: [
-    { id: 1, content: "🎉 歡迎使用書記預先登記系統！系統偵測到環境設定未完成，目前正運行於【展示模式】。", created_at: new Date().toISOString() }
+    { id: 1, content: "🎉 歡迎使用書記預先登記系統！目前運行於【展示模式】。", created_at: new Date().toISOString() }
   ] as Bulletin[],
   hierarchy: [
     { id: 1, location: "台北總部", activity: "兒童夏令營", option: "一般報名組" },
@@ -92,7 +91,7 @@ const MOCK_DATA = {
   notes: [] as Note[],
 };
 
-// 輔助函式：修正 Parameter implicitly has an 'any' type 錯誤
+// 輔助函式
 const encodeName = (name: string): string => {
   try { 
     let hex = ''; 
@@ -122,14 +121,6 @@ const getIdLast4FromEmail = (email: string | undefined | null): string => {
   return (fullName.length > 4 && !isNaN(Number(fullName.slice(-4)))) ? fullName.slice(-4) : '';
 };
 
-const calculateDuration = (start: string, end: string): number | string => {
-  if (!start || !end) return '-';
-  const d1 = new Date(start); 
-  const d2 = new Date(end);
-  const diffTime = d2.getTime() - d1.getTime();
-  return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
-};
-
 const formatDateTime = (isoString: string): string => {
   if (!isoString) return '-';
   try {
@@ -148,7 +139,6 @@ export default function App() {
   const [idLast4, setIdLast4] = useState<string>(''); 
   const [password, setPassword] = useState<string>('');
   
-  // 修正：補上型別泛型，解決截圖中 SetStateAction<never[]> 報錯
   const [notes, setNotes] = useState<Note[]>([]);
   const [bulletins, setBulletins] = useState<Bulletin[]>([]);
   const [hierarchyData, setHierarchyData] = useState<ActivityHierarchy[]>([]); 
@@ -177,17 +167,15 @@ export default function App() {
     memo: ''
   });
 
-  // 安全讀取環境變數，解決 ReferenceError: process is not defined 報錯
   const getEnvVar = (key: string): string => {
     try {
-      if (typeof process !== 'undefined' && process.env) {
-        return (process.env as any)[key] || '';
+      if (typeof process !== 'undefined' && (process as any).env) {
+        return (process as any).env[key] || '';
       }
     } catch { }
     return '';
   };
 
-  // 1. 初始化 SDK 與環境偵測
   useEffect(() => {
     const loadSupabase = () => {
       const script = document.createElement('script');
@@ -203,7 +191,6 @@ export default function App() {
             setSupabase(client);
             setIsMock(false);
           } catch (err) {
-            console.warn("Supabase 初始化失敗，回退至展示模式。");
             setIsMock(true);
           }
         } else {
@@ -223,7 +210,6 @@ export default function App() {
     setMinStartDate(d);
   }, []);
 
-  // 2. 資料獲取邏輯
   const fetchData = useCallback(async () => {
     if (isMock) {
       setBulletins(MOCK_DATA.bulletins);
@@ -232,7 +218,6 @@ export default function App() {
       return;
     }
     if (!supabase) return;
-    
     try {
       const { data: bData } = await supabase.from('bulletins').select('*').order('created_at', { ascending: false });
       if (bData) setBulletins(bData);
@@ -240,9 +225,7 @@ export default function App() {
       if (hData) setHierarchyData(hData);
       const { data: nData } = await supabase.from('notes').select('*').order('created_at', { ascending: false });
       if (nData) setNotes(nData);
-    } catch (err) {
-      console.error("Error fetching data:", err);
-    }
+    } catch (err) { }
   }, [supabase, isMock]);
 
   useEffect(() => {
@@ -258,7 +241,6 @@ export default function App() {
     }
   }, [user, fetchData, isMock, supabase]);
 
-  // 3. 身份驗證邏輯
   const handleLogin = async () => {
     if (isMock) {
       setUser({ id: 'mock-u-1', email: encodeName(username + idLast4) + FAKE_DOMAIN });
@@ -269,7 +251,7 @@ export default function App() {
     const email = encodeName(username + idLast4) + FAKE_DOMAIN;
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
-      alert('登入失敗，請確認帳號或密碼。');
+      alert('登入失敗');
     } else {
       setUser(data.user);
       setFormData(prev => ({ ...prev, real_name: username }));
@@ -282,29 +264,14 @@ export default function App() {
     setUser(null); setIsAdmin(false); setActiveTab('bulletin');
   };
 
-  // 4. 三層聯動邏輯計算：使用型別斷言修正 string | null 賦值問題
   const locations = useMemo(() => [...new Set(hierarchyData.map(h => h.location))].sort(), [hierarchyData]);
-  
   const availableActivities = useMemo(() => {
-    return [...new Set(
-      hierarchyData
-        .filter(h => h.location === formData.activity_location && h.activity !== null)
-        .map(h => h.activity as string)
-    )].sort();
+    return [...new Set(hierarchyData.filter(h => h.location === formData.activity_location && h.activity !== null).map(h => h.activity as string))].sort();
   }, [hierarchyData, formData.activity_location]);
-
   const availableOptions = useMemo(() => {
-    return hierarchyData
-      .filter(h => 
-        h.location === formData.activity_location && 
-        h.activity === formData.activity_name && 
-        h.option !== null
-      )
-      .map(h => h.option as string)
-      .sort();
+    return hierarchyData.filter(h => h.location === formData.activity_location && h.activity === formData.activity_name && h.option !== null).map(h => h.option as string).sort();
   }, [hierarchyData, formData.activity_location, formData.activity_name]);
 
-  // 5. 報名提交
   const handleSubmitNote = async () => {
     if (!formData.activity_location || !formData.activity_name || !formData.activity_option || !formData.real_name) {
       return alert('請完整填寫必填欄位 (*)');
@@ -318,7 +285,6 @@ export default function App() {
       sign_name: `${formData.real_name} (${last4})`,
       created_at: new Date().toISOString()
     };
-
     if (isMock) {
       MOCK_DATA.notes.unshift({ ...payload, id: Date.now() } as Note);
       setNotes([...MOCK_DATA.notes]);
@@ -326,22 +292,15 @@ export default function App() {
       setActiveTab('history');
     } else {
       const { error } = await supabase.from('notes').insert([payload]);
-      if (!error) { 
-        alert('登記成功'); 
-        fetchData(); 
-        setActiveTab('history'); 
-      } else { 
-        alert('錯誤: ' + error.message); 
-      }
+      if (!error) { alert('登記成功'); fetchData(); setActiveTab('history'); }
+      else { alert('錯誤: ' + error.message); }
     }
     setLoading(false);
   };
 
-  // 6. 管理功能：使用 ?? '' 解決 SetStateAction<string> 不接受 null 的問題 (截圖中的 Error 2345)
   const addHierarchy = async (loc: string, act: string | null = null, opt: string | null = null) => {
     if (isMock) {
-      const newItem: ActivityHierarchy = { id: Date.now(), location: loc, activity: act, option: opt };
-      setHierarchyData([...hierarchyData, newItem]);
+      setHierarchyData([...hierarchyData, { id: Date.now(), location: loc, activity: act, option: opt }]);
       return;
     }
     await supabase.from('activity_hierarchy').insert([{ location: loc, activity: act, option: opt }]);
@@ -358,15 +317,22 @@ export default function App() {
     fetchData();
   };
 
-  if (loading && !supabase && !isMock) return <div className="min-h-screen bg-amber-50 flex items-center justify-center font-bold text-amber-900">系統加載中...</div>;
+  if (loading && !supabase && !isMock) {
+    return (
+      <div className="min-h-screen bg-amber-50 flex items-center justify-center font-bold text-amber-900">
+        系統加載中...
+      </div>
+    );
+  }
 
-  // --- 介面渲染 ---
   if (!user) {
     return (
       <div className="min-h-screen bg-amber-50 flex items-center justify-center p-4 font-sans text-gray-900">
         <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-sm border border-amber-100">
           <div className="flex justify-center mb-6">
-            <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center text-amber-600 shadow-inner"><Shield className="w-8 h-8" /></div>
+            <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center text-amber-600 shadow-inner">
+              <Shield className="w-8 h-8" />
+            </div>
           </div>
           <h2 className="text-xl font-bold mb-4 text-center text-gray-700">書記登記系統 登入</h2>
           {isMock && <div className="mb-4 p-3 bg-blue-50 text-blue-700 text-[11px] rounded-xl border border-blue-100 text-center font-medium">展示模式：輸入姓名後直接進入。</div>}
@@ -390,30 +356,47 @@ export default function App() {
       <div className="w-full max-w-6xl">
         <div className="flex flex-col sm:flex-row justify-between items-center mb-6 bg-white p-4 rounded-2xl shadow-sm border border-amber-100 gap-4">
           <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center font-bold text-amber-700 text-xl shadow-inner">{(getDisplayNameOnly(user.email))[0]}</div>
+            <div className="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center font-bold text-amber-700 text-xl shadow-inner">
+              {(getDisplayNameOnly(user.email))[0]}
+            </div>
             <div>
                <div className="font-bold text-lg">{getDisplayNameOnly(user.email)} {isAdmin && <span className="text-[10px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full ml-1 font-bold">管理員</span>}</div>
                <div className="text-xs text-gray-400 font-mono italic">ID: {getIdLast4FromEmail(user.email)} {isMock && "(展示中)"}</div>
             </div>
           </div>
-          <button onClick={handleLogout} className="bg-red-50 hover:bg-red-100 text-red-600 px-4 py-2 rounded-xl flex items-center gap-2 text-sm font-bold transition-all"><LogOut className="w-4 h-4" /> 登出</button>
+          <button onClick={handleLogout} className="bg-red-50 hover:bg-red-100 text-red-600 px-4 py-2 rounded-xl flex items-center gap-2 text-sm font-bold transition-all">
+            <LogOut className="w-4 h-4" /> 登出
+          </button>
         </div>
 
         <div className="flex flex-wrap gap-2 mb-6 bg-amber-200/40 p-1.5 rounded-2xl backdrop-blur-sm">
-          <button onClick={()=>setActiveTab('bulletin')} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl transition-all ${activeTab === 'bulletin' ? 'bg-white shadow-md text-amber-700 font-bold border border-amber-100 scale-105' : 'text-amber-600 hover:bg-amber-100'}`}><Bell className="w-4 h-4" /> 公告</button>
-          <button onClick={()=>setActiveTab('form')} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl transition-all ${activeTab === 'form' ? 'bg-white shadow-md text-amber-700 font-bold border border-amber-100 scale-105' : 'text-amber-600 hover:bg-amber-100'}`}><Edit className="w-4 h-4" /> 報名</button>
-          <button onClick={()=>setActiveTab('history')} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl transition-all ${activeTab === 'history' ? 'bg-white shadow-md text-amber-700 font-bold border border-amber-100 scale-105' : 'text-amber-600 hover:bg-amber-100'}`}><History className="w-4 h-4" /> 紀錄</button>
+          <button onClick={()=>setActiveTab('bulletin')} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl transition-all ${activeTab === 'bulletin' ? 'bg-white shadow-md text-amber-700 font-bold border border-amber-100 scale-105' : 'text-amber-600 hover:bg-amber-100'}`}>
+            <Bell className="w-4 h-4" /> 公告
+          </button>
+          <button onClick={()=>setActiveTab('form')} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl transition-all ${activeTab === 'form' ? 'bg-white shadow-md text-amber-700 font-bold border border-amber-100 scale-105' : 'text-amber-600 hover:bg-amber-100'}`}>
+            <Edit className="w-4 h-4" /> 報名
+          </button>
+          <button onClick={()=>setActiveTab('history')} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl transition-all ${activeTab === 'history' ? 'bg-white shadow-md text-amber-700 font-bold border border-amber-100 scale-105' : 'text-amber-600 hover:bg-amber-100'}`}>
+            <History className="w-4 h-4" /> 紀錄
+          </button>
           {isAdmin && (
             <>
-              <button onClick={()=>setActiveTab('admin_settings')} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl transition-all ${activeTab === 'admin_settings' ? 'bg-white shadow-md text-blue-700 font-bold border border-blue-100 scale-105' : 'text-blue-600 hover:bg-blue-100'}`}><Settings className="w-4 h-4" /> 設定</button>
-              <button onClick={()=>setActiveTab('admin_data')} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl transition-all ${activeTab === 'admin_data' ? 'bg-white shadow-md text-blue-700 font-bold border border-blue-100 scale-105' : 'text-blue-600 hover:bg-blue-100'}`}><FileText className="w-4 h-4" /> 資料</button>
+              <button onClick={()=>setActiveTab('admin_settings')} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl transition-all ${activeTab === 'admin_settings' ? 'bg-white shadow-md text-blue-700 font-bold border border-blue-100 scale-105' : 'text-blue-600 hover:bg-blue-100'}`}>
+                <Settings className="w-4 h-4" /> 設定
+              </button>
+              <button onClick={()=>setActiveTab('admin_data')} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl transition-all ${activeTab === 'admin_data' ? 'bg-white shadow-md text-blue-700 font-bold border border-blue-100 scale-105' : 'text-blue-600 hover:bg-blue-100'}`}>
+                <FileText className="w-4 h-4" /> 資料
+              </button>
             </>
           )}
         </div>
 
+        {/* 內容區塊開始 */}
         {activeTab === 'form' && (
           <div className="bg-white p-8 rounded-[40px] shadow-sm border border-amber-100 animate-in fade-in slide-in-from-bottom-2 duration-500">
-            <h3 className="text-xl font-extrabold mb-8 flex items-center gap-2 border-b pb-4 text-amber-900"><Edit className="w-7 h-7 text-amber-600" /> 發心登記表</h3>
+            <h3 className="text-xl font-extrabold mb-8 flex items-center gap-2 border-b pb-4 text-amber-900">
+              <Edit className="w-7 h-7 text-amber-600" /> 發心登記表
+            </h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
               <div className="space-y-2">
                 <label className="text-sm font-bold text-gray-600 flex items-center gap-2"><MapPin className="w-4 h-4 text-blue-500" /> 1. 活動地點*</label>
@@ -436,7 +419,6 @@ export default function App() {
                   {availableOptions.map((opt, idx) => <option key={idx} value={opt}>{opt}</option>)}
                 </select>
               </div>
-
               <div className="space-y-2">
                 <label className="text-sm font-bold text-gray-600">精舍* (限2字)</label>
                 <input className="w-full border-2 border-gray-50 p-4 rounded-2xl bg-gray-50 focus:border-amber-500 focus:bg-white outline-none text-gray-900 shadow-inner" placeholder="例：普台" value={formData.monastery} onChange={e => setFormData({...formData, monastery: e.target.value})} />
@@ -449,7 +431,6 @@ export default function App() {
                 <label className="text-sm font-bold text-gray-600">法名</label>
                 <input className="w-full border-2 border-gray-50 p-4 rounded-2xl bg-gray-50 focus:border-amber-500 focus:bg-white outline-none text-gray-900 shadow-inner" value={formData.dharma_name} onChange={e => setFormData({...formData, dharma_name: e.target.value})} />
               </div>
-
               <div className="md:col-span-2 space-y-2">
                 <label className="text-sm font-bold text-gray-600">發心起訖日期*</label>
                 <div className="flex gap-2">
@@ -464,11 +445,10 @@ export default function App() {
           </div>
         )}
 
-        {/* 公告 */}
         {activeTab === 'bulletin' && (
           <div className="space-y-4">
             {bulletins.map(b => (
-              <div key={b.id} className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 animate-in fade-in slide-in-from-top-2">
+              <div key={b.id} className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
                 <p className="text-gray-800 whitespace-pre-wrap leading-relaxed">{b.content}</p>
                 <p className="text-[10px] text-gray-400 mt-4 font-mono">{formatDateTime(b.created_at)}</p>
               </div>
@@ -476,12 +456,11 @@ export default function App() {
           </div>
         )}
 
-        {/* 歷史紀錄 */}
         {activeTab === 'history' && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {notes.filter(n => n.user_id === (user?.id || 'mock')).map(n => (
               <div key={n.id} className="bg-white p-6 rounded-[35px] shadow-sm border border-gray-100 relative overflow-hidden transition-all hover:shadow-lg">
-                <div className={`absolute top-0 left-0 w-2 h-full bg-amber-500`}></div>
+                <div className="absolute top-0 left-0 w-2 h-full bg-amber-500"></div>
                 <div className="flex justify-between items-start mb-4">
                   <div>
                     <span className="text-[10px] bg-amber-100 text-amber-700 px-2.5 py-1 rounded-full font-black uppercase tracking-wider">{n.activity_location}</span>
@@ -495,26 +474,35 @@ export default function App() {
                 </div>
               </div>
             ))}
-            {notes.filter(n => n.user_id === (user?.id || 'mock')).length === 0 && <div className="col-span-full py-24 text-center text-gray-400 font-bold border-4 border-dashed border-gray-100 rounded-[40px]">您目前尚無登記紀錄</div>}
+            {notes.filter(n => n.user_id === (user?.id || 'mock')).length === 0 && (
+              <div className="col-span-full py-24 text-center text-gray-400 font-bold border-4 border-dashed border-gray-100 rounded-[40px]">
+                您目前尚無登記紀錄
+              </div>
+            )}
           </div>
         )}
 
-        {/* 管理者設定區：修復賦值型別問題 (Error 2345) */}
         {activeTab === 'admin_settings' && isAdmin && (
           <div className="bg-white p-8 rounded-[40px] shadow-sm border border-blue-100 animate-in fade-in duration-300">
-            <h3 className="text-xl font-black mb-8 flex items-center gap-2 border-b pb-4 text-blue-900"><Database className="w-7 h-7 text-blue-600" /> 層級數據管理</h3>
+            <h3 className="text-xl font-black mb-8 flex items-center gap-2 border-b pb-4 text-blue-900">
+              <Database className="w-7 h-7 text-blue-600" /> 層級數據管理
+            </h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
               <div className="space-y-4">
                 <h4 className="font-bold text-gray-700 border-l-4 border-blue-500 pl-3">1. 地點</h4>
                 <div className="flex gap-2">
                   <input className="flex-1 border p-3 rounded-2xl bg-gray-50 text-gray-900 shadow-inner" placeholder="新地點" value={newLocation} onChange={e=>setNewLocation(e.target.value)} />
-                  <button onClick={()=>{if(newLocation){addHierarchy(newLocation);setNewLocation('');}}} className="bg-blue-600 text-white p-3 rounded-2xl hover:bg-blue-700 shadow-lg transition-colors"><Plus className="w-4 h-4"/></button>
+                  <button onClick={()=>{if(newLocation){addHierarchy(newLocation);setNewLocation('');}}} className="bg-blue-600 text-white p-3 rounded-2xl hover:bg-blue-700 shadow-lg transition-colors">
+                    <Plus className="w-4 h-4" />
+                  </button>
                 </div>
                 <div className="space-y-1 max-h-60 overflow-y-auto pr-1">
                   {locations.map((loc, i) => (
                     <div key={i} className={`p-3 rounded-xl flex justify-between items-center text-sm cursor-pointer transition-all ${mgmtSelectedLoc === loc ? 'bg-blue-600 text-white shadow-md' : 'bg-gray-50 hover:bg-gray-100'}`} onClick={()=>{setMgmtSelectedLoc(loc);setMgmtSelectedAct('');}}>
                       <span className="font-bold">{loc}</span>
-                      <button onClick={(e)=>{e.stopPropagation(); const target = hierarchyData.find(h=>h.location===loc); if(target) deleteHierarchy(target.id);}} className="p-1 hover:bg-red-500 rounded transition-colors group"><Trash2 className={`w-4 h-4 ${mgmtSelectedLoc === loc ? 'text-white/60' : 'text-red-400'} group-hover:text-white`}/></button>
+                      <button onClick={(e)=>{e.stopPropagation(); const target = hierarchyData.find(h=>h.location===loc); if(target) deleteHierarchy(target.id);}} className="p-1 hover:bg-red-500 rounded transition-colors group">
+                        <Trash2 className="w-4 h-4 text-red-400 group-hover:text-white" />
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -523,13 +511,17 @@ export default function App() {
                 <h4 className="font-bold text-gray-700 border-l-4 border-green-500 pl-3">2. 活動</h4>
                 <div className="flex gap-2">
                   <input className="flex-1 border p-3 rounded-2xl bg-gray-50 text-gray-900 shadow-inner disabled:opacity-40" disabled={!mgmtSelectedLoc} placeholder="新活動" value={newActivity} onChange={e=>setNewActivity(e.target.value)} />
-                  <button onClick={()=>{if(newActivity){addHierarchy(mgmtSelectedLoc, newActivity);setNewActivity('');}}} className="bg-green-600 text-white p-3 rounded-2xl disabled:opacity-40 hover:bg-green-700 shadow-lg transition-colors" disabled={!mgmtSelectedLoc}><Plus className="w-4 h-4"/></button>
+                  <button onClick={()=>{if(newActivity){addHierarchy(mgmtSelectedLoc, newActivity);setNewActivity('');}}} className="bg-green-600 text-white p-3 rounded-2xl disabled:opacity-40 hover:bg-green-700 shadow-lg transition-colors" disabled={!mgmtSelectedLoc}>
+                    <Plus className="w-4 h-4" />
+                  </button>
                 </div>
                 <div className="space-y-1 max-h-60 overflow-y-auto pr-1">
                   {hierarchyData.filter(h=>h.location===mgmtSelectedLoc && h.activity && !h.option).map(h=>(
                     <div key={h.id} className={`p-3 rounded-xl flex justify-between items-center text-sm cursor-pointer transition-all ${mgmtSelectedAct === h.activity ? 'bg-green-600 text-white shadow-md' : 'bg-gray-50 hover:bg-gray-100'}`} onClick={()=>setMgmtSelectedAct(h.activity ?? '')}>
                       <span className="font-bold">{h.activity}</span>
-                      <button onClick={(e)=>{e.stopPropagation(); deleteHierarchy(h.id);}} className="p-1 hover:bg-red-500 rounded transition-colors group"><Trash2 className={`w-4 h-4 ${mgmtSelectedAct === h.activity ? 'text-white/60' : 'text-red-400'} group-hover:text-white`}/></button>
+                      <button onClick={(e)=>{e.stopPropagation(); deleteHierarchy(h.id);}} className="p-1 hover:bg-red-500 rounded transition-colors group">
+                        <Trash2 className="w-4 h-4 text-red-400 group-hover:text-white" />
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -538,13 +530,17 @@ export default function App() {
                 <h4 className="font-bold text-gray-700 border-l-4 border-orange-500 pl-3">3. 選項</h4>
                 <div className="flex gap-2">
                   <input className="flex-1 border p-3 rounded-2xl bg-gray-50 text-gray-900 shadow-inner disabled:opacity-40" disabled={!mgmtSelectedAct} placeholder="新選項" value={newOption} onChange={e=>setNewOption(e.target.value)} />
-                  <button onClick={()=>{if(newOption){addHierarchy(mgmtSelectedLoc, mgmtSelectedAct, newOption);setNewOption('');}}} className="bg-orange-600 text-white p-3 rounded-2xl disabled:opacity-40 hover:bg-orange-700 shadow-lg transition-colors" disabled={!mgmtSelectedAct}><Plus className="w-4 h-4"/></button>
+                  <button onClick={()=>{if(newOption){addHierarchy(mgmtSelectedLoc, mgmtSelectedAct, newOption);setNewOption('');}}} className="bg-orange-600 text-white p-3 rounded-2xl disabled:opacity-40 hover:bg-orange-700 shadow-lg transition-colors" disabled={!mgmtSelectedAct}>
+                    <Plus className="w-4 h-4" />
+                  </button>
                 </div>
                 <div className="space-y-1 max-h-60 overflow-y-auto pr-1">
                   {hierarchyData.filter(h=>h.location===mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option).map(h=>(
                     <div key={h.id} className="p-3 bg-gray-50 rounded-xl flex justify-between items-center text-sm border border-gray-100 hover:border-orange-200 transition-colors">
                       <span className="font-bold text-gray-800">{h.option}</span>
-                      <button onClick={()=>deleteHierarchy(h.id)} className="p-1 hover:bg-red-500 rounded transition-colors group"><Trash2 className="w-4 h-4 text-red-400 group-hover:text-white"/></button>
+                      <button onClick={()=>deleteHierarchy(h.id)} className="p-1 hover:bg-red-500 rounded transition-colors group">
+                        <Trash2 className="w-4 h-4 text-red-400 group-hover:text-white" />
+                      </button>
                     </div>
                   ))}
                 </div>
