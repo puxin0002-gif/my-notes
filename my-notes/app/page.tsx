@@ -1,3 +1,5 @@
+"use client";
+
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { 
   Bell, 
@@ -25,15 +27,14 @@ import {
 } from 'lucide-react';
 
 /**
- * 系統版本：v10.7 (TypeScript 嚴格檢查 & 佈署環境完全修復版)
+ * 系統版本：v10.8 (Next.js Client Component & TypeScript 相容版)
  * 修正說明：
- * 1. 補齊所有隱含型別宣告，解決截圖中 "implicitly has an 'any' type" 報錯。
- * 2. 修正 useState 泛型，解決 "never[]" 型別不符問題。
- * 3. 解決 Error 2345：在所有賦值處使用 ?? '' 確保不將 null 傳給字串狀態。
- * 4. 校對所有標籤閉合，解決 VS Code 解析導致「找不到 div」的問題。
+ * 1. 加入 "use client"; 指令，解決 Next.js App Router 導致的 Hook 使用錯誤。
+ * 2. 保持 v10.7 的所有型別修正，解決 implicitly any 與 null 賦值報錯。
+ * 3. 確保佈署時 npm run build 能順利通過。
  */
 
-// --- TypeScript 介面定義：確保資料結構嚴謹 ---
+// --- TypeScript 介面定義 ---
 
 interface ActivityHierarchy {
   id: string | number;
@@ -68,7 +69,7 @@ interface Bulletin {
   created_at: string;
 }
 
-// 擴充 Window 介面，讓 TypeScript 認識動態加載的 supabase SDK
+// 擴充 Window 介面
 declare global {
   interface Window {
     supabase: any;
@@ -77,7 +78,7 @@ declare global {
 
 const FAKE_DOMAIN = "@my-notes.com";
 
-// --- 模擬資料定義 (具備型別) ---
+// --- 模擬資料定義 ---
 const MOCK_DATA = {
   bulletins: [
     { id: 1, content: "🎉 歡迎使用書記預先登記系統！系統偵測到環境設定未完成，目前正運行於【展示模式】。", created_at: new Date().toISOString() }
@@ -92,7 +93,7 @@ const MOCK_DATA = {
   notes: [] as Note[],
 };
 
-// 輔助函式：新增明確參數型別，解決 implicitly any 錯誤
+// 輔助函式
 const encodeName = (name: string): string => {
   try { 
     let hex = ''; 
@@ -148,7 +149,6 @@ export default function App() {
   const [idLast4, setIdLast4] = useState<string>(''); 
   const [password, setPassword] = useState<string>('');
   
-  // 使用泛型解決 never[] 賦值報錯
   const [notes, setNotes] = useState<Note[]>([]);
   const [bulletins, setBulletins] = useState<Bulletin[]>([]);
   const [hierarchyData, setHierarchyData] = useState<ActivityHierarchy[]>([]); 
@@ -402,7 +402,6 @@ export default function App() {
           )}
         </div>
 
-        {/* 內容區塊開始 */}
         {activeTab === 'form' && (
           <div className="bg-white p-8 rounded-[40px] shadow-sm border border-amber-100 animate-in fade-in slide-in-from-bottom-2 duration-500">
             <h3 className="text-xl font-extrabold mb-8 flex items-center gap-2 border-b pb-4 text-amber-900">
