@@ -5,16 +5,16 @@ import {
   Bell, FileText, History, Settings, Shield, LogOut, Plus, Trash2, Check, 
   Edit, User, MapPin, Tag, ListFilter, Save, Database, Clock, Car, Info, 
   Home, UserCheck, AlertCircle, Briefcase, Layers, 
-  CheckCircle2, CheckSquare, FileSpreadsheet, Megaphone, ClipboardCheck, UserCog, Share2, Lock, Eye, EyeOff, Users, ArrowRight
+  CheckCircle2, CheckSquare, FileSpreadsheet, Megaphone, ClipboardCheck, UserCog, Share2, Lock, Eye, EyeOff, Users, ArrowRight, RefreshCw, AlertTriangle
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v27.1 (全自動背景覆蓋版)
+ * 系統版本：v29.1 (UI 清理與 Trigger 整合版)
  * 修正說明：
- * 1. 移除「同步資料」按鈕。
- * 2. 實作「背景自動覆蓋」：登入/註冊後，系統自動讀取 Metadata 並強制 UPDATE 資料庫。
- * 3. 解決 DB Trigger 寫入亂碼問題，使用者無需任何額外操作。
+ * 1. 移除介面上殘留的 `handleFixProfile` 呼叫，解決編譯錯誤。
+ * 2. 補齊 `AlertTriangle` 圖示匯入。
+ * 3. 系統現在完全依賴後端 SQL Trigger 來寫入 user_permissions，前端邏輯保持最簡潔。
  */
 
 // --- 主色系設定 ---
@@ -210,55 +210,10 @@ export default function App() {
     } catch (err) { }
   }, [supabaseClient, isMock]);
 
-  // 核心：全自動背景修復 (Auto-Fix)
-  const silentAutoFix = async (currentUser: any) => {
-    if (!supabaseClient || !currentUser) return;
-    
-    // 1. 從 Metadata 獲取「正確」資料
-    const metaName = currentUser.user_metadata?.user_name;
-    const metaId4 = currentUser.user_metadata?.id_last4;
-
-    if (!metaName || !metaId4) return;
-
-    // 2. 檢查資料庫現況
-    const { data: existing } = await supabaseClient
-        .from('user_permissions')
-        .select('id, id_last4')
-        .eq('uid', currentUser.id)
-        .maybeSingle();
-
-    // 3. 判斷是否需要修復
-    if (!existing) {
-        console.log("No data found, inserting...");
-        await supabaseClient.from('user_permissions').insert([{
-            uid: currentUser.id,
-            email: currentUser.email,
-            user_name: metaName,
-            id_last4: metaId4,
-            is_admin: false,
-            is_disabled: false,
-            created_at: new Date().toISOString()
-        }]);
-    } else if (existing.id_last4 !== metaId4) {
-        console.log(`Mismatch detected! DB: ${existing.id_last4} vs Meta: ${metaId4}. Overwriting...`);
-        // 4. 強制覆蓋 (解決 Trigger 亂碼)
-        await supabaseClient
-            .from('user_permissions')
-            .update({ 
-                id_last4: metaId4,
-                user_name: metaName
-            })
-            .eq('id', existing.id);
-    }
-  };
-
   useEffect(() => {
     if (user) {
       fetchData();
       if (!isMock && supabaseClient) {
-        // 登入後立即觸發自動修復
-        silentAutoFix(user);
-
         const email = user.email;
         supabaseClient.from('user_permissions').select('is_admin').eq('email', email).single()
           .then(({ data }: any) => { if (data) setIsAdmin(data.is_admin); });
@@ -267,19 +222,14 @@ export default function App() {
           .on('postgres_changes', { event: '*', schema: 'public', table: 'notes' }, fetchData)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'bulletins' }, fetchData)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'activity_hierarchy' }, fetchData)
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'user_permissions' }, (payload: any) => {
-              fetchData();
-              // 如果監聽到自己的資料變更，檢查是否被 Trigger 改壞了，如果是則再次覆蓋
-              if (payload.new && payload.new.uid === user.id && payload.new.id_last4 !== user.user_metadata?.id_last4) {
-                  silentAutoFix(user);
-              }
-          })
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'user_permissions' }, fetchData)
           .subscribe();
         return () => { supabaseClient.removeChannel(channel); };
       }
     }
   }, [user, fetchData, supabaseClient, isMock]);
 
+  // 核心驗證邏輯
   const handleAuthAction = async () => {
     if (!username || !idLast4) return alert('請輸入姓名與 ID 後四碼');
     if (!supabaseClient && !isMock) return alert('系統未連線至資料庫');
@@ -313,6 +263,7 @@ export default function App() {
                 return;
             }
 
+            // 註冊時將資料帶入 Metadata，後端 Trigger 會自動讀取並寫入 user_permissions
             const { data, error } = await supabaseClient.auth.signUp({
                 email,
                 password,
@@ -324,18 +275,11 @@ export default function App() {
                   } 
                 }
             });
+
             if (error) throw error;
             
             if (data.user) {
-                // 註冊後的延遲修復策略
-                // 1. 等待 Trigger 跑完 (2秒)
-                console.log("Waiting for trigger...");
-                setTimeout(async () => {
-                    await silentAutoFix(data.user); // 2. 執行強制覆蓋
-                    console.log("Auto-fix executed after signup.");
-                }, 2000);
-
-                alert(`註冊成功！資料建立中...`);
+                alert(`註冊成功！系統將自動建立您的資料。`);
                 if (data.session) {
                     setUser(data.user);
                     setFormData(prev => ({ ...prev, real_name: finalUsername }));
@@ -548,9 +492,7 @@ export default function App() {
             <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center border border-white/30 shadow-inner"><Shield className="w-7 h-7" /></div>
             <span className="font-black tracking-widest text-2xl uppercase">嗨～ {getDisplayNameOnly(user?.email)}</span>
          </div>
-         <div className="flex items-center gap-4">
-             <button onClick={handleLogout} className="bg-white/10 px-6 py-2 rounded-2xl font-bold">登出</button>
-         </div>
+         <button onClick={handleLogout} className="bg-white/10 px-6 py-2 rounded-2xl font-bold">登出</button>
       </div>
 
       <div className="max-w-7xl mx-auto p-6 md:p-10">
@@ -760,6 +702,12 @@ export default function App() {
                     <div className="flex gap-2 shrink-0"><input className="flex-1 p-4 border-4 rounded-2xl text-xl font-bold min-w-0" disabled={!mgmtSelectedOpt} value={newContent} onChange={e=>setNewContent(e.target.value)} /><button onClick={handleAddHierarchy} className="bg-[#7A2E40] text-white p-4 rounded-2xl shrink-0" disabled={!mgmtSelectedOpt}><Plus/></button></div>
                     <div className="max-h-96 overflow-y-auto space-y-2">{hierarchyData.filter(h=>h.location===mgmtSelectedLoc && h.activity===mgmtSelectedAct && h.option===mgmtSelectedOpt && h.content).map(h => <div key={h.id} className="p-4 rounded-2xl text-xl font-bold flex justify-between shadow-sm border border-[#F2ECE4]"><span>{h.content}</span><button onClick={()=>handleDeleteHierarchy(h.id, null)}><Trash2 className="w-5 h-5 text-red-300"/></button></div>)}</div>
                  </div>
+              </div>
+              
+              {/* SQL 權限修復指令區 */}
+              <div className="mt-16 bg-slate-900 p-8 rounded-[40px] font-mono text-sm text-green-400 overflow-x-auto">
+                 <h4 className="text-white font-bold mb-4 flex items-center gap-2"><AlertTriangle className="text-yellow-500"/> 資料庫權限修復指令 (若無法寫入請在 Supabase SQL Editor 執行此段)</h4>
+                 <code>CREATE POLICY "Enable all access for authenticated users" ON "public"."user_permissions" FOR ALL TO authenticated USING (auth.uid() = uid) WITH CHECK (auth.uid() = uid);</code>
               </div>
            </div>
         )}
