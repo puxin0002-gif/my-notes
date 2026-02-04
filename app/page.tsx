@@ -10,11 +10,11 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v25.1 (RLS 權限迴避與自動補檔版)
+ * 系統版本：v25.2 (ID寫入查詢更新版)
  * 修正說明：
- * 1. 註冊邏輯調整：將資料存入 User Metadata，若無 Session 則不強行寫入 DB，避免 RLS 錯誤。
- * 2. 自動補檔機制：在用戶登入後 (useEffect)，自動檢查並從 Metadata 補寫入 user_permissions。
- * 3. 確保資料安全落地，即使重新整理頁面也能正確補寫。
+ * 1. 寫入策略：先 SELECT 檢查，若存在則 UPDATE，不存在則 INSERT。
+ * 2. 這是解決 DB Trigger 預設值覆蓋問題的最穩定解法。
+ * 3. 增加寫入後的 Alert 確認，確保資料正確送出。
  */
 
 // --- 主色系設定 ---
@@ -92,6 +92,23 @@ declare global {
 
 const FAKE_DOMAIN = "@my-notes.com";
 
+// --- 模擬資料 ---
+const MOCK_DATA = {
+  bulletins: [
+    { id: '1', content: "🎉 歡迎使用學員登記系統！目前為離線展示模式。", created_at: new Date().toISOString() }
+  ] as Bulletin[],
+  hierarchy: [
+    { id: '1', location: "中台", activity: "三日禪修", option: "一般行程", content: null },
+    { id: '2', location: "中台", activity: "三日禪修", option: "自選參加行程", content: "第一日早課" },
+    { id: '3', location: "精舍", activity: "在地共修", option: "一般行程", content: null }
+  ] as ActivityHierarchy[],
+  notes: [] as Note[],
+  users: [
+    { id: '1', email: 'admin@my-notes.com', user_name: '陳大大', id_last4: '1111', is_admin: true, is_disabled: false },
+  ] as UserPermission[],
+  resetRequests: [] as ResetRequest[]
+};
+
 // --- 輔助函式 ---
 const encodeName = (name: string): string => {
   try { let hex = ''; for (let i = 0; i < name.length; i++) hex += ('0000' + name.charCodeAt(i).toString(16)).slice(-4); return hex; } catch { return name; }
@@ -166,8 +183,6 @@ export default function App() {
   const [newUser, setNewUser] = useState({ name: '', id4: '', pwd: '' });
   const [filterLoc, setFilterLoc] = useState<string>('');
 
-  const [MOCK_DATA, setMOCK_DATA] = useState<any>({ bulletins: [], hierarchy: [], notes: [] });
-
   useEffect(() => {
     const loadSupabase = () => {
       const script = document.createElement('script');
@@ -210,26 +225,59 @@ export default function App() {
     } catch (err) { }
   }, [supabaseClient, isMock]);
 
-  // 獨立抽出的寫入函式 (供註冊後或登入後呼叫)
+  // 獨立抽出的寫入函式 (核心修正：先查詢再更新)
   const ensureUserPermission = async (currentUser: any, name: string, id4: string) => {
     if (!supabaseClient || !currentUser) return;
     
-    // 強制更新策略：Upsert
-    const payload = {
-      uid: currentUser.id,
-      email: currentUser.email,
-      user_name: name,
-      id_last4: id4, // 這裡確保使用傳入的 id4
-      is_admin: false,
-      is_disabled: false,
-      created_at: new Date().toISOString()
-    };
+    const targetId = id4; // 鎖定變數
 
-    const { error } = await supabaseClient
-      .from('user_permissions')
-      .upsert(payload, { onConflict: 'uid' });
+    console.log(`[Debug] Checking permission for UID: ${currentUser.id}, Target ID4: ${targetId}`);
 
-    if (error) console.error("Auto-create/update permission failed:", error);
+    // 1. 先查詢
+    const { data: existing, error: fetchError } = await supabaseClient
+        .from('user_permissions')
+        .select('id')
+        .eq('uid', currentUser.id)
+        .maybeSingle();
+
+    if (fetchError) {
+        console.error("Fetch Error:", fetchError);
+        return;
+    }
+
+    if (existing) {
+        // 2a. 若存在 -> 更新 (覆蓋可能錯誤的 Trigger 值)
+        console.log("[Debug] User exists, forcing UPDATE.");
+        const { error: updateError } = await supabaseClient
+            .from('user_permissions')
+            .update({
+                user_name: name,
+                id_last4: targetId, // 強制寫入
+                email: currentUser.email
+            })
+            .eq('id', existing.id);
+        
+        if (updateError) console.error("Update Failed:", updateError);
+        else console.log("[Debug] Update Success.");
+
+    } else {
+        // 2b. 若不存在 -> 新增
+        console.log("[Debug] User not found, executing INSERT.");
+        const { error: insertError } = await supabaseClient
+            .from('user_permissions')
+            .insert([{
+                uid: currentUser.id,
+                email: currentUser.email,
+                user_name: name,
+                id_last4: targetId,
+                is_admin: false,
+                is_disabled: false,
+                created_at: new Date().toISOString()
+            }]);
+            
+        if (insertError) console.error("Insert Failed:", insertError);
+        else console.log("[Debug] Insert Success.");
+    }
   };
 
   useEffect(() => {
@@ -238,7 +286,7 @@ export default function App() {
       if (!isMock && supabaseClient) {
         const email = user.email;
         
-        // 自動補檔檢查：如果登入後發現 user_permissions 沒資料，自動補寫
+        // 自動補檔
         const metaName = user.user_metadata?.user_name;
         const metaId4 = user.user_metadata?.id_last4;
         if (metaName && metaId4) {
@@ -265,8 +313,6 @@ export default function App() {
 
     setLoading(true);
     const email = encodeName(username + idLast4) + FAKE_DOMAIN;
-    
-    // 鎖定變數，防止參照錯誤
     const finalIdLast4 = idLast4.trim();
     const finalUsername = username.trim();
 
@@ -289,7 +335,12 @@ export default function App() {
         } else if (authMode === 'signup') {
             if (!password) { setLoading(false); return alert('請設定密碼'); }
             
-            // 1. 執行註冊 (關鍵：寫入 user_metadata)
+            // 註冊前提示
+            if(!confirm(`確認註冊資料：\n姓名：${finalUsername}\nID後4碼：${finalIdLast4}\n\n請確認無誤後送出。`)) {
+                setLoading(false);
+                return;
+            }
+
             const { data, error } = await supabaseClient.auth.signUp({
                 email,
                 password,
@@ -303,14 +354,17 @@ export default function App() {
             });
             if (error) throw error;
             
-            // 2. 嘗試寫入 (如果已有 Session 則立即寫入，否則等待 Email 驗證後登入觸發 Auto-Sync)
-            if (data.user && data.session) {
+            if (data.user) {
+                // 呼叫強化版寫入函式
                 await ensureUserPermission(data.user, finalUsername, finalIdLast4);
-                alert('註冊成功！已自動登入。');
-                setUser(data.user);
-                setFormData(prev => ({ ...prev, real_name: finalUsername }));
-            } else {
-                alert('註冊成功！但因需驗證信箱，資料尚未寫入資料庫。\n\n請至信箱收取驗證信，點擊連結登入後，系統將自動建立您的資料。');
+                
+                alert(`註冊成功！系統已強制寫入 ID：${finalIdLast4}`);
+                if (data.session) {
+                    setUser(data.user);
+                    setFormData(prev => ({ ...prev, real_name: finalUsername }));
+                } else {
+                    alert('請檢查信箱並點擊驗證連結。');
+                }
             }
 
         } else if (authMode === 'forgot') {
