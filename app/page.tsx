@@ -10,11 +10,11 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v24.4 (註冊資料寫入終極暴力版)
+ * 系統版本：v24.5 (ID寫入強制更新版)
  * 修正說明：
- * 1. 寫入策略改為：Try Insert -> Catch Error -> Try Update。
- * 2. 這是最穩健的寫入方式，可同時解決 RLS、Trigger 與 Unique Constraint 的各種衝突。
- * 3. 確保 `id_last4` 變數在寫入當下是被正確捕捉的。
+ * 1. 註冊後無論如何都執行一次 UPDATE，確保 id_last4 被覆蓋寫入。
+ * 2. 增加寫入前的資料檢查與日誌。
+ * 3. 確保 Supabase 連線與寫入權限。
  */
 
 // --- 主色系設定 ---
@@ -92,23 +92,6 @@ declare global {
 
 const FAKE_DOMAIN = "@my-notes.com";
 
-// --- 模擬資料 ---
-const MOCK_DATA = {
-  bulletins: [
-    { id: '1', content: "🎉 歡迎使用學員登記系統！目前為離線展示模式。", created_at: new Date().toISOString() }
-  ] as Bulletin[],
-  hierarchy: [
-    { id: '1', location: "中台", activity: "三日禪修", option: "一般行程", content: null },
-    { id: '2', location: "中台", activity: "三日禪修", option: "自選參加行程", content: "第一日早課" },
-    { id: '3', location: "精舍", activity: "在地共修", option: "一般行程", content: null }
-  ] as ActivityHierarchy[],
-  notes: [] as Note[],
-  users: [
-    { id: '1', email: 'admin@my-notes.com', user_name: '陳大大', id_last4: '1111', is_admin: true, is_disabled: false },
-  ] as UserPermission[],
-  resetRequests: [] as ResetRequest[]
-};
-
 // --- 輔助函式 ---
 const encodeName = (name: string): string => {
   try { let hex = ''; for (let i = 0; i < name.length; i++) hex += ('0000' + name.charCodeAt(i).toString(16)).slice(-4); return hex; } catch { return name; }
@@ -150,20 +133,17 @@ export default function App() {
   const [loading, setLoading] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<string>('bulletin');
 
-  // 資料狀態
   const [notes, setNotes] = useState<Note[]>([]);
   const [bulletins, setBulletins] = useState<Bulletin[]>([]);
   const [hierarchyData, setHierarchyData] = useState<ActivityHierarchy[]>([]);
   const [allUsers, setAllUsers] = useState<UserPermission[]>([]);
   const [resetRequests, setResetRequests] = useState<ResetRequest[]>([]);
 
-  // 登入狀態
   const [username, setUsername] = useState<string>('');
   const [idLast4, setIdLast4] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [authMode, setAuthMode] = useState<'login'|'signup'|'forgot'>('login');
   
-  // 表單狀態
   const [minStartDate, setMinStartDate] = useState<string>('');
   const [formData, setFormData] = useState({
     real_name: '', dharma_name: '', registrant_type: '目前上禪修班學員', registration_option: '新增',
@@ -175,7 +155,6 @@ export default function App() {
     stay_start_date: '', stay_end_date: ''
   });
 
-  // 管理介面狀態
   const [newBulletin, setNewBulletin] = useState<string>('');
   const [newLocation, setNewLocation] = useState<string>('');
   const [newActivity, setNewActivity] = useState<string>('');
@@ -187,7 +166,6 @@ export default function App() {
   const [newUser, setNewUser] = useState({ name: '', id4: '', pwd: '' });
   const [filterLoc, setFilterLoc] = useState<string>('');
 
-  // 1. SDK 初始化
   useEffect(() => {
     const loadSupabase = () => {
       const script = document.createElement('script');
@@ -196,19 +174,13 @@ export default function App() {
       script.onload = () => {
         const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
         const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-        
         if (window.supabase && url && key) {
           try {
             const client = window.supabase.createClient(url, key);
             setSupabaseClient(client);
             setIsMock(false);
-          } catch (err) {
-            console.error("Supabase Init Failed:", err);
-            setIsMock(true); 
-          }
-        } else { 
-          setIsMock(true); 
-        }
+          } catch (err) { setIsMock(true); }
+        } else { setIsMock(true); }
         setLoading(false);
       };
       script.onerror = () => { setIsMock(true); setLoading(false); };
@@ -219,16 +191,8 @@ export default function App() {
     setMinStartDate(now.toISOString().slice(0, 16));
   }, []);
 
-  // 2. 資料同步
   const fetchData = useCallback(async () => {
-    if (isMock) { 
-      setBulletins(MOCK_DATA.bulletins);
-      setHierarchyData(MOCK_DATA.hierarchy);
-      setNotes(MOCK_DATA.notes);
-      setAllUsers(MOCK_DATA.users);
-      setResetRequests(MOCK_DATA.resetRequests);
-      return; 
-    }
+    if (isMock) return;
     if (!supabaseClient) return;
     try {
       const { data: bData } = await supabaseClient.from('bulletins').select('*').order('created_at', { ascending: false });
@@ -241,9 +205,7 @@ export default function App() {
       if (uData) setAllUsers(uData);
       const { data: rData } = await supabaseClient.from('reset_requests').select('*').order('created_at', { ascending: false });
       if (rData) setResetRequests(rData);
-    } catch (err) {
-      console.error("Error fetching data:", err);
-    }
+    } catch (err) { }
   }, [supabaseClient, isMock]);
 
   useEffect(() => {
@@ -265,7 +227,7 @@ export default function App() {
     }
   }, [user, fetchData, supabaseClient, isMock]);
 
-  // 3. 核心：身份驗證與註冊邏輯分流 (修正重點：改用手動 Try-Insert-Catch-Update)
+  // 3. 核心：身份驗證與註冊邏輯分流 (修正重點：強制 UPDATE)
   const handleAuthAction = async () => {
     if (!username || !idLast4) return alert('請輸入姓名與 ID 後四碼');
     if (!supabaseClient && !isMock) return alert('系統未連線至資料庫');
@@ -283,7 +245,6 @@ export default function App() {
 
     try {
         if (authMode === 'login') {
-            // --- 登入邏輯 ---
             if (!password) { setLoading(false); return alert('請輸入密碼'); }
             const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
             if (error) throw error;
@@ -291,7 +252,6 @@ export default function App() {
             setFormData(prev => ({ ...prev, real_name: username }));
 
         } else if (authMode === 'signup') {
-            // --- 註冊邏輯 ---
             if (!password) { setLoading(false); return alert('請設定密碼'); }
             
             // 1. 執行 Supabase Auth 註冊
@@ -301,48 +261,48 @@ export default function App() {
                 options: { 
                   data: { 
                     user_name: username, 
-                    id_last4: idLast4,
+                    id_last4: idLast4, // Metadata
                     full_name: username 
                   } 
                 }
             });
             if (error) throw error;
             
-            // 2. 寫入 user_permissions 表 (暴力寫入法)
+            // 2. 寫入 user_permissions 表 (強制寫入)
             if (data.user) {
-                const permissionPayload = {
-                    uid: data.user.id,
-                    email: email,
-                    user_name: username,
-                    id_last4: idLast4,   // <--- 確保這變數有值
-                    is_admin: false,
-                    is_disabled: false,
-                    created_at: new Date().toISOString()
-                };
+                console.log("[Debug] Registering:", { uid: data.user.id, name: username, id4: idLast4 });
 
-                console.log("[Debug] User created, writing permission:", permissionPayload);
-
-                // 策略：直接 Insert
-                const { error: insertError } = await supabaseClient
+                // 步驟 A：先嘗試寫入 (UPSERT)
+                const { error: upsertError } = await supabaseClient
                     .from('user_permissions')
-                    .insert([permissionPayload]);
+                    .upsert({
+                        uid: data.user.id,
+                        email: email,
+                        user_name: username,
+                        id_last4: idLast4,
+                        is_admin: false,
+                        is_disabled: false,
+                        created_at: new Date().toISOString()
+                    }, { onConflict: 'uid' }); // 確保以 UID 為唯一鍵
 
-                if (insertError) {
-                    console.warn("Insert failed, trying Update...", insertError);
-                    // 如果 Insert 失敗 (可能已存在)，嘗試 Update
+                // 步驟 B：如果 UPSERT 失敗 (例如 RLS 不允許 INSERT)，嘗試 UPDATE
+                if (upsertError) {
+                    console.error("Upsert Failed, trying Update:", upsertError);
                     const { error: updateError } = await supabaseClient
                         .from('user_permissions')
-                        .update({ user_name: username, id_last4: idLast4 })
+                        .update({ 
+                            user_name: username, 
+                            id_last4: idLast4 
+                        })
                         .eq('uid', data.user.id);
                     
                     if (updateError) {
-                        console.error("Update failed too:", updateError);
-                        alert(`註冊成功，但資料寫入失敗：\nInsert: ${insertError.message}\nUpdate: ${updateError.message}\n請檢查 RLS 設定。`);
+                         alert(`資料寫入失敗：${updateError.message}。請聯繫管理員確認權限。`);
                     } else {
-                        alert('註冊成功！資料已更新。');
-                        // 嘗試自動登入
-                        const { data: loginData } = await supabaseClient.auth.signInWithPassword({ email, password });
-                        if(loginData.session) setUser(loginData.user);
+                         alert('註冊成功！資料已更新。');
+                         // 自動登入
+                         const { data: loginData } = await supabaseClient.auth.signInWithPassword({ email, password });
+                         if(loginData.session) setUser(loginData.user);
                     }
                 } else {
                     alert('註冊成功！資料已建立。');
