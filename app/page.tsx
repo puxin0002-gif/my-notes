@@ -5,16 +5,16 @@ import {
   Bell, FileText, History, Settings, Shield, LogOut, Plus, Trash2, Check, 
   Edit, User, MapPin, Tag, ListFilter, Save, Database, Clock, Car, Info, 
   Home, UserCheck, AlertCircle, Briefcase, Layers, 
-  CheckCircle2, CheckSquare, FileSpreadsheet, Megaphone, ClipboardCheck, UserCog, Share2, Lock, Eye, EyeOff, Users, ArrowRight, RefreshCw
+  CheckCircle2, CheckSquare, FileSpreadsheet, Megaphone, ClipboardCheck, UserCog, Share2, Lock, Eye, EyeOff, Users, ArrowRight
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v26.0 (Metadata 優先與自動修復版)
+ * 系統版本：v27.1 (全自動背景覆蓋版)
  * 修正說明：
- * 1. 寫入策略：以 user_metadata 為真理，登入後自動比對並強制覆蓋 DB 資料。
- * 2. 增加「重試機制」：若 DB 資料與 Metadata 不符，自動重試寫入最多 3 次。
- * 3. 新增「手動同步」按鈕，供使用者強制修正資料。
+ * 1. 移除「同步資料」按鈕。
+ * 2. 實作「背景自動覆蓋」：登入/註冊後，系統自動讀取 Metadata 並強制 UPDATE 資料庫。
+ * 3. 解決 DB Trigger 寫入亂碼問題，使用者無需任何額外操作。
  */
 
 // --- 主色系設定 ---
@@ -210,53 +210,45 @@ export default function App() {
     } catch (err) { }
   }, [supabaseClient, isMock]);
 
-  // 核心函式：同步 Metadata 與 Table 資料
-  const syncUserPermission = async (currentUser: any) => {
+  // 核心：全自動背景修復 (Auto-Fix)
+  const silentAutoFix = async (currentUser: any) => {
     if (!supabaseClient || !currentUser) return;
     
+    // 1. 從 Metadata 獲取「正確」資料
     const metaName = currentUser.user_metadata?.user_name;
     const metaId4 = currentUser.user_metadata?.id_last4;
 
-    if (!metaName || !metaId4) {
-        console.warn("No metadata found for sync.");
-        return;
-    }
+    if (!metaName || !metaId4) return;
 
-    console.log(`[Sync] Checking DB for ${currentUser.id} vs Metadata ID4: ${metaId4}`);
-
-    // 1. 查詢現有資料
-    const { data: existing, error: fetchError } = await supabaseClient
+    // 2. 檢查資料庫現況
+    const { data: existing } = await supabaseClient
         .from('user_permissions')
         .select('id, id_last4')
         .eq('uid', currentUser.id)
         .maybeSingle();
 
-    // 2. 如果資料不存在，或者資料不正確 (例如被 Trigger 寫入亂碼)，則更新
-    if (!existing || existing.id_last4 !== metaId4) {
-        console.log("[Sync] Data mismatch or missing, forcing UPDATE/INSERT...");
-        
-        const payload = {
+    // 3. 判斷是否需要修復
+    if (!existing) {
+        console.log("No data found, inserting...");
+        await supabaseClient.from('user_permissions').insert([{
             uid: currentUser.id,
             email: currentUser.email,
             user_name: metaName,
-            id_last4: metaId4, // 這是正確的值
+            id_last4: metaId4,
             is_admin: false,
             is_disabled: false,
             created_at: new Date().toISOString()
-        };
-
-        // 使用 upsert 強制寫入
-        const { error: upsertError } = await supabaseClient
+        }]);
+    } else if (existing.id_last4 !== metaId4) {
+        console.log(`Mismatch detected! DB: ${existing.id_last4} vs Meta: ${metaId4}. Overwriting...`);
+        // 4. 強制覆蓋 (解決 Trigger 亂碼)
+        await supabaseClient
             .from('user_permissions')
-            .upsert(payload, { onConflict: 'uid' });
-
-        if (upsertError) console.error("[Sync] Failed:", upsertError);
-        else {
-             console.log("[Sync] Success!");
-             alert("系統已自動修復並同步您的 ID 資料。"); // 讓使用者知道
-        }
-    } else {
-        console.log("[Sync] Data is already correct.");
+            .update({ 
+                id_last4: metaId4,
+                user_name: metaName
+            })
+            .eq('id', existing.id);
     }
   };
 
@@ -264,8 +256,8 @@ export default function App() {
     if (user) {
       fetchData();
       if (!isMock && supabaseClient) {
-        // 登入後自動執行同步檢查
-        syncUserPermission(user);
+        // 登入後立即觸發自動修復
+        silentAutoFix(user);
 
         const email = user.email;
         supabaseClient.from('user_permissions').select('is_admin').eq('email', email).single()
@@ -275,7 +267,13 @@ export default function App() {
           .on('postgres_changes', { event: '*', schema: 'public', table: 'notes' }, fetchData)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'bulletins' }, fetchData)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'activity_hierarchy' }, fetchData)
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'user_permissions' }, fetchData)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'user_permissions' }, (payload: any) => {
+              fetchData();
+              // 如果監聽到自己的資料變更，檢查是否被 Trigger 改壞了，如果是則再次覆蓋
+              if (payload.new && payload.new.uid === user.id && payload.new.id_last4 !== user.user_metadata?.id_last4) {
+                  silentAutoFix(user);
+              }
+          })
           .subscribe();
         return () => { supabaseClient.removeChannel(channel); };
       }
@@ -315,7 +313,6 @@ export default function App() {
                 return;
             }
 
-            // 1. 註冊 (Metadata 非常重要)
             const { data, error } = await supabaseClient.auth.signUp({
                 email,
                 password,
@@ -330,10 +327,15 @@ export default function App() {
             if (error) throw error;
             
             if (data.user) {
-                // 2. 嘗試初次寫入 (即使失敗，後續登入會由 syncUserPermission 補救)
-                await syncUserPermission(data.user);
-                
-                alert(`註冊成功！`);
+                // 註冊後的延遲修復策略
+                // 1. 等待 Trigger 跑完 (2秒)
+                console.log("Waiting for trigger...");
+                setTimeout(async () => {
+                    await silentAutoFix(data.user); // 2. 執行強制覆蓋
+                    console.log("Auto-fix executed after signup.");
+                }, 2000);
+
+                alert(`註冊成功！資料建立中...`);
                 if (data.session) {
                     setUser(data.user);
                     setFormData(prev => ({ ...prev, real_name: finalUsername }));
@@ -547,8 +549,6 @@ export default function App() {
             <span className="font-black tracking-widest text-2xl uppercase">嗨～ {getDisplayNameOnly(user?.email)}</span>
          </div>
          <div className="flex items-center gap-4">
-             {/* 手動同步按鈕 */}
-             <button onClick={() => syncUserPermission(user)} className="bg-white/10 px-4 py-2 rounded-2xl flex items-center gap-2 text-sm font-bold hover:bg-white/20"><RefreshCw className="w-4 h-4"/> 同步資料</button>
              <button onClick={handleLogout} className="bg-white/10 px-6 py-2 rounded-2xl font-bold">登出</button>
          </div>
       </div>
