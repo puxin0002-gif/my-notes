@@ -10,11 +10,11 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v24.1 (欄位寫入確認版)
+ * 系統版本：v24.2 (資料寫入強制更新版)
  * 修正說明：
- * 1. 確認註冊流程中 `id_last4` (身份證後4碼) 寫入 user_permissions。
- * 2. 增加 Console Log 以追蹤註冊寫入資料。
- * 3. 確保 reset_requests 寫入邏輯正確。
+ * 1. 註冊邏輯改用 `upsert`，確保若用戶已存在則更新 id_last4 與 user_name。
+ * 2. 增加詳細的 Debug Log 以確認寫入內容。
+ * 3. 確保 Supabase 連線初始化穩定。
  */
 
 // --- 主色系設定 ---
@@ -265,7 +265,7 @@ export default function App() {
     }
   }, [user, fetchData, supabaseClient, isMock]);
 
-  // 3. 核心：身份驗證與註冊邏輯分流
+  // 3. 核心：身份驗證與註冊邏輯分流 (修正重點)
   const handleAuthAction = async () => {
     if (!username || !idLast4) return alert('請輸入姓名與 ID 後四碼');
     if (!supabaseClient && !isMock) return alert('系統未連線至資料庫');
@@ -308,7 +308,7 @@ export default function App() {
             });
             if (error) throw error;
             
-            // 2. 寫入 user_permissions 表 (確保 id_last4 被寫入)
+            // 2. 寫入 user_permissions 表 (改用 upsert 以確保寫入，解決部分資料未寫入問題)
             if (data.user) {
                 const permissionPayload = {
                     uid: data.user.id,
@@ -320,9 +320,12 @@ export default function App() {
                     created_at: new Date().toISOString()
                 };
 
-                console.log("Registering user permissions:", permissionPayload);
+                console.log("[Debug] Writing Permission:", permissionPayload);
 
-                const { error: permError } = await supabaseClient.from('user_permissions').insert([permissionPayload]);
+                // 使用 upsert，如果 uid 已存在則更新，確保欄位有值
+                const { error: permError } = await supabaseClient
+                    .from('user_permissions')
+                    .upsert([permissionPayload], { onConflict: 'uid' });
 
                 if (permError) {
                     console.error("Permission Write Failed:", permError);
