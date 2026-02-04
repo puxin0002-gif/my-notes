@@ -10,11 +10,11 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v24.2 (資料寫入強制更新版)
+ * 系統版本：v24.3 (註冊寫入邏輯手動分流版)
  * 修正說明：
- * 1. 註冊邏輯改用 `upsert`，確保若用戶已存在則更新 id_last4 與 user_name。
- * 2. 增加詳細的 Debug Log 以確認寫入內容。
- * 3. 確保 Supabase 連線初始化穩定。
+ * 1. 移除 upsert，改用 select -> insert/update 手動判斷，解決 "no unique constraint" 錯誤。
+ * 2. 確保 user_permissions 的 id_last4 與 user_name 絕對寫入。
+ * 3. 增加寫入後的成功提示與自動登入。
  */
 
 // --- 主色系設定 ---
@@ -150,20 +150,17 @@ export default function App() {
   const [loading, setLoading] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<string>('bulletin');
 
-  // 資料狀態
   const [notes, setNotes] = useState<Note[]>([]);
   const [bulletins, setBulletins] = useState<Bulletin[]>([]);
   const [hierarchyData, setHierarchyData] = useState<ActivityHierarchy[]>([]);
   const [allUsers, setAllUsers] = useState<UserPermission[]>([]);
   const [resetRequests, setResetRequests] = useState<ResetRequest[]>([]);
 
-  // 登入狀態
   const [username, setUsername] = useState<string>('');
   const [idLast4, setIdLast4] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [authMode, setAuthMode] = useState<'login'|'signup'|'forgot'>('login');
   
-  // 表單狀態
   const [minStartDate, setMinStartDate] = useState<string>('');
   const [formData, setFormData] = useState({
     real_name: '', dharma_name: '', registrant_type: '目前上禪修班學員', registration_option: '新增',
@@ -175,7 +172,6 @@ export default function App() {
     stay_start_date: '', stay_end_date: ''
   });
 
-  // 管理介面狀態
   const [newBulletin, setNewBulletin] = useState<string>('');
   const [newLocation, setNewLocation] = useState<string>('');
   const [newActivity, setNewActivity] = useState<string>('');
@@ -187,7 +183,6 @@ export default function App() {
   const [newUser, setNewUser] = useState({ name: '', id4: '', pwd: '' });
   const [filterLoc, setFilterLoc] = useState<string>('');
 
-  // 1. SDK 初始化
   useEffect(() => {
     const loadSupabase = () => {
       const script = document.createElement('script');
@@ -196,19 +191,13 @@ export default function App() {
       script.onload = () => {
         const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
         const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-        
         if (window.supabase && url && key) {
           try {
             const client = window.supabase.createClient(url, key);
             setSupabaseClient(client);
             setIsMock(false);
-          } catch (err) {
-            console.error("Supabase Init Failed:", err);
-            setIsMock(true); 
-          }
-        } else { 
-          setIsMock(true); 
-        }
+          } catch (err) { setIsMock(true); }
+        } else { setIsMock(true); }
         setLoading(false);
       };
       script.onerror = () => { setIsMock(true); setLoading(false); };
@@ -219,7 +208,6 @@ export default function App() {
     setMinStartDate(now.toISOString().slice(0, 16));
   }, []);
 
-  // 2. 資料同步
   const fetchData = useCallback(async () => {
     if (isMock) { 
       setBulletins(MOCK_DATA.bulletins);
@@ -241,9 +229,7 @@ export default function App() {
       if (uData) setAllUsers(uData);
       const { data: rData } = await supabaseClient.from('reset_requests').select('*').order('created_at', { ascending: false });
       if (rData) setResetRequests(rData);
-    } catch (err) {
-      console.error("Error fetching data:", err);
-    }
+    } catch (err) { }
   }, [supabaseClient, isMock]);
 
   useEffect(() => {
@@ -265,7 +251,7 @@ export default function App() {
     }
   }, [user, fetchData, supabaseClient, isMock]);
 
-  // 3. 核心：身份驗證與註冊邏輯分流 (修正重點)
+  // 3. 核心：身份驗證與註冊邏輯分流 (修正重點：改用手動 Check-Insert/Update)
   const handleAuthAction = async () => {
     if (!username || !idLast4) return alert('請輸入姓名與 ID 後四碼');
     if (!supabaseClient && !isMock) return alert('系統未連線至資料庫');
@@ -283,7 +269,6 @@ export default function App() {
 
     try {
         if (authMode === 'login') {
-            // --- 登入邏輯 ---
             if (!password) { setLoading(false); return alert('請輸入密碼'); }
             const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
             if (error) throw error;
@@ -291,45 +276,57 @@ export default function App() {
             setFormData(prev => ({ ...prev, real_name: username }));
 
         } else if (authMode === 'signup') {
-            // --- 註冊邏輯 ---
             if (!password) { setLoading(false); return alert('請設定密碼'); }
             
-            // 1. Supabase Auth 註冊
+            // 1. 執行註冊
             const { data, error } = await supabaseClient.auth.signUp({
                 email,
                 password,
-                options: { 
-                  data: { 
-                    user_name: username, 
-                    id_last4: idLast4,
-                    full_name: username 
-                  } 
-                }
+                options: { data: { user_name: username, id_last4: idLast4, full_name: username } }
             });
             if (error) throw error;
             
-            // 2. 寫入 user_permissions 表 (改用 upsert 以確保寫入，解決部分資料未寫入問題)
+            // 2. 寫入 user_permissions 表 (手動判斷，避免依賴 DB Constraint)
             if (data.user) {
                 const permissionPayload = {
                     uid: data.user.id,
                     email: email,
                     user_name: username,
-                    id_last4: idLast4,   // <--- 關鍵寫入欄位
+                    id_last4: idLast4,
                     is_admin: false,
                     is_disabled: false,
                     created_at: new Date().toISOString()
                 };
 
-                console.log("[Debug] Writing Permission:", permissionPayload);
+                console.log("[Debug] Attempting to write permission:", permissionPayload);
 
-                // 使用 upsert，如果 uid 已存在則更新，確保欄位有值
-                const { error: permError } = await supabaseClient
+                // 先檢查是否已存在
+                const { data: existing } = await supabaseClient
                     .from('user_permissions')
-                    .upsert([permissionPayload], { onConflict: 'uid' });
+                    .select('id')
+                    .eq('uid', data.user.id)
+                    .maybeSingle();
+
+                let permError = null;
+
+                if (existing) {
+                    // 若存在則更新 (補齊資料)
+                    const { error } = await supabaseClient
+                        .from('user_permissions')
+                        .update(permissionPayload)
+                        .eq('id', existing.id);
+                    permError = error;
+                } else {
+                    // 若不存在則新增
+                    const { error } = await supabaseClient
+                        .from('user_permissions')
+                        .insert([permissionPayload]);
+                    permError = error;
+                }
 
                 if (permError) {
                     console.error("Permission Write Failed:", permError);
-                    alert(`註冊成功但資料寫入失敗：${permError.message}\n(請確認 Supabase RLS 權限)`);
+                    alert(`註冊成功但資料寫入失敗：${permError.message}\n(請確認 Supabase RLS 權限開放 Insert/Update)`);
                 } else {
                     alert('註冊成功！資料已建立。');
                     if (data.session) {
@@ -342,7 +339,6 @@ export default function App() {
             }
 
         } else if (authMode === 'forgot') {
-            // --- 忘記密碼邏輯 (寫入 reset_requests) ---
             const { error } = await supabaseClient.from('reset_requests').insert([{
                 user_name: username,
                 id_last4: idLast4,
@@ -368,7 +364,6 @@ export default function App() {
   const locations = useMemo(() => [...new Set(hierarchyData.map(h => h.location))].sort(), [hierarchyData]);
   const availableActivities = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === formData.activity_location && h.activity !== null).map(h => h.activity as string))].sort(), [hierarchyData, formData.activity_location]);
   const availableOptions = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === formData.activity_location && h.activity === formData.activity_name && h.option !== null).map(h => h.option as string))].sort(), [hierarchyData, formData.activity_location, formData.activity_name]);
-  
   const availableContents = useMemo(() => hierarchyData.filter(h => h.location === formData.activity_location && h.activity === formData.activity_name && h.option === formData.activity_option && h.content !== null).map(h => h.content as string).sort(), [hierarchyData, formData.activity_location, formData.activity_name, formData.activity_option]);
 
   const filteredTransportOptions = useMemo(() => {
