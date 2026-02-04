@@ -10,18 +10,17 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v30.0 (權限連動與編譯錯誤終極修復版)
+ * 系統版本：v30.1 (權限管理切換功能版)
  * 修正說明：
- * 1. 登入後自動檢查 user_permissions 的 is_admin 欄位，若為 true 則開啟管理員模式。
- * 2. 修復所有 TypeScript 錯誤 (ID 型別統一、變數未定義、圖示缺失)。
- * 3. 註冊邏輯改為 Update-First，確保能覆蓋 Trigger 產生的資料。
- * 4. 移除過時的 handleFixProfile。
+ * 1. 新增 handleToggleAdmin 函式，允許在「用戶」頁籤直接勾選修改 is_admin 權限。
+ * 2. 用戶列表的「管理員」核取方塊現在可以點擊互動了。
+ * 3. 確保登入時會依照 user_permissions 的 is_admin 欄位正確判斷身份。
  */
 
 // --- 主色系設定 ---
 const PRIMARY_COLOR = "#7A2E40"; 
 
-// --- 型別定義 (統一 ID 為 string) ---
+// --- 型別定義 ---
 interface ActivityHierarchy {
   id: string;
   location: string;
@@ -215,7 +214,7 @@ export default function App() {
     setMinStartDate(now.toISOString().slice(0, 16));
   }, []);
 
-  // 核心：檢查並設定管理員權限
+  // 核心：檢查並設定管理員權限 (Login Check)
   const checkAdminPermission = useCallback(async (uid: string, email: string) => {
     if (!supabaseClient) return;
     
@@ -227,7 +226,7 @@ export default function App() {
       .maybeSingle();
 
     if (data) {
-      console.log("[Auth] Admin status:", data.is_admin);
+      console.log("[Auth] Admin status loaded:", data.is_admin);
       setIsAdmin(data.is_admin === true);
     } else {
       console.log("[Auth] No permission record found.");
@@ -272,9 +271,10 @@ export default function App() {
           .on('postgres_changes', { event: '*', schema: 'public', table: 'bulletins' }, fetchData)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'activity_hierarchy' }, fetchData)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'user_permissions' }, (payload: any) => {
-              fetchData(); // 當有人修改權限表時，刷新資料
-              // 如果是修改自己的權限，重新檢查 Admin 狀態
+              fetchData(); 
+              // 即時更新權限：若有人(或自己)修改了自己的 is_admin，立即生效
               if (payload.new && payload.new.uid === user.id) {
+                 console.log("[Auth] Permission updated via realtime:", payload.new.is_admin);
                  setIsAdmin(payload.new.is_admin === true);
               }
           })
@@ -334,7 +334,7 @@ export default function App() {
             if (error) throw error;
             
             if (data.user) {
-                // 註冊後的寫入策略：Update First (針對 Trigger) -> Insert Fallback
+                // 註冊後的寫入策略：Update First -> Insert Fallback
                 const permissionPayload = {
                     user_name: finalUsername,
                     id_last4: finalIdLast4,
@@ -517,11 +517,28 @@ export default function App() {
     alert('需串接後端 API 建立 Auth 用戶');
   };
 
-  // 管理者切換用戶狀態
+  // 管理者切換用戶狀態 (啟用/停用)
   const handleToggleUserStatus = async (uid: string, currentStatus: boolean) => {
     if (!supabaseClient) return;
     await supabaseClient.from('user_permissions').update({ is_disabled: !currentStatus }).eq('uid', uid);
     fetchData();
+  };
+
+  // 管理者切換管理員權限 (新增功能)
+  const handleToggleAdmin = async (uid: string, currentStatus: boolean) => {
+    if (!supabaseClient) return;
+    // 更新資料庫
+    const { error } = await supabaseClient
+      .from('user_permissions')
+      .update({ is_admin: !currentStatus })
+      .eq('uid', uid);
+
+    if (error) {
+       alert("權限更新失敗：" + error.message);
+    } else {
+       // 更新後重新抓取列表，確保畫面同步
+       fetchData();
+    }
   };
 
   // 管理者處理重設請求
@@ -671,7 +688,7 @@ export default function App() {
           </div>
         )}
 
-        {/* 3. 用戶管理 (Admin Only) */}
+        {/* 3. 用戶管理 (Admin Only) - 修正：checkbox 改為可互動 */}
         {activeTab === 'users' && isAdmin && (
           <div className="space-y-8 animate-in fade-in">
              <div className="bg-white p-6 rounded-3xl shadow-sm border border-[#E8E2D1]">
@@ -686,14 +703,22 @@ export default function App() {
              <div className="bg-white rounded-3xl shadow-sm border border-[#E8E2D1] overflow-hidden">
                 <table className="w-full text-sm text-left">
                    <thead className="bg-slate-50 text-slate-500 font-bold border-b">
-                      <tr><th className="p-4">姓名</th><th className="p-4">ID後4碼</th><th className="p-4">管理員</th><th className="p-4">狀態</th><th className="p-4 text-right">操作</th></tr>
+                      <tr><th className="p-4">姓名</th><th className="p-4">ID後4碼</th><th className="p-4">管理員</th><th className="p-4">狀態</th><th className="p-4 text-right">報名數</th></tr>
                    </thead>
                    <tbody className="divide-y">
                       {allUsers.map(u => (
                          <tr key={u.id} className="hover:bg-slate-50">
                             <td className="p-4 font-bold text-[#7A2E40]">{u.user_name}</td>
                             <td className="p-4 font-mono text-slate-400">{u.id_last4}</td>
-                            <td className="p-4">{u.is_admin ? '是' : '否'}</td>
+                            {/* 修改：綁定 handleToggleAdmin，允許點擊切換 */}
+                            <td className="p-4">
+                                <input 
+                                  type="checkbox" 
+                                  checked={u.is_admin} 
+                                  onChange={() => handleToggleAdmin(u.uid!, u.is_admin)} 
+                                  className="w-5 h-5 rounded border-slate-300 text-[#7A2E40] focus:ring-[#7A2E40] cursor-pointer" 
+                                />
+                            </td>
                             <td className="p-4"><span className={`px-2 py-1 rounded text-xs font-bold ${u.is_disabled ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>{u.is_disabled ? '已停用' : '啟用中'}</span></td>
                             <td className="p-4 text-right"><button onClick={()=>handleToggleUserStatus(u.uid!, u.is_disabled)} className="text-blue-500 hover:underline">{u.is_disabled ? '啟用' : '停用'}</button></td>
                          </tr>
@@ -709,6 +734,7 @@ export default function App() {
           <div className="space-y-12 animate-in fade-in">
              <div className="bg-[#7A2E40] p-10 rounded-[50px] flex justify-between items-center shadow-xl">
                 <h2 className="text-4xl font-black text-white">審核中心</h2>
+                <button onClick={handleExport} className="bg-white/20 text-white px-10 py-4 rounded-[30px] text-2xl font-bold border border-white/30 hover:bg-white hover:text-[#612639] transition-all">匯出名冊</button>
              </div>
              <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
                 {/* 報名審核 */}
@@ -738,7 +764,7 @@ export default function App() {
           </div>
         )}
 
-        {/* 5. 資料總表 (恢復) */}
+        {/* 5. 資料總表 */}
         {activeTab === 'admin_data' && isAdmin && (
            <div className="bg-white p-10 rounded-[60px] shadow-sm border border-[#E8E2D1] animate-in fade-in">
               <div className="flex justify-between items-center mb-10 gap-6 border-b border-[#F2ECE4] pb-8">
