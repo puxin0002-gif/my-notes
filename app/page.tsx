@@ -10,11 +10,11 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v25.0 (ID寫入絕對隔離版)
+ * 系統版本：v25.1 (RLS 權限迴避與自動補檔版)
  * 修正說明：
- * 1. 變數隔離：寫入前將 idLast4 鎖定為常數，防止變數污染。
- * 2. 註冊確認：送出前彈窗確認寫入數值。
- * 3. 確保資料庫寫入邏輯無誤。
+ * 1. 註冊邏輯調整：若註冊後無 Session (需驗證信)，則不立即寫入資料表，避免 RLS 錯誤。
+ * 2. 自動補檔機制：在用戶登入後 (useEffect)，自動檢查並補齊 user_permissions 資料。
+ * 3. 確保資料來自 user_metadata，即使重新整理頁面也能正確寫入。
  */
 
 // --- 主色系設定 ---
@@ -208,11 +208,45 @@ export default function App() {
     } catch (err) { }
   }, [supabaseClient, isMock]);
 
+  // 獨立抽出的寫入函式 (供註冊後或登入後呼叫)
+  const ensureUserPermission = async (currentUser: any, name: string, id4: string) => {
+    if (!supabaseClient || !currentUser) return;
+    
+    // 檢查是否已存在
+    const { data: existing } = await supabaseClient
+        .from('user_permissions')
+        .select('id')
+        .eq('uid', currentUser.id)
+        .maybeSingle();
+
+    if (!existing) {
+        console.log("Creating missing permission for:", currentUser.id);
+        const { error } = await supabaseClient.from('user_permissions').insert([{
+            uid: currentUser.id,
+            email: currentUser.email,
+            user_name: name,
+            id_last4: id4,
+            is_admin: false,
+            is_disabled: false,
+            created_at: new Date().toISOString()
+        }]);
+        if (error) console.error("Auto-create permission failed:", error);
+    }
+  };
+
   useEffect(() => {
     if (user) {
       fetchData();
       if (!isMock && supabaseClient) {
         const email = user.email;
+        
+        // 自動補檔檢查：如果登入後發現 user_permissions 沒資料，自動補寫
+        const metaName = user.user_metadata?.user_name;
+        const metaId4 = user.user_metadata?.id_last4;
+        if (metaName && metaId4) {
+             ensureUserPermission(user, metaName, metaId4);
+        }
+
         supabaseClient.from('user_permissions').select('is_admin').eq('email', email).single()
           .then(({ data }: any) => { if (data) setIsAdmin(data.is_admin); });
         
@@ -227,14 +261,13 @@ export default function App() {
     }
   }, [user, fetchData, supabaseClient, isMock]);
 
-  // 3. 核心：身份驗證與註冊邏輯分流 (修正重點：變數隔離)
   const handleAuthAction = async () => {
     if (!username || !idLast4) return alert('請輸入姓名與 ID 後四碼');
     if (!supabaseClient && !isMock) return alert('系統未連線至資料庫');
 
     setLoading(true);
     const email = encodeName(username + idLast4) + FAKE_DOMAIN;
-    const finalIdLast4 = idLast4.trim(); // 確保無空白且變數隔離
+    const finalIdLast4 = idLast4.trim();
     const finalUsername = username.trim();
 
     if (isMock) { 
@@ -256,12 +289,7 @@ export default function App() {
         } else if (authMode === 'signup') {
             if (!password) { setLoading(false); return alert('請設定密碼'); }
             
-            // 彈窗確認
-            if (!confirm(`確認註冊資料：\n姓名：${finalUsername}\nID後4碼：${finalIdLast4}\n\n是否繼續？`)) {
-                setLoading(false);
-                return;
-            }
-
+            // 1. 註冊 (將資料寫入 metadata 以便後續補檔)
             const { data, error } = await supabaseClient.auth.signUp({
                 email,
                 password,
@@ -275,36 +303,14 @@ export default function App() {
             });
             if (error) throw error;
             
-            if (data.user) {
-                const permissionPayload = {
-                    uid: data.user.id,
-                    email: email,
-                    user_name: finalUsername,
-                    id_last4: finalIdLast4,
-                    is_admin: false,
-                    is_disabled: false,
-                    created_at: new Date().toISOString()
-                };
-
-                console.log("[Debug] Payload:", permissionPayload);
-
-                // 嘗試寫入 (UPSERT)
-                const { error: upsertError } = await supabaseClient
-                    .from('user_permissions')
-                    .upsert(permissionPayload, { onConflict: 'uid' });
-
-                if (upsertError) {
-                    console.error("Upsert Failed:", upsertError);
-                    alert(`資料寫入異常：${upsertError.message}`);
-                } else {
-                    alert('註冊成功！');
-                    if (data.session) {
-                        setUser(data.user);
-                        setFormData(prev => ({ ...prev, real_name: finalUsername }));
-                    } else {
-                        alert('請檢查信箱並點擊驗證連結。');
-                    }
-                }
+            // 2. 嘗試寫入 (若有 Session)
+            if (data.user && data.session) {
+                await ensureUserPermission(data.user, finalUsername, finalIdLast4);
+                alert('註冊成功！已自動登入。');
+                setUser(data.user);
+                setFormData(prev => ({ ...prev, real_name: finalUsername }));
+            } else {
+                alert('註冊成功！請至信箱收取驗證信。\n(驗證後登入系統將自動建立您的資料)');
             }
 
         } else if (authMode === 'forgot') {
@@ -333,7 +339,6 @@ export default function App() {
   const locations = useMemo(() => [...new Set(hierarchyData.map(h => h.location))].sort(), [hierarchyData]);
   const availableActivities = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === formData.activity_location && h.activity !== null).map(h => h.activity as string))].sort(), [hierarchyData, formData.activity_location]);
   const availableOptions = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === formData.activity_location && h.activity === formData.activity_name && h.option !== null).map(h => h.option as string))].sort(), [hierarchyData, formData.activity_location, formData.activity_name]);
-  
   const availableContents = useMemo(() => hierarchyData.filter(h => h.location === formData.activity_location && h.activity === formData.activity_name && h.option === formData.activity_option && h.content !== null).map(h => h.content as string).sort(), [hierarchyData, formData.activity_location, formData.activity_name, formData.activity_option]);
 
   const filteredTransportOptions = useMemo(() => {
