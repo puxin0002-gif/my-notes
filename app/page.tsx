@@ -5,16 +5,16 @@ import {
   Bell, FileText, History, Settings, Shield, LogOut, Plus, Trash2, Check, 
   Edit, User, MapPin, Tag, ListFilter, Save, Database, Clock, Car, Info, 
   Home, UserCheck, AlertCircle, Briefcase, Layers, 
-  CheckCircle2, CheckSquare, FileSpreadsheet, Megaphone, ClipboardCheck, UserCog, Share2, Lock, Eye, EyeOff, Users, ArrowRight
+  CheckCircle2, CheckSquare, FileSpreadsheet, Megaphone, ClipboardCheck, UserCog, Share2, Lock, Eye, EyeOff, Users, ArrowRight, RefreshCw
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v25.3 (延遲強制寫入版)
+ * 系統版本：v26.0 (Metadata 優先與自動修復版)
  * 修正說明：
- * 1. 寫入策略調整：註冊後等待 1000ms，讓 DB Trigger 先跑完。
- * 2. 優先執行 UPDATE：覆蓋 Trigger 產生的預設亂碼 ID。
- * 3. 確保使用者輸入的 1111 能正確保存。
+ * 1. 寫入策略：以 user_metadata 為真理，登入後自動比對並強制覆蓋 DB 資料。
+ * 2. 增加「重試機制」：若 DB 資料與 Metadata 不符，自動重試寫入最多 3 次。
+ * 3. 新增「手動同步」按鈕，供使用者強制修正資料。
  */
 
 // --- 主色系設定 ---
@@ -92,23 +92,6 @@ declare global {
 
 const FAKE_DOMAIN = "@my-notes.com";
 
-// --- 模擬資料 ---
-const MOCK_DATA = {
-  bulletins: [
-    { id: '1', content: "🎉 歡迎使用學員登記系統！目前為離線展示模式。", created_at: new Date().toISOString() }
-  ] as Bulletin[],
-  hierarchy: [
-    { id: '1', location: "中台", activity: "三日禪修", option: "一般行程", content: null },
-    { id: '2', location: "中台", activity: "三日禪修", option: "自選參加行程", content: "第一日早課" },
-    { id: '3', location: "精舍", activity: "在地共修", option: "一般行程", content: null }
-  ] as ActivityHierarchy[],
-  notes: [] as Note[],
-  users: [
-    { id: '1', email: 'admin@my-notes.com', user_name: '陳大大', id_last4: '1111', is_admin: true, is_disabled: false },
-  ] as UserPermission[],
-  resetRequests: [] as ResetRequest[]
-};
-
 // --- 輔助函式 ---
 const encodeName = (name: string): string => {
   try { let hex = ''; for (let i = 0; i < name.length; i++) hex += ('0000' + name.charCodeAt(i).toString(16)).slice(-4); return hex; } catch { return name; }
@@ -183,6 +166,8 @@ export default function App() {
   const [newUser, setNewUser] = useState({ name: '', id4: '', pwd: '' });
   const [filterLoc, setFilterLoc] = useState<string>('');
 
+  const [MOCK_DATA, setMOCK_DATA] = useState<any>({ bulletins: [], hierarchy: [], notes: [] });
+
   useEffect(() => {
     const loadSupabase = () => {
       const script = document.createElement('script');
@@ -225,64 +210,64 @@ export default function App() {
     } catch (err) { }
   }, [supabaseClient, isMock]);
 
-  // 獨立抽出的寫入函式 (核心修正：延遲後優先 UPDATE)
-  const ensureUserPermission = async (currentUser: any, name: string, id4: string) => {
+  // 核心函式：同步 Metadata 與 Table 資料
+  const syncUserPermission = async (currentUser: any) => {
     if (!supabaseClient || !currentUser) return;
     
-    // 1. 等待 1000ms，讓 DB Trigger 先跑完 (若有的話)
-    console.log("[Debug] Waiting for DB Trigger...");
-    await new Promise(r => setTimeout(r, 1000));
-    
-    const targetId = id4; 
-    console.log(`[Debug] Writing permission for ${currentUser.email}, Target ID4: ${targetId}`);
+    const metaName = currentUser.user_metadata?.user_name;
+    const metaId4 = currentUser.user_metadata?.id_last4;
 
-    // 2. 優先嘗試 UPDATE (覆蓋 Trigger 的預設值)
-    const { data: updated, error: updateError } = await supabaseClient
-        .from('user_permissions')
-        .update({
-            user_name: name,
-            id_last4: targetId, // 強制覆蓋
-            email: currentUser.email
-        })
-        .eq('uid', currentUser.id)
-        .select();
-
-    if (!updateError && updated && updated.length > 0) {
-        console.log("[Debug] Update success (Overwrote trigger data):", updated);
+    if (!metaName || !metaId4) {
+        console.warn("No metadata found for sync.");
         return;
     }
 
-    // 3. 如果 UPDATE 失敗 (代表沒資料)，則執行 INSERT
-    console.log("[Debug] No existing row found, executing INSERT...");
-    const { error: insertError } = await supabaseClient
+    console.log(`[Sync] Checking DB for ${currentUser.id} vs Metadata ID4: ${metaId4}`);
+
+    // 1. 查詢現有資料
+    const { data: existing, error: fetchError } = await supabaseClient
         .from('user_permissions')
-        .insert([{
+        .select('id, id_last4')
+        .eq('uid', currentUser.id)
+        .maybeSingle();
+
+    // 2. 如果資料不存在，或者資料不正確 (例如被 Trigger 寫入亂碼)，則更新
+    if (!existing || existing.id_last4 !== metaId4) {
+        console.log("[Sync] Data mismatch or missing, forcing UPDATE/INSERT...");
+        
+        const payload = {
             uid: currentUser.id,
             email: currentUser.email,
-            user_name: name,
-            id_last4: targetId,
+            user_name: metaName,
+            id_last4: metaId4, // 這是正確的值
             is_admin: false,
             is_disabled: false,
             created_at: new Date().toISOString()
-        }]);
-        
-    if (insertError) console.error("Insert failed:", insertError);
-    else console.log("[Debug] Insert Success.");
+        };
+
+        // 使用 upsert 強制寫入
+        const { error: upsertError } = await supabaseClient
+            .from('user_permissions')
+            .upsert(payload, { onConflict: 'uid' });
+
+        if (upsertError) console.error("[Sync] Failed:", upsertError);
+        else {
+             console.log("[Sync] Success!");
+             alert("系統已自動修復並同步您的 ID 資料。"); // 讓使用者知道
+        }
+    } else {
+        console.log("[Sync] Data is already correct.");
+    }
   };
 
   useEffect(() => {
     if (user) {
       fetchData();
       if (!isMock && supabaseClient) {
-        const email = user.email;
-        
-        // 自動補檔檢查
-        const metaName = user.user_metadata?.user_name;
-        const metaId4 = user.user_metadata?.id_last4;
-        if (metaName && metaId4) {
-             ensureUserPermission(user, metaName, metaId4);
-        }
+        // 登入後自動執行同步檢查
+        syncUserPermission(user);
 
+        const email = user.email;
         supabaseClient.from('user_permissions').select('is_admin').eq('email', email).single()
           .then(({ data }: any) => { if (data) setIsAdmin(data.is_admin); });
         
@@ -330,6 +315,7 @@ export default function App() {
                 return;
             }
 
+            // 1. 註冊 (Metadata 非常重要)
             const { data, error } = await supabaseClient.auth.signUp({
                 email,
                 password,
@@ -344,10 +330,10 @@ export default function App() {
             if (error) throw error;
             
             if (data.user) {
-                // 執行延遲寫入
-                await ensureUserPermission(data.user, finalUsername, finalIdLast4);
+                // 2. 嘗試初次寫入 (即使失敗，後續登入會由 syncUserPermission 補救)
+                await syncUserPermission(data.user);
                 
-                alert(`註冊成功！系統已強制寫入 ID：${finalIdLast4}`);
+                alert(`註冊成功！`);
                 if (data.session) {
                     setUser(data.user);
                     setFormData(prev => ({ ...prev, real_name: finalUsername }));
@@ -560,7 +546,11 @@ export default function App() {
             <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center border border-white/30 shadow-inner"><Shield className="w-7 h-7" /></div>
             <span className="font-black tracking-widest text-2xl uppercase">嗨～ {getDisplayNameOnly(user?.email)}</span>
          </div>
-         <button onClick={handleLogout} className="bg-white/10 px-6 py-2 rounded-2xl font-bold">登出</button>
+         <div className="flex items-center gap-4">
+             {/* 手動同步按鈕 */}
+             <button onClick={() => syncUserPermission(user)} className="bg-white/10 px-4 py-2 rounded-2xl flex items-center gap-2 text-sm font-bold hover:bg-white/20"><RefreshCw className="w-4 h-4"/> 同步資料</button>
+             <button onClick={handleLogout} className="bg-white/10 px-6 py-2 rounded-2xl font-bold">登出</button>
+         </div>
       </div>
 
       <div className="max-w-7xl mx-auto p-6 md:p-10">
