@@ -10,12 +10,11 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v24.0 (註冊資料寫入與 Vercel 佈署修復版)
+ * 系統版本：v24.1 (欄位寫入確認版)
  * 修正說明：
- * 1. 確保註冊時 `user_name` 與 `id_last4` 正確寫入 user_permissions。
- * 2. 確保忘記密碼申請寫入 reset_requests。
- * 3. 解決 Vercel 找不到路徑的問題 (Root Directory)。
- * 4. 恢復所有管理功能與 UI 設計。
+ * 1. 確認註冊流程中 `id_last4` (身份證後4碼) 寫入 user_permissions。
+ * 2. 增加 Console Log 以追蹤註冊寫入資料。
+ * 3. 確保 reset_requests 寫入邏輯正確。
  */
 
 // --- 主色系設定 ---
@@ -266,7 +265,7 @@ export default function App() {
     }
   }, [user, fetchData, supabaseClient, isMock]);
 
-  // 3. 核心：身份驗證與註冊邏輯分流 (修正重點)
+  // 3. 核心：身份驗證與註冊邏輯分流
   const handleAuthAction = async () => {
     if (!username || !idLast4) return alert('請輸入姓名與 ID 後四碼');
     if (!supabaseClient && !isMock) return alert('系統未連線至資料庫');
@@ -303,29 +302,31 @@ export default function App() {
                   data: { 
                     user_name: username, 
                     id_last4: idLast4,
-                    full_name: username // 寫入標準 Metadata
+                    full_name: username 
                   } 
                 }
             });
             if (error) throw error;
             
-            // 2. 寫入 user_permissions 表
+            // 2. 寫入 user_permissions 表 (確保 id_last4 被寫入)
             if (data.user) {
                 const permissionPayload = {
                     uid: data.user.id,
                     email: email,
-                    user_name: username, // 確保寫入姓名
-                    id_last4: idLast4,   // 確保寫入 ID 後 4 碼
+                    user_name: username,
+                    id_last4: idLast4,   // <--- 關鍵寫入欄位
                     is_admin: false,
                     is_disabled: false,
                     created_at: new Date().toISOString()
                 };
 
+                console.log("Registering user permissions:", permissionPayload);
+
                 const { error: permError } = await supabaseClient.from('user_permissions').insert([permissionPayload]);
 
                 if (permError) {
                     console.error("Permission Write Failed:", permError);
-                    alert(`註冊成功但資料建立失敗：${permError.message}\n(請確認 RLS 權限)`);
+                    alert(`註冊成功但資料寫入失敗：${permError.message}\n(請確認 Supabase RLS 權限)`);
                 } else {
                     alert('註冊成功！資料已建立。');
                     if (data.session) {
@@ -341,7 +342,7 @@ export default function App() {
             // --- 忘記密碼邏輯 (寫入 reset_requests) ---
             const { error } = await supabaseClient.from('reset_requests').insert([{
                 user_name: username,
-                id_last4: idLast4, // 確保寫入 ID 後 4 碼
+                id_last4: idLast4,
                 status: 'pending',
                 created_at: new Date().toISOString()
             }]);
