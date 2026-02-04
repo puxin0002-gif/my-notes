@@ -10,11 +10,11 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v24.5 (ID寫入強制更新版)
+ * 系統版本：v25.0 (ID寫入絕對隔離版)
  * 修正說明：
- * 1. 註冊後無論如何都執行一次 UPDATE，確保 id_last4 被覆蓋寫入。
- * 2. 增加寫入前的資料檢查與日誌。
- * 3. 確保 Supabase 連線與寫入權限。
+ * 1. 變數隔離：寫入前將 idLast4 鎖定為常數，防止變數污染。
+ * 2. 註冊確認：送出前彈窗確認寫入數值。
+ * 3. 確保資料庫寫入邏輯無誤。
  */
 
 // --- 主色系設定 ---
@@ -227,13 +227,15 @@ export default function App() {
     }
   }, [user, fetchData, supabaseClient, isMock]);
 
-  // 3. 核心：身份驗證與註冊邏輯分流 (修正重點：強制 UPDATE)
+  // 3. 核心：身份驗證與註冊邏輯分流 (修正重點：變數隔離)
   const handleAuthAction = async () => {
     if (!username || !idLast4) return alert('請輸入姓名與 ID 後四碼');
     if (!supabaseClient && !isMock) return alert('系統未連線至資料庫');
 
     setLoading(true);
     const email = encodeName(username + idLast4) + FAKE_DOMAIN;
+    const finalIdLast4 = idLast4.trim(); // 確保無空白且變數隔離
+    const finalUsername = username.trim();
 
     if (isMock) { 
         setUser({ id: 'mock', email });
@@ -254,61 +256,51 @@ export default function App() {
         } else if (authMode === 'signup') {
             if (!password) { setLoading(false); return alert('請設定密碼'); }
             
-            // 1. 執行 Supabase Auth 註冊
+            // 彈窗確認
+            if (!confirm(`確認註冊資料：\n姓名：${finalUsername}\nID後4碼：${finalIdLast4}\n\n是否繼續？`)) {
+                setLoading(false);
+                return;
+            }
+
             const { data, error } = await supabaseClient.auth.signUp({
                 email,
                 password,
                 options: { 
                   data: { 
-                    user_name: username, 
-                    id_last4: idLast4, // Metadata
-                    full_name: username 
+                    user_name: finalUsername, 
+                    id_last4: finalIdLast4,
+                    full_name: finalUsername 
                   } 
                 }
             });
             if (error) throw error;
             
-            // 2. 寫入 user_permissions 表 (強制寫入)
             if (data.user) {
-                console.log("[Debug] Registering:", { uid: data.user.id, name: username, id4: idLast4 });
+                const permissionPayload = {
+                    uid: data.user.id,
+                    email: email,
+                    user_name: finalUsername,
+                    id_last4: finalIdLast4,
+                    is_admin: false,
+                    is_disabled: false,
+                    created_at: new Date().toISOString()
+                };
 
-                // 步驟 A：先嘗試寫入 (UPSERT)
+                console.log("[Debug] Payload:", permissionPayload);
+
+                // 嘗試寫入 (UPSERT)
                 const { error: upsertError } = await supabaseClient
                     .from('user_permissions')
-                    .upsert({
-                        uid: data.user.id,
-                        email: email,
-                        user_name: username,
-                        id_last4: idLast4,
-                        is_admin: false,
-                        is_disabled: false,
-                        created_at: new Date().toISOString()
-                    }, { onConflict: 'uid' }); // 確保以 UID 為唯一鍵
+                    .upsert(permissionPayload, { onConflict: 'uid' });
 
-                // 步驟 B：如果 UPSERT 失敗 (例如 RLS 不允許 INSERT)，嘗試 UPDATE
                 if (upsertError) {
-                    console.error("Upsert Failed, trying Update:", upsertError);
-                    const { error: updateError } = await supabaseClient
-                        .from('user_permissions')
-                        .update({ 
-                            user_name: username, 
-                            id_last4: idLast4 
-                        })
-                        .eq('uid', data.user.id);
-                    
-                    if (updateError) {
-                         alert(`資料寫入失敗：${updateError.message}。請聯繫管理員確認權限。`);
-                    } else {
-                         alert('註冊成功！資料已更新。');
-                         // 自動登入
-                         const { data: loginData } = await supabaseClient.auth.signInWithPassword({ email, password });
-                         if(loginData.session) setUser(loginData.user);
-                    }
+                    console.error("Upsert Failed:", upsertError);
+                    alert(`資料寫入異常：${upsertError.message}`);
                 } else {
-                    alert('註冊成功！資料已建立。');
+                    alert('註冊成功！');
                     if (data.session) {
                         setUser(data.user);
-                        setFormData(prev => ({ ...prev, real_name: username }));
+                        setFormData(prev => ({ ...prev, real_name: finalUsername }));
                     } else {
                         alert('請檢查信箱並點擊驗證連結。');
                     }
@@ -317,8 +309,8 @@ export default function App() {
 
         } else if (authMode === 'forgot') {
             const { error } = await supabaseClient.from('reset_requests').insert([{
-                user_name: username,
-                id_last4: idLast4,
+                user_name: finalUsername,
+                id_last4: finalIdLast4,
                 status: 'pending',
                 created_at: new Date().toISOString()
             }]);
