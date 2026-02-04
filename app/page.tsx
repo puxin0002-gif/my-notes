@@ -5,22 +5,23 @@ import {
   Bell, FileText, History, Settings, Shield, LogOut, Plus, Trash2, Check, 
   Edit, User, MapPin, Tag, ListFilter, Save, Database, Clock, Car, Info, 
   Home, UserCheck, AlertCircle, Briefcase, Layers, 
-  CheckCircle2, CheckSquare, FileSpreadsheet, Megaphone, ClipboardCheck, UserCog, Share2, Lock, Eye, EyeOff, Users, ArrowRight, RefreshCw, AlertTriangle
+  CheckCircle2, CheckSquare, FileSpreadsheet, Megaphone, ClipboardCheck, UserCog, Share2, Lock, Eye, EyeOff, Users, ArrowRight, AlertTriangle
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v29.1 (UI 清理與 Trigger 整合版)
+ * 系統版本：v30.0 (權限連動與編譯錯誤終極修復版)
  * 修正說明：
- * 1. 移除介面上殘留的 `handleFixProfile` 呼叫，解決編譯錯誤。
- * 2. 補齊 `AlertTriangle` 圖示匯入。
- * 3. 系統現在完全依賴後端 SQL Trigger 來寫入 user_permissions，前端邏輯保持最簡潔。
+ * 1. 登入後自動檢查 user_permissions 的 is_admin 欄位，若為 true 則開啟管理員模式。
+ * 2. 修復所有 TypeScript 錯誤 (ID 型別統一、變數未定義、圖示缺失)。
+ * 3. 註冊邏輯改為 Update-First，確保能覆蓋 Trigger 產生的資料。
+ * 4. 移除過時的 handleFixProfile。
  */
 
 // --- 主色系設定 ---
 const PRIMARY_COLOR = "#7A2E40"; 
 
-// --- 型別定義 ---
+// --- 型別定義 (統一 ID 為 string) ---
 interface ActivityHierarchy {
   id: string;
   location: string;
@@ -92,6 +93,25 @@ declare global {
 
 const FAKE_DOMAIN = "@my-notes.com";
 
+// --- 模擬資料 ---
+const MOCK_DATA = {
+  bulletins: [
+    { id: '1', content: "🎉 歡迎使用學員登記系統！目前為展示模式。", created_at: new Date().toISOString() }
+  ] as Bulletin[],
+  hierarchy: [
+    { id: '1', location: "中台", activity: "三日禪修", option: "一般行程", content: null },
+    { id: '2', location: "中台", activity: "三日禪修", option: "自選參加行程", content: "第一日早課" },
+    { id: '3', location: "精舍", activity: "在地共修", option: "一般行程", content: null }
+  ] as ActivityHierarchy[],
+  notes: [] as Note[],
+  users: [
+    { id: '1', email: 'admin@my-notes.com', user_name: '陳大大', id_last4: '1111', is_admin: true, is_disabled: false },
+  ] as UserPermission[],
+  resetRequests: [
+    { id: '1', user_name: '測試申請', id_last4: '1234', status: 'pending', created_at: new Date().toISOString() }
+  ] as ResetRequest[]
+};
+
 // --- 輔助函式 ---
 const encodeName = (name: string): string => {
   try { let hex = ''; for (let i = 0; i < name.length; i++) hex += ('0000' + name.charCodeAt(i).toString(16)).slice(-4); return hex; } catch { return name; }
@@ -133,17 +153,20 @@ export default function App() {
   const [loading, setLoading] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<string>('bulletin');
 
+  // 資料狀態
   const [notes, setNotes] = useState<Note[]>([]);
   const [bulletins, setBulletins] = useState<Bulletin[]>([]);
   const [hierarchyData, setHierarchyData] = useState<ActivityHierarchy[]>([]);
   const [allUsers, setAllUsers] = useState<UserPermission[]>([]);
   const [resetRequests, setResetRequests] = useState<ResetRequest[]>([]);
 
+  // 登入狀態
   const [username, setUsername] = useState<string>('');
   const [idLast4, setIdLast4] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [authMode, setAuthMode] = useState<'login'|'signup'|'forgot'>('login');
   
+  // 表單狀態
   const [minStartDate, setMinStartDate] = useState<string>('');
   const [formData, setFormData] = useState({
     real_name: '', dharma_name: '', registrant_type: '目前上禪修班學員', registration_option: '新增',
@@ -155,6 +178,7 @@ export default function App() {
     stay_start_date: '', stay_end_date: ''
   });
 
+  // 管理介面狀態
   const [newBulletin, setNewBulletin] = useState<string>('');
   const [newLocation, setNewLocation] = useState<string>('');
   const [newActivity, setNewActivity] = useState<string>('');
@@ -165,8 +189,6 @@ export default function App() {
   const [mgmtSelectedOpt, setMgmtSelectedOpt] = useState<string>('');
   const [newUser, setNewUser] = useState({ name: '', id4: '', pwd: '' });
   const [filterLoc, setFilterLoc] = useState<string>('');
-
-  const [MOCK_DATA, setMOCK_DATA] = useState<any>({ bulletins: [], hierarchy: [], notes: [] });
 
   useEffect(() => {
     const loadSupabase = () => {
@@ -193,8 +215,35 @@ export default function App() {
     setMinStartDate(now.toISOString().slice(0, 16));
   }, []);
 
+  // 核心：檢查並設定管理員權限
+  const checkAdminPermission = useCallback(async (uid: string, email: string) => {
+    if (!supabaseClient) return;
+    
+    // 查詢 user_permissions 表
+    const { data, error } = await supabaseClient
+      .from('user_permissions')
+      .select('is_admin')
+      .eq('uid', uid)
+      .maybeSingle();
+
+    if (data) {
+      console.log("[Auth] Admin status:", data.is_admin);
+      setIsAdmin(data.is_admin === true);
+    } else {
+      console.log("[Auth] No permission record found.");
+      setIsAdmin(false);
+    }
+  }, [supabaseClient]);
+
   const fetchData = useCallback(async () => {
-    if (isMock) return;
+    if (isMock) { 
+      setBulletins(MOCK_DATA.bulletins);
+      setHierarchyData(MOCK_DATA.hierarchy);
+      setNotes(MOCK_DATA.notes);
+      setAllUsers(MOCK_DATA.users);
+      setResetRequests(MOCK_DATA.resetRequests);
+      return; 
+    }
     if (!supabaseClient) return;
     try {
       const { data: bData } = await supabaseClient.from('bulletins').select('*').order('created_at', { ascending: false });
@@ -210,26 +259,32 @@ export default function App() {
     } catch (err) { }
   }, [supabaseClient, isMock]);
 
+  // 監聽用戶狀態與權限
   useEffect(() => {
     if (user) {
       fetchData();
       if (!isMock && supabaseClient) {
-        const email = user.email;
-        supabaseClient.from('user_permissions').select('is_admin').eq('email', email).single()
-          .then(({ data }: any) => { if (data) setIsAdmin(data.is_admin); });
-        
+        // 登入後立即檢查權限
+        checkAdminPermission(user.id, user.email);
+
         const channel = supabaseClient.channel('db-all-sync')
           .on('postgres_changes', { event: '*', schema: 'public', table: 'notes' }, fetchData)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'bulletins' }, fetchData)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'activity_hierarchy' }, fetchData)
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'user_permissions' }, fetchData)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'user_permissions' }, (payload: any) => {
+              fetchData(); // 當有人修改權限表時，刷新資料
+              // 如果是修改自己的權限，重新檢查 Admin 狀態
+              if (payload.new && payload.new.uid === user.id) {
+                 setIsAdmin(payload.new.is_admin === true);
+              }
+          })
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'reset_requests' }, fetchData)
           .subscribe();
         return () => { supabaseClient.removeChannel(channel); };
       }
     }
-  }, [user, fetchData, supabaseClient, isMock]);
+  }, [user, fetchData, supabaseClient, isMock, checkAdminPermission]);
 
-  // 核心驗證邏輯
   const handleAuthAction = async () => {
     if (!username || !idLast4) return alert('請輸入姓名與 ID 後四碼');
     if (!supabaseClient && !isMock) return alert('系統未連線至資料庫');
@@ -242,7 +297,8 @@ export default function App() {
     if (isMock) { 
         setUser({ id: 'mock', email });
         setFormData(prev => ({ ...prev, real_name: username }));
-        setIsAdmin(true);
+        // 模擬模式預設為管理員 (方便測試)
+        setIsAdmin(true); 
         setLoading(false);
         return;
     }
@@ -263,7 +319,6 @@ export default function App() {
                 return;
             }
 
-            // 註冊時將資料帶入 Metadata，後端 Trigger 會自動讀取並寫入 user_permissions
             const { data, error } = await supabaseClient.auth.signUp({
                 email,
                 password,
@@ -279,7 +334,32 @@ export default function App() {
             if (error) throw error;
             
             if (data.user) {
-                alert(`註冊成功！系統將自動建立您的資料。`);
+                // 註冊後的寫入策略：Update First (針對 Trigger) -> Insert Fallback
+                const permissionPayload = {
+                    user_name: finalUsername,
+                    id_last4: finalIdLast4,
+                    email: email,
+                    is_admin: false,
+                    is_disabled: false
+                };
+
+                // 1. 嘗試 UPDATE (如果 Trigger 已經建立了空資料)
+                const { error: updateError, data: updatedData } = await supabaseClient
+                    .from('user_permissions')
+                    .update(permissionPayload)
+                    .eq('uid', data.user.id)
+                    .select();
+
+                // 2. 如果 UPDATE 沒有更新到任何資料 (updatedData 為空)，則執行 INSERT
+                if (!updatedData || updatedData.length === 0) {
+                     await supabaseClient.from('user_permissions').insert([{
+                        uid: data.user.id,
+                        ...permissionPayload,
+                        created_at: new Date().toISOString()
+                     }]);
+                }
+
+                alert(`註冊成功！資料已建立。`);
                 if (data.session) {
                     setUser(data.user);
                     setFormData(prev => ({ ...prev, real_name: finalUsername }));
@@ -437,6 +517,22 @@ export default function App() {
     alert('需串接後端 API 建立 Auth 用戶');
   };
 
+  // 管理者切換用戶狀態
+  const handleToggleUserStatus = async (uid: string, currentStatus: boolean) => {
+    if (!supabaseClient) return;
+    await supabaseClient.from('user_permissions').update({ is_disabled: !currentStatus }).eq('uid', uid);
+    fetchData();
+  };
+
+  // 管理者處理重設請求
+  const handleResetAction = async (id: string, action: 'approve' | 'reject') => {
+    if (!supabaseClient) return;
+    const status = action === 'approve' ? 'completed' : 'rejected';
+    await supabaseClient.from('reset_requests').update({ status }).eq('id', id);
+    if (action === 'approve') alert("已標記為完成。請手動通知用戶新密碼。");
+    fetchData();
+  };
+
   const filteredAdminNotes = useMemo(() => {
     return notes.filter(n => (!filterLoc || n.activity_location === filterLoc));
   }, [notes, filterLoc]);
@@ -491,6 +587,7 @@ export default function App() {
          <div className="flex items-center gap-4">
             <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center border border-white/30 shadow-inner"><Shield className="w-7 h-7" /></div>
             <span className="font-black tracking-widest text-2xl uppercase">嗨～ {getDisplayNameOnly(user?.email)}</span>
+            {isAdmin && <span className="bg-amber-400 text-amber-900 text-xs px-2 py-1 rounded font-bold">管理者</span>}
          </div>
          <button onClick={handleLogout} className="bg-white/10 px-6 py-2 rounded-2xl font-bold">登出</button>
       </div>
@@ -574,7 +671,7 @@ export default function App() {
           </div>
         )}
 
-        {/* 3. 用戶管理 (新) */}
+        {/* 3. 用戶管理 (Admin Only) */}
         {activeTab === 'users' && isAdmin && (
           <div className="space-y-8 animate-in fade-in">
              <div className="bg-white p-6 rounded-3xl shadow-sm border border-[#E8E2D1]">
@@ -589,17 +686,16 @@ export default function App() {
              <div className="bg-white rounded-3xl shadow-sm border border-[#E8E2D1] overflow-hidden">
                 <table className="w-full text-sm text-left">
                    <thead className="bg-slate-50 text-slate-500 font-bold border-b">
-                      <tr><th className="p-4">姓名</th><th className="p-4">法名</th><th className="p-4">身份證ID</th><th className="p-4">管理員</th><th className="p-4">狀態</th><th className="p-4 text-right">報名數</th></tr>
+                      <tr><th className="p-4">姓名</th><th className="p-4">ID後4碼</th><th className="p-4">管理員</th><th className="p-4">狀態</th><th className="p-4 text-right">操作</th></tr>
                    </thead>
                    <tbody className="divide-y">
                       {allUsers.map(u => (
                          <tr key={u.id} className="hover:bg-slate-50">
                             <td className="p-4 font-bold text-[#7A2E40]">{u.user_name}</td>
-                            <td className="p-4">-</td>
                             <td className="p-4 font-mono text-slate-400">{u.id_last4}</td>
-                            <td className="p-4"><input type="checkbox" checked={u.is_admin} readOnly className="rounded" /></td>
+                            <td className="p-4">{u.is_admin ? '是' : '否'}</td>
                             <td className="p-4"><span className={`px-2 py-1 rounded text-xs font-bold ${u.is_disabled ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>{u.is_disabled ? '已停用' : '啟用中'}</span></td>
-                            <td className="p-4 text-right font-bold text-blue-600">0</td>
+                            <td className="p-4 text-right"><button onClick={()=>handleToggleUserStatus(u.uid!, u.is_disabled)} className="text-blue-500 hover:underline">{u.is_disabled ? '啟用' : '停用'}</button></td>
                          </tr>
                       ))}
                    </tbody>
@@ -613,9 +709,9 @@ export default function App() {
           <div className="space-y-12 animate-in fade-in">
              <div className="bg-[#7A2E40] p-10 rounded-[50px] flex justify-between items-center shadow-xl">
                 <h2 className="text-4xl font-black text-white">審核中心</h2>
-                <button onClick={handleExport} className="bg-white/20 text-white px-10 py-4 rounded-[30px] text-2xl font-bold border border-white/30 hover:bg-white hover:text-[#612639] transition-all">匯出名冊</button>
              </div>
              <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
+                {/* 報名審核 */}
                 {notes.filter(n => !n.is_deleted).map(n => (
                    <div key={n.id} className="bg-white p-12 rounded-[60px] shadow-lg border border-[#E8E2D1] relative overflow-hidden">
                       <div className={`absolute top-0 right-0 px-12 py-5 rounded-bl-[60px] font-black text-white text-xl ${n.audit_status === '待審核' ? 'bg-orange-500' : n.audit_status === '已通過' ? 'bg-emerald-600' : 'bg-red-600'}`}>{n.audit_status}</div>
@@ -623,6 +719,18 @@ export default function App() {
                       <div className="flex gap-4 mt-8">
                          <button onClick={()=>handleUpdateAuditStatus(n.id, '已通過')} className="flex-1 py-6 bg-emerald-50 text-emerald-700 font-black text-3xl rounded-[30px] border-4 border-emerald-600 hover:bg-emerald-600 hover:text-white transition-all">通過</button>
                          <button onClick={()=>handleUpdateAuditStatus(n.id, '不通過')} className="flex-1 py-6 bg-red-50 text-red-700 font-black text-3xl rounded-[30px] border-4 border-red-600 hover:bg-red-600 hover:text-white transition-all">駁回</button>
+                      </div>
+                   </div>
+                ))}
+                {/* 密碼重設審核 */}
+                {resetRequests.filter(r => r.status === 'pending').map(r => (
+                   <div key={r.id} className="bg-white p-12 rounded-[60px] shadow-lg border-4 border-blue-200 relative overflow-hidden">
+                      <div className="absolute top-0 right-0 px-12 py-5 rounded-bl-[60px] font-black text-white text-xl bg-blue-500">重設密碼</div>
+                      <div className="text-blue-900 font-black text-5xl mb-4">{r.user_name}</div>
+                      <div className="text-slate-400 text-2xl font-mono">ID: {r.id_last4}</div>
+                      <div className="flex gap-4 mt-8">
+                         <button onClick={()=>handleResetAction(r.id, 'approve')} className="flex-1 py-6 bg-blue-50 text-blue-700 font-black text-3xl rounded-[30px] border-4 border-blue-600 hover:bg-blue-600 hover:text-white transition-all">批准</button>
+                         <button onClick={()=>handleResetAction(r.id, 'reject')} className="flex-1 py-6 bg-slate-50 text-slate-700 font-black text-3xl rounded-[30px] border-4 border-slate-600 hover:bg-slate-600 hover:text-white transition-all">拒絕</button>
                       </div>
                    </div>
                 ))}
@@ -702,12 +810,6 @@ export default function App() {
                     <div className="flex gap-2 shrink-0"><input className="flex-1 p-4 border-4 rounded-2xl text-xl font-bold min-w-0" disabled={!mgmtSelectedOpt} value={newContent} onChange={e=>setNewContent(e.target.value)} /><button onClick={handleAddHierarchy} className="bg-[#7A2E40] text-white p-4 rounded-2xl shrink-0" disabled={!mgmtSelectedOpt}><Plus/></button></div>
                     <div className="max-h-96 overflow-y-auto space-y-2">{hierarchyData.filter(h=>h.location===mgmtSelectedLoc && h.activity===mgmtSelectedAct && h.option===mgmtSelectedOpt && h.content).map(h => <div key={h.id} className="p-4 rounded-2xl text-xl font-bold flex justify-between shadow-sm border border-[#F2ECE4]"><span>{h.content}</span><button onClick={()=>handleDeleteHierarchy(h.id, null)}><Trash2 className="w-5 h-5 text-red-300"/></button></div>)}</div>
                  </div>
-              </div>
-              
-              {/* SQL 權限修復指令區 */}
-              <div className="mt-16 bg-slate-900 p-8 rounded-[40px] font-mono text-sm text-green-400 overflow-x-auto">
-                 <h4 className="text-white font-bold mb-4 flex items-center gap-2"><AlertTriangle className="text-yellow-500"/> 資料庫權限修復指令 (若無法寫入請在 Supabase SQL Editor 執行此段)</h4>
-                 <code>CREATE POLICY "Enable all access for authenticated users" ON "public"."user_permissions" FOR ALL TO authenticated USING (auth.uid() = uid) WITH CHECK (auth.uid() = uid);</code>
               </div>
            </div>
         )}
