@@ -269,6 +269,7 @@ export default function App() {
 
     try {
         if (authMode === 'login') {
+            // --- 登入邏輯 ---
             if (!password) { setLoading(false); return alert('請輸入密碼'); }
             const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
             if (error) throw error;
@@ -292,7 +293,7 @@ export default function App() {
                     uid: data.user.id,
                     email: email,
                     user_name: username,
-                    id_last4: idLast4,
+                    id_last4: idLast4,   // <--- 關鍵寫入欄位
                     is_admin: false,
                     is_disabled: false,
                     created_at: new Date().toISOString()
