@@ -10,11 +10,11 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v25.0 (ID寫入變數隔離與強制檢查版)
+ * 系統版本：v25.1 (RLS 權限迴避與自動補檔版)
  * 修正說明：
- * 1. 變數隔離：在 handleAuthAction 開頭鎖定 finalIdLast4，防止寫入錯誤變數。
- * 2. 寫入檢查：確保寫入 payload 中的 id_last4 絕對有值。
- * 3. 成功提示：註冊成功後彈窗顯示實際寫入的 ID，方便除錯。
+ * 1. 註冊邏輯調整：將資料存入 User Metadata，若無 Session 則不強行寫入 DB，避免 RLS 錯誤。
+ * 2. 自動補檔機制：在用戶登入後 (useEffect)，自動檢查並從 Metadata 補寫入 user_permissions。
+ * 3. 確保資料安全落地，即使重新整理頁面也能正確補寫。
  */
 
 // --- 主色系設定 ---
@@ -133,20 +133,17 @@ export default function App() {
   const [loading, setLoading] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<string>('bulletin');
 
-  // 資料狀態
   const [notes, setNotes] = useState<Note[]>([]);
   const [bulletins, setBulletins] = useState<Bulletin[]>([]);
   const [hierarchyData, setHierarchyData] = useState<ActivityHierarchy[]>([]);
   const [allUsers, setAllUsers] = useState<UserPermission[]>([]);
   const [resetRequests, setResetRequests] = useState<ResetRequest[]>([]);
 
-  // 登入狀態
   const [username, setUsername] = useState<string>('');
   const [idLast4, setIdLast4] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [authMode, setAuthMode] = useState<'login'|'signup'|'forgot'>('login');
   
-  // 表單狀態
   const [minStartDate, setMinStartDate] = useState<string>('');
   const [formData, setFormData] = useState({
     real_name: '', dharma_name: '', registrant_type: '目前上禪修班學員', registration_option: '新增',
@@ -158,7 +155,6 @@ export default function App() {
     stay_start_date: '', stay_end_date: ''
   });
 
-  // 管理介面狀態
   const [newBulletin, setNewBulletin] = useState<string>('');
   const [newLocation, setNewLocation] = useState<string>('');
   const [newActivity, setNewActivity] = useState<string>('');
@@ -172,7 +168,6 @@ export default function App() {
 
   const [MOCK_DATA, setMOCK_DATA] = useState<any>({ bulletins: [], hierarchy: [], notes: [] });
 
-  // 1. SDK 初始化
   useEffect(() => {
     const loadSupabase = () => {
       const script = document.createElement('script');
@@ -198,13 +193,8 @@ export default function App() {
     setMinStartDate(now.toISOString().slice(0, 16));
   }, []);
 
-  // 2. 資料同步
   const fetchData = useCallback(async () => {
-    if (isMock) { 
-      setBulletins([{ id: '1', content: "🎉 歡迎使用學員登記系統 (展示模式)", created_at: new Date().toISOString() }]);
-      setHierarchyData([{ id: '1', location: "中台", activity: "三日禪修", option: "一般行程", content: null }]);
-      return; 
-    }
+    if (isMock) return;
     if (!supabaseClient) return;
     try {
       const { data: bData } = await supabaseClient.from('bulletins').select('*').order('created_at', { ascending: false });
@@ -248,7 +238,7 @@ export default function App() {
       if (!isMock && supabaseClient) {
         const email = user.email;
         
-        // 自動補檔檢查
+        // 自動補檔檢查：如果登入後發現 user_permissions 沒資料，自動補寫
         const metaName = user.user_metadata?.user_name;
         const metaId4 = user.user_metadata?.id_last4;
         if (metaName && metaId4) {
@@ -269,7 +259,6 @@ export default function App() {
     }
   }, [user, fetchData, supabaseClient, isMock]);
 
-  // 3. 核心：身份驗證與註冊邏輯分流 (修正重點：變數隔離與寫入確認)
   const handleAuthAction = async () => {
     if (!username || !idLast4) return alert('請輸入姓名與 ID 後四碼');
     if (!supabaseClient && !isMock) return alert('系統未連線至資料庫');
@@ -300,51 +289,28 @@ export default function App() {
         } else if (authMode === 'signup') {
             if (!password) { setLoading(false); return alert('請設定密碼'); }
             
-            // 1. Supabase Auth 註冊
+            // 1. 執行註冊 (關鍵：寫入 user_metadata)
             const { data, error } = await supabaseClient.auth.signUp({
                 email,
                 password,
                 options: { 
                   data: { 
                     user_name: finalUsername, 
-                    id_last4: finalIdLast4, // Metadata
+                    id_last4: finalIdLast4,
                     full_name: finalUsername 
                   } 
                 }
             });
             if (error) throw error;
             
-            // 2. 寫入 user_permissions 表 (強制使用 final 變數)
-            if (data.user) {
-                const permissionPayload = {
-                    uid: data.user.id,
-                    email: email,
-                    user_name: finalUsername,
-                    id_last4: finalIdLast4,   // <--- 這裡使用鎖定的變數
-                    is_admin: false,
-                    is_disabled: false,
-                    created_at: new Date().toISOString()
-                };
-
-                console.log("[Debug] Payload:", permissionPayload);
-
-                // 嘗試寫入 (UPSERT)
-                const { error: upsertError } = await supabaseClient
-                    .from('user_permissions')
-                    .upsert(permissionPayload, { onConflict: 'uid' });
-
-                if (upsertError) {
-                    console.error("Upsert Failed:", upsertError);
-                    alert(`資料寫入異常：${upsertError.message}`);
-                } else {
-                    alert(`註冊成功！系統已寫入 ID：${finalIdLast4}`); // 讓使用者確認
-                    if (data.session) {
-                        setUser(data.user);
-                        setFormData(prev => ({ ...prev, real_name: finalUsername }));
-                    } else {
-                        alert('請檢查信箱並點擊驗證連結。');
-                    }
-                }
+            // 2. 嘗試寫入 (如果已有 Session 則立即寫入，否則等待 Email 驗證後登入觸發 Auto-Sync)
+            if (data.user && data.session) {
+                await ensureUserPermission(data.user, finalUsername, finalIdLast4);
+                alert('註冊成功！已自動登入。');
+                setUser(data.user);
+                setFormData(prev => ({ ...prev, real_name: finalUsername }));
+            } else {
+                alert('註冊成功！但因需驗證信箱，資料尚未寫入資料庫。\n\n請至信箱收取驗證信，點擊連結登入後，系統將自動建立您的資料。');
             }
 
         } else if (authMode === 'forgot') {
