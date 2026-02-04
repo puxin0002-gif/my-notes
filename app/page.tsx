@@ -10,11 +10,11 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v25.2 (ID寫入查詢更新版)
+ * 系統版本：v25.3 (延遲強制寫入版)
  * 修正說明：
- * 1. 寫入策略：先 SELECT 檢查，若存在則 UPDATE，不存在則 INSERT。
- * 2. 這是解決 DB Trigger 預設值覆蓋問題的最穩定解法。
- * 3. 增加寫入後的 Alert 確認，確保資料正確送出。
+ * 1. 寫入策略調整：註冊後等待 1000ms，讓 DB Trigger 先跑完。
+ * 2. 優先執行 UPDATE：覆蓋 Trigger 產生的預設亂碼 ID。
+ * 3. 確保使用者輸入的 1111 能正確保存。
  */
 
 // --- 主色系設定 ---
@@ -225,59 +225,49 @@ export default function App() {
     } catch (err) { }
   }, [supabaseClient, isMock]);
 
-  // 獨立抽出的寫入函式 (核心修正：先查詢再更新)
+  // 獨立抽出的寫入函式 (核心修正：延遲後優先 UPDATE)
   const ensureUserPermission = async (currentUser: any, name: string, id4: string) => {
     if (!supabaseClient || !currentUser) return;
     
-    const targetId = id4; // 鎖定變數
+    // 1. 等待 1000ms，讓 DB Trigger 先跑完 (若有的話)
+    console.log("[Debug] Waiting for DB Trigger...");
+    await new Promise(r => setTimeout(r, 1000));
+    
+    const targetId = id4; 
+    console.log(`[Debug] Writing permission for ${currentUser.email}, Target ID4: ${targetId}`);
 
-    console.log(`[Debug] Checking permission for UID: ${currentUser.id}, Target ID4: ${targetId}`);
-
-    // 1. 先查詢
-    const { data: existing, error: fetchError } = await supabaseClient
+    // 2. 優先嘗試 UPDATE (覆蓋 Trigger 的預設值)
+    const { data: updated, error: updateError } = await supabaseClient
         .from('user_permissions')
-        .select('id')
+        .update({
+            user_name: name,
+            id_last4: targetId, // 強制覆蓋
+            email: currentUser.email
+        })
         .eq('uid', currentUser.id)
-        .maybeSingle();
+        .select();
 
-    if (fetchError) {
-        console.error("Fetch Error:", fetchError);
+    if (!updateError && updated && updated.length > 0) {
+        console.log("[Debug] Update success (Overwrote trigger data):", updated);
         return;
     }
 
-    if (existing) {
-        // 2a. 若存在 -> 更新 (覆蓋可能錯誤的 Trigger 值)
-        console.log("[Debug] User exists, forcing UPDATE.");
-        const { error: updateError } = await supabaseClient
-            .from('user_permissions')
-            .update({
-                user_name: name,
-                id_last4: targetId, // 強制寫入
-                email: currentUser.email
-            })
-            .eq('id', existing.id);
+    // 3. 如果 UPDATE 失敗 (代表沒資料)，則執行 INSERT
+    console.log("[Debug] No existing row found, executing INSERT...");
+    const { error: insertError } = await supabaseClient
+        .from('user_permissions')
+        .insert([{
+            uid: currentUser.id,
+            email: currentUser.email,
+            user_name: name,
+            id_last4: targetId,
+            is_admin: false,
+            is_disabled: false,
+            created_at: new Date().toISOString()
+        }]);
         
-        if (updateError) console.error("Update Failed:", updateError);
-        else console.log("[Debug] Update Success.");
-
-    } else {
-        // 2b. 若不存在 -> 新增
-        console.log("[Debug] User not found, executing INSERT.");
-        const { error: insertError } = await supabaseClient
-            .from('user_permissions')
-            .insert([{
-                uid: currentUser.id,
-                email: currentUser.email,
-                user_name: name,
-                id_last4: targetId,
-                is_admin: false,
-                is_disabled: false,
-                created_at: new Date().toISOString()
-            }]);
-            
-        if (insertError) console.error("Insert Failed:", insertError);
-        else console.log("[Debug] Insert Success.");
-    }
+    if (insertError) console.error("Insert failed:", insertError);
+    else console.log("[Debug] Insert Success.");
   };
 
   useEffect(() => {
@@ -286,7 +276,7 @@ export default function App() {
       if (!isMock && supabaseClient) {
         const email = user.email;
         
-        // 自動補檔
+        // 自動補檔檢查
         const metaName = user.user_metadata?.user_name;
         const metaId4 = user.user_metadata?.id_last4;
         if (metaName && metaId4) {
@@ -335,7 +325,6 @@ export default function App() {
         } else if (authMode === 'signup') {
             if (!password) { setLoading(false); return alert('請設定密碼'); }
             
-            // 註冊前提示
             if(!confirm(`確認註冊資料：\n姓名：${finalUsername}\nID後4碼：${finalIdLast4}\n\n請確認無誤後送出。`)) {
                 setLoading(false);
                 return;
@@ -355,7 +344,7 @@ export default function App() {
             if (error) throw error;
             
             if (data.user) {
-                // 呼叫強化版寫入函式
+                // 執行延遲寫入
                 await ensureUserPermission(data.user, finalUsername, finalIdLast4);
                 
                 alert(`註冊成功！系統已強制寫入 ID：${finalIdLast4}`);
