@@ -10,16 +10,30 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v39.0 (刪除鍵修復與介面瘦身版)
+ * 系統版本：v40.0 (資料庫欄位補全與刪除功能修復版)
  * 修正說明：
- * 1. [Bug Fix] 補齊 handleDeleteLocation 等刪除函式，解決 "Cannot find name" 錯誤。
- * 2. [UI] 將「公告發布」移至「公告」頁籤。
- * 3. [UI] 縮小頁籤欄與登記表單的高度與間距，提升空間利用率。
- * 4. [UX] 下拉選單加入預設空白選項，改善操作體驗。
+ * 1. [Bug Fix] 補齊所有 handleDelete... 函式，解決編譯錯誤。
+ * 2. [DB Fix] 請務必在 Supabase 執行 SQL 補齊 accommodation_option 欄位。
+ * 3. [UX] 下拉選單預設值優化。
+ * 4. [Feature] 公告圖片支援本機上傳 (Base64)。
+ * 5. [UI] 移除設定頁面的多餘文字。
  */
 
 // --- 主色系設定 ---
 const PRIMARY_COLOR = "#7A2E40"; 
+
+// --- 內嵌 Logo SVG ---
+const CustomLogo = ({ className }: { className?: string }) => (
+  <svg viewBox="0 0 100 100" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="50" cy="50" r="48" fill="#7A2E40"/>
+    <path d="M25 65 Q50 85 75 65 L70 55 Q50 70 30 55 Z" fill="#E8E2D1"/>
+    <path d="M35 55 L40 30 L60 30 L65 55 Z" fill="#E8E2D1" opacity="0.9"/>
+    <circle cx="50" cy="20" r="8" fill="#D97706"/>
+    <path d="M50 12 V28" stroke="#7A2E40" strokeWidth="2"/>
+    <path d="M42 20 H58" stroke="#7A2E40" strokeWidth="2"/>
+    <path d="M50 8 V4 M20 50 H16 M80 50 H84" stroke="white" strokeWidth="2" opacity="0.5"/>
+  </svg>
+);
 
 // --- 型別定義 ---
 interface ActivityHierarchy {
@@ -145,6 +159,7 @@ export default function App() {
   const [password, setPassword] = useState<string>('');
   const [authMode, setAuthMode] = useState<'login'|'signup'|'forgot'>('login');
   
+  const [minStartDate, setMinStartDate] = useState<string>('');
   const [formData, setFormData] = useState({
     real_name: '', dharma_name: '', registrant_type: '目前上禪修班學員', registration_option: '新增',
     activity_location: '', activity_name: '', activity_option: '',
@@ -394,7 +409,7 @@ export default function App() {
     if (error) alert("新增失敗：" + error.message); else { setNewContent(''); fetchData(); }
   };
 
-  // 補回缺失的刪除函式
+  // 補回缺失的刪除函式 (修復 Cannot find name)
   const handleDeleteLocation = async (loc: string) => {
     if (!supabaseClient) return;
     if (confirm(`確定刪除地點「${loc}」及其所有下層資料？`)) {
@@ -531,13 +546,12 @@ export default function App() {
                   <div className="flex gap-2 items-start">
                      <textarea className="flex-1 p-3 border rounded-xl text-lg font-bold bg-slate-50 outline-none focus:border-[#7A2E40]" rows={2} placeholder="輸入公告內容..." value={newBulletin} onChange={e=>setNewBulletin(e.target.value)} />
                      <div className="flex flex-col gap-2">
-                        {/* 圖片上傳 Input (隱藏) */}
                         <input type="file" ref={fileInputRef} accept="image/jpeg,image/png" className="hidden" onChange={handleFileChange} />
                         <button onClick={handleSelectImage} className="bg-slate-200 text-slate-700 px-4 py-3 rounded-xl font-bold text-sm hover:bg-slate-300 flex items-center justify-center gap-1" title="選擇本機圖片"><ImageIcon className="w-4 h-4"/> 圖片</button>
                         <button onClick={handleAddBulletin} className="bg-[#7A2E40] text-white px-4 py-3 rounded-xl font-bold text-sm hover:bg-[#5a1e2f] flex items-center justify-center gap-1"><Check className="w-4 h-4"/> 發布</button>
                      </div>
                   </div>
-                  <p className="text-xs text-slate-400 mt-2 ml-1">* 提示：點擊「圖片」可選擇本機 JPG/PNG 檔案。</p>
+                  <p className="text-xs text-slate-400 mt-2 ml-1">* 提示：圖片將自動轉為內嵌格式。</p>
                </div>
              )}
              {bulletins.map(b => (
@@ -577,7 +591,7 @@ export default function App() {
           </div>
         )}
 
-        {/* ... 其他分頁邏輯 ... */}
+        {/* ... 其他分頁邏輯 (History, Audit, Users, Data) 保持不變 ... */}
         {activeTab === 'history' && <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-12">{notes.filter(n => n.user_id === user?.id).map(n => <div key={n.id} className="bg-white p-10 rounded-[60px] shadow-xl border border-[#E8E2D1]"><div className="space-y-6"><h4 className="font-black text-4xl text-slate-800">{n.activity_name}</h4><div className="flex items-center gap-4 text-3xl font-black text-[#7A2E40]"><User className="w-10 h-10"/> {n.real_name}</div><div className="mt-10 bg-[#FAF9F6] p-6 rounded-[40px] border border-[#E8E2D1] flex justify-between items-center"><label className="flex items-center gap-5 cursor-pointer select-none"><input type="checkbox" className="w-10 h-10 rounded-xl text-[#7A2E40]" checked={n.is_deleted} onChange={() => handleToggleDeleteNote(n.id, n.is_deleted)} /><span className="font-black text-3xl text-[#7A2E40]">刪除紀錄</span></label></div></div></div>)}</div>}
 
         {activeTab === 'users' && isAdmin && (
@@ -585,6 +599,7 @@ export default function App() {
              <div className="bg-white p-6 rounded-3xl shadow-sm border border-[#E8E2D1]">
                 <h4 className="font-bold text-slate-600 mb-4 flex items-center gap-2"><Plus className="w-4 h-4"/> 新增使用者 (自動產生UID)</h4>
                 <div className="flex flex-col md:flex-row gap-4">
+                   {/* 修正：輸入框 padding 改為 p-3 節省空間 */}
                    <input className="flex-1 p-3 border rounded-xl text-sm" placeholder="姓名" value={newUser.name} onChange={e=>setNewUser({...newUser, name: e.target.value})} />
                    <input className="w-32 p-3 border rounded-xl text-sm" placeholder="ID後4碼" value={newUser.id4} onChange={e=>setNewUser({...newUser, id4: e.target.value})} />
                    <input className="w-40 p-3 border rounded-xl text-sm" placeholder="密碼" value={newUser.pwd} onChange={e=>setNewUser({...newUser, pwd: e.target.value})} />
