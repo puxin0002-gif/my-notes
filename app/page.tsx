@@ -10,30 +10,15 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v40.0 (資料庫欄位補全與刪除功能修復版)
+ * 系統版本：v40.1 (LOGO 圖片還原版)
  * 修正說明：
- * 1. [Bug Fix] 補齊所有 handleDelete... 函式，解決編譯錯誤。
- * 2. [DB Fix] 請務必在 Supabase 執行 SQL 補齊 accommodation_option 欄位。
- * 3. [UX] 下拉選單預設值優化。
- * 4. [Feature] 公告圖片支援本機上傳 (Base64)。
- * 5. [UI] 移除設定頁面的多餘文字。
+ * 1. [UI] 將 LOGO 改回讀取 /logo.png 檔案 (請確保 public 資料夾中有此檔案)。
+ * 2. [UI] 移除內嵌 SVG 代碼。
+ * 3. [System] 完整保留 v40.0 的所有邏輯、刪除功能與排版優化。
  */
 
 // --- 主色系設定 ---
 const PRIMARY_COLOR = "#7A2E40"; 
-
-// --- 內嵌 Logo SVG ---
-const CustomLogo = ({ className }: { className?: string }) => (
-  <svg viewBox="0 0 100 100" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
-    <circle cx="50" cy="50" r="48" fill="#7A2E40"/>
-    <path d="M25 65 Q50 85 75 65 L70 55 Q50 70 30 55 Z" fill="#E8E2D1"/>
-    <path d="M35 55 L40 30 L60 30 L65 55 Z" fill="#E8E2D1" opacity="0.9"/>
-    <circle cx="50" cy="20" r="8" fill="#D97706"/>
-    <path d="M50 12 V28" stroke="#7A2E40" strokeWidth="2"/>
-    <path d="M42 20 H58" stroke="#7A2E40" strokeWidth="2"/>
-    <path d="M50 8 V4 M20 50 H16 M80 50 H84" stroke="white" strokeWidth="2" opacity="0.5"/>
-  </svg>
-);
 
 // --- 型別定義 ---
 interface ActivityHierarchy {
@@ -111,6 +96,9 @@ const FAKE_DOMAIN = "@my-notes.com";
 const encodeName = (name: string): string => {
   try { let hex = ''; for (let i = 0; i < name.length; i++) hex += ('0000' + name.charCodeAt(i).toString(16)).slice(-4); return hex; } catch { return name; }
 };
+const decodeName = (email: string): string => {
+  try { const hex = email.split('@')[0]; let str = ''; for (let i = 0; i < hex.length; i += 4) str += String.fromCharCode(parseInt(hex.substr(i, 4), 16)); return str; } catch { return email?.split('@')[0] || ''; }
+};
 const getDisplayNameOnly = (email: string | undefined | null): string => {
   if (!email) return 'User';
   try {
@@ -119,6 +107,15 @@ const getDisplayNameOnly = (email: string | undefined | null): string => {
     for (let i = 0; i < hex.length; i += 4) str += String.fromCharCode(parseInt(hex.substr(i, 4), 16)); 
     return str.length > 4 ? str.slice(0, -4) : str;
   } catch { return email.split('@')[0]; }
+};
+const getIdLast4FromEmail = (email: string | undefined | null): string => {
+  if (!email) return '0000';
+  try {
+    const hex = email.split('@')[0]; 
+    let str = ''; 
+    for (let i = 0; i < hex.length; i += 4) str += String.fromCharCode(parseInt(hex.substr(i, 4), 16)); 
+    return str.length > 4 ? str.slice(-4) : '0000';
+  } catch { return '0000'; }
 };
 const formatDateTime = (isoString: string | undefined | null): string => {
   if (!isoString) return '-';
@@ -551,7 +548,7 @@ export default function App() {
                         <button onClick={handleAddBulletin} className="bg-[#7A2E40] text-white px-4 py-3 rounded-xl font-bold text-sm hover:bg-[#5a1e2f] flex items-center justify-center gap-1"><Check className="w-4 h-4"/> 發布</button>
                      </div>
                   </div>
-                  <p className="text-xs text-slate-400 mt-2 ml-1">* 提示：圖片將自動轉為內嵌格式。</p>
+                  <p className="text-xs text-slate-400 mt-2 ml-1">* 提示：點擊「圖片」按鈕可插入圖片網址。</p>
                </div>
              )}
              {bulletins.map(b => (
@@ -671,6 +668,12 @@ export default function App() {
                  <div className="space-y-6 min-w-0"><h4 className="font-black text-3xl border-l-[15px] border-[#7A2E40] pl-6">活動</h4><div className="flex gap-2 shrink-0"><input className="flex-1 p-3 border-4 rounded-2xl text-xl font-bold min-w-0" disabled={!mgmtSelectedLoc} value={newActivity} onChange={e=>setNewActivity(e.target.value)} /><button onClick={addActivity} className="bg-[#7A2E40] text-white p-3 rounded-2xl shrink-0" disabled={!mgmtSelectedLoc}><Plus/></button></div><div className="max-h-96 overflow-y-auto space-y-2">{adminActivities.map(a => <div key={a} onClick={()=>setMgmtSelectedAct(a)} className={`p-4 rounded-2xl text-xl font-bold cursor-pointer flex justify-between items-center ${mgmtSelectedAct === a ? 'bg-[#7A2E40] text-white' : 'bg-slate-100'}`}><span>{a}</span><button onClick={(e)=>{e.stopPropagation(); handleDeleteActivity(a)}} className={mgmtSelectedAct === a ? "text-white/80 hover:text-white" : "text-slate-400 hover:text-red-500"}><Trash2 className="w-5 h-5"/></button></div>)}</div></div>
                  <div className="space-y-6 min-w-0"><h4 className="font-black text-3xl border-l-[15px] border-[#7A2E40] pl-6">行程</h4><div className="flex gap-2 shrink-0"><input className="flex-1 p-3 border-4 rounded-2xl text-xl font-bold min-w-0" disabled={!mgmtSelectedAct} value={newOption} onChange={e=>setNewOption(e.target.value)} /><button onClick={addOption} className="bg-[#7A2E40] text-white p-3 rounded-2xl shrink-0" disabled={!mgmtSelectedAct}><Plus/></button></div><div className="max-h-96 overflow-y-auto space-y-2">{adminOptions.map(o => <div key={o} onClick={()=>setMgmtSelectedOpt(o)} className={`p-4 rounded-2xl text-xl font-bold cursor-pointer flex justify-between items-center ${mgmtSelectedOpt === o ? 'bg-[#7A2E40] text-white' : 'bg-slate-100'}`}><span>{o}</span><button onClick={(e)=>{e.stopPropagation(); handleDeleteOption(o)}} className={mgmtSelectedOpt === o ? "text-white/80 hover:text-white" : "text-slate-400 hover:text-red-500"}><Trash2 className="w-5 h-5"/></button></div>)}</div></div>
                  <div className="space-y-6 min-w-0"><h4 className="font-black text-3xl border-l-[15px] border-[#7A2E40] pl-6">內容</h4><div className="flex gap-2 shrink-0"><input className="flex-1 p-3 border-4 rounded-2xl text-xl font-bold min-w-0" disabled={!mgmtSelectedOpt} value={newContent} onChange={e=>setNewContent(e.target.value)} /><button onClick={addContent} className="bg-[#7A2E40] text-white p-3 rounded-2xl shrink-0" disabled={!mgmtSelectedOpt}><Plus/></button></div><div className="max-h-96 overflow-y-auto space-y-2">{adminContents.map(h => <div key={h.id} className="p-4 rounded-2xl text-xl font-bold flex justify-between shadow-sm border border-[#F2ECE4]"><span>{h.content}</span><button onClick={()=>handleDeleteContent(h.id)} className="text-slate-400 hover:text-red-500"><Trash2 className="w-5 h-5"/></button></div>)}</div></div>
+              </div>
+              
+              <div className="mt-16 bg-slate-900 p-8 rounded-[40px] font-mono text-sm text-green-400 overflow-x-auto">
+                 <h4 className="text-white font-bold mb-4 flex items-center gap-2"><AlertTriangle className="text-yellow-500"/> 若無法新增活動，請在 Supabase SQL Editor 執行此段指令：</h4>
+                 {/* 修正：增加 content 欄位新增指令 */}
+                 <code>ALTER TABLE "public"."activity_hierarchy" ADD COLUMN IF NOT EXISTS "content" text; CREATE POLICY "Enable all for authenticated" ON "public"."activity_hierarchy" FOR ALL TO authenticated USING (true) WITH CHECK (true);</code>
               </div>
            </div>
         )}
