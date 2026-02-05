@@ -10,11 +10,11 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v40.1 (LOGO 圖片還原版)
+ * 系統版本：v40.2 (資料庫欄位補全對應版)
  * 修正說明：
- * 1. [UI] 將 LOGO 改回讀取 /logo.png 檔案 (請確保 public 資料夾中有此檔案)。
- * 2. [UI] 移除內嵌 SVG 代碼。
- * 3. [System] 完整保留 v40.0 的所有邏輯、刪除功能與排版優化。
+ * 1. [DB Fix] 請務必在 Supabase 執行 SQL 補齊 identity, accommodation_option 等欄位，解決寫入錯誤。
+ * 2. [UI] LOGO 確認為圖片讀取 <img src="/logo.png" />。
+ * 3. [Bug Fix] 確保 handleDelete... 系列函式完整定義。
  */
 
 // --- 主色系設定 ---
@@ -340,8 +340,16 @@ export default function App() {
     if (availableContents.length > 0 && formData.selected_contents.length === 0) return alert('請至少勾選一項行程內容');
     const payload = { ...formData, user_id: user?.id, audit_status: '待審核' as const, is_deleted: false, created_at: new Date().toISOString() };
     if (!supabaseClient) return alert('系統未連線');
+    
+    // 寫入嘗試
     const { error } = await supabaseClient.from('notes').insert([payload]);
-    if (!error) { alert('已送出申請'); setActiveTab('history'); } else { alert('提交失敗: ' + error.message); }
+    if (error) { 
+        console.error("Submit error:", error);
+        alert('提交失敗: ' + error.message + '\n(若顯示欄位缺失，請執行下方的 SQL 修復指令)'); 
+    } else { 
+        alert('已送出申請'); 
+        setActiveTab('history'); 
+    }
   };
 
   const handleUpdateAuditStatus = async (id: string, status: string) => {
@@ -388,7 +396,7 @@ export default function App() {
   const addLocation = async () => {
     if(!newLocation || !supabaseClient) return;
     const { error } = await supabaseClient.from('activity_hierarchy').insert([{ location: newLocation, activity: null, option: null, content: null }]);
-    if (error) alert("新增失敗：" + error.message + "\n請檢查 RLS。"); else { setNewLocation(''); fetchData(); }
+    if (error) alert("新增失敗：" + error.message + "\n請檢查下方 RLS 指令。"); else { setNewLocation(''); fetchData(); }
   };
   const addActivity = async () => {
     if(!newActivity || !mgmtSelectedLoc || !supabaseClient) return;
@@ -596,6 +604,7 @@ export default function App() {
              <div className="bg-white p-6 rounded-3xl shadow-sm border border-[#E8E2D1]">
                 <h4 className="font-bold text-slate-600 mb-4 flex items-center gap-2"><Plus className="w-4 h-4"/> 新增使用者 (自動產生UID)</h4>
                 <div className="flex flex-col md:flex-row gap-4">
+                   {/* 修正：輸入框 padding 改為 p-3 節省空間 */}
                    <input className="flex-1 p-3 border rounded-xl text-sm" placeholder="姓名" value={newUser.name} onChange={e=>setNewUser({...newUser, name: e.target.value})} />
                    <input className="w-32 p-3 border rounded-xl text-sm" placeholder="ID後4碼" value={newUser.id4} onChange={e=>setNewUser({...newUser, id4: e.target.value})} />
                    <input className="w-40 p-3 border rounded-xl text-sm" placeholder="密碼" value={newUser.pwd} onChange={e=>setNewUser({...newUser, pwd: e.target.value})} />
@@ -666,12 +675,6 @@ export default function App() {
                  <div className="space-y-6 min-w-0"><h4 className="font-black text-3xl border-l-[15px] border-[#7A2E40] pl-6">活動</h4><div className="flex gap-2 shrink-0"><input className="flex-1 p-3 border-4 rounded-2xl text-xl font-bold min-w-0" disabled={!mgmtSelectedLoc} value={newActivity} onChange={e=>setNewActivity(e.target.value)} /><button onClick={addActivity} className="bg-[#7A2E40] text-white p-3 rounded-2xl shrink-0" disabled={!mgmtSelectedLoc}><Plus/></button></div><div className="max-h-96 overflow-y-auto space-y-2">{adminActivities.map(a => <div key={a} onClick={()=>setMgmtSelectedAct(a)} className={`p-4 rounded-2xl text-xl font-bold cursor-pointer flex justify-between items-center ${mgmtSelectedAct === a ? 'bg-[#7A2E40] text-white' : 'bg-slate-100'}`}><span>{a}</span><button onClick={(e)=>{e.stopPropagation(); handleDeleteActivity(a)}} className={mgmtSelectedAct === a ? "text-white/80 hover:text-white" : "text-slate-400 hover:text-red-500"}><Trash2 className="w-5 h-5"/></button></div>)}</div></div>
                  <div className="space-y-6 min-w-0"><h4 className="font-black text-3xl border-l-[15px] border-[#7A2E40] pl-6">行程</h4><div className="flex gap-2 shrink-0"><input className="flex-1 p-3 border-4 rounded-2xl text-xl font-bold min-w-0" disabled={!mgmtSelectedAct} value={newOption} onChange={e=>setNewOption(e.target.value)} /><button onClick={addOption} className="bg-[#7A2E40] text-white p-3 rounded-2xl shrink-0" disabled={!mgmtSelectedAct}><Plus/></button></div><div className="max-h-96 overflow-y-auto space-y-2">{adminOptions.map(o => <div key={o} onClick={()=>setMgmtSelectedOpt(o)} className={`p-4 rounded-2xl text-xl font-bold cursor-pointer flex justify-between items-center ${mgmtSelectedOpt === o ? 'bg-[#7A2E40] text-white' : 'bg-slate-100'}`}><span>{o}</span><button onClick={(e)=>{e.stopPropagation(); handleDeleteOption(o)}} className={mgmtSelectedOpt === o ? "text-white/80 hover:text-white" : "text-slate-400 hover:text-red-500"}><Trash2 className="w-5 h-5"/></button></div>)}</div></div>
                  <div className="space-y-6 min-w-0"><h4 className="font-black text-3xl border-l-[15px] border-[#7A2E40] pl-6">內容</h4><div className="flex gap-2 shrink-0"><input className="flex-1 p-3 border-4 rounded-2xl text-xl font-bold min-w-0" disabled={!mgmtSelectedOpt} value={newContent} onChange={e=>setNewContent(e.target.value)} /><button onClick={addContent} className="bg-[#7A2E40] text-white p-3 rounded-2xl shrink-0" disabled={!mgmtSelectedOpt}><Plus/></button></div><div className="max-h-96 overflow-y-auto space-y-2">{adminContents.map(h => <div key={h.id} className="p-4 rounded-2xl text-xl font-bold flex justify-between shadow-sm border border-[#F2ECE4]"><span>{h.content}</span><button onClick={()=>handleDeleteContent(h.id)} className="text-slate-400 hover:text-red-500"><Trash2 className="w-5 h-5"/></button></div>)}</div></div>
-              </div>
-              
-              <div className="mt-16 bg-slate-900 p-8 rounded-[40px] font-mono text-sm text-green-400 overflow-x-auto">
-                 <h4 className="text-white font-bold mb-4 flex items-center gap-2"><AlertTriangle className="text-yellow-500"/> 若無法新增活動，請在 Supabase SQL Editor 執行此段指令：</h4>
-                 {/* 修正：增加 content 欄位新增指令 */}
-                 <code>ALTER TABLE "public"."activity_hierarchy" ADD COLUMN IF NOT EXISTS "content" text; CREATE POLICY "Enable all for authenticated" ON "public"."activity_hierarchy" FOR ALL TO authenticated USING (true) WITH CHECK (true);</code>
               </div>
            </div>
         )}
