@@ -10,11 +10,12 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v40.2 (資料庫欄位補全對應版)
+ * 系統版本：v40.3 (欄位補全與函式名稱修復版)
  * 修正說明：
- * 1. [DB Fix] 請務必在 Supabase 執行 SQL 補齊 identity, accommodation_option 等欄位，解決寫入錯誤。
- * 2. [UI] LOGO 確認為圖片讀取 <img src="/logo.png" />。
- * 3. [Bug Fix] 確保 handleDelete... 系列函式完整定義。
+ * 1. [DB Fix] 請務必在 Supabase 執行 SQL 補齊 identity, other_remarks 等欄位。
+ * 2. [Bug Fix] 修正 JSX 中呼叫的函式名稱 (toggleDeleteNote -> handleToggleDeleteNote)。
+ * 3. [Bug Fix] 確保 handleDeleteLocation 等所有刪除函式皆已定義且位置正確。
+ * 4. [UI] LOGO 維持圖片讀取 <img src="/logo.png" />。
  */
 
 // --- 主色系設定 ---
@@ -345,7 +346,7 @@ export default function App() {
     const { error } = await supabaseClient.from('notes').insert([payload]);
     if (error) { 
         console.error("Submit error:", error);
-        alert('提交失敗: ' + error.message + '\n(若顯示欄位缺失，請執行下方的 SQL 修復指令)'); 
+        alert('提交失敗: ' + error.message + '\n(請務必執行 SQL 修復指令)'); 
     } else { 
         alert('已送出申請'); 
         setActiveTab('history'); 
@@ -596,7 +597,7 @@ export default function App() {
           </div>
         )}
 
-        {/* ... 其他分頁邏輯 (History, Audit, Users, Data) 保持不變 ... */}
+        {/* ... 其他分頁邏輯 (History, Audit, Users, Data) ... */}
         {activeTab === 'history' && <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-12">{notes.filter(n => n.user_id === user?.id).map(n => <div key={n.id} className="bg-white p-10 rounded-[60px] shadow-xl border border-[#E8E2D1]"><div className="space-y-6"><h4 className="font-black text-4xl text-slate-800">{n.activity_name}</h4><div className="flex items-center gap-4 text-3xl font-black text-[#7A2E40]"><User className="w-10 h-10"/> {n.real_name}</div><div className="mt-10 bg-[#FAF9F6] p-6 rounded-[40px] border border-[#E8E2D1] flex justify-between items-center"><label className="flex items-center gap-5 cursor-pointer select-none"><input type="checkbox" className="w-10 h-10 rounded-xl text-[#7A2E40]" checked={n.is_deleted} onChange={() => handleToggleDeleteNote(n.id, n.is_deleted)} /><span className="font-black text-3xl text-[#7A2E40]">刪除紀錄</span></label></div></div></div>)}</div>}
 
         {activeTab === 'users' && isAdmin && (
@@ -604,7 +605,6 @@ export default function App() {
              <div className="bg-white p-6 rounded-3xl shadow-sm border border-[#E8E2D1]">
                 <h4 className="font-bold text-slate-600 mb-4 flex items-center gap-2"><Plus className="w-4 h-4"/> 新增使用者 (自動產生UID)</h4>
                 <div className="flex flex-col md:flex-row gap-4">
-                   {/* 修正：輸入框 padding 改為 p-3 節省空間 */}
                    <input className="flex-1 p-3 border rounded-xl text-sm" placeholder="姓名" value={newUser.name} onChange={e=>setNewUser({...newUser, name: e.target.value})} />
                    <input className="w-32 p-3 border rounded-xl text-sm" placeholder="ID後4碼" value={newUser.id4} onChange={e=>setNewUser({...newUser, id4: e.target.value})} />
                    <input className="w-40 p-3 border rounded-xl text-sm" placeholder="密碼" value={newUser.pwd} onChange={e=>setNewUser({...newUser, pwd: e.target.value})} />
@@ -675,6 +675,12 @@ export default function App() {
                  <div className="space-y-6 min-w-0"><h4 className="font-black text-3xl border-l-[15px] border-[#7A2E40] pl-6">活動</h4><div className="flex gap-2 shrink-0"><input className="flex-1 p-3 border-4 rounded-2xl text-xl font-bold min-w-0" disabled={!mgmtSelectedLoc} value={newActivity} onChange={e=>setNewActivity(e.target.value)} /><button onClick={addActivity} className="bg-[#7A2E40] text-white p-3 rounded-2xl shrink-0" disabled={!mgmtSelectedLoc}><Plus/></button></div><div className="max-h-96 overflow-y-auto space-y-2">{adminActivities.map(a => <div key={a} onClick={()=>setMgmtSelectedAct(a)} className={`p-4 rounded-2xl text-xl font-bold cursor-pointer flex justify-between items-center ${mgmtSelectedAct === a ? 'bg-[#7A2E40] text-white' : 'bg-slate-100'}`}><span>{a}</span><button onClick={(e)=>{e.stopPropagation(); handleDeleteActivity(a)}} className={mgmtSelectedAct === a ? "text-white/80 hover:text-white" : "text-slate-400 hover:text-red-500"}><Trash2 className="w-5 h-5"/></button></div>)}</div></div>
                  <div className="space-y-6 min-w-0"><h4 className="font-black text-3xl border-l-[15px] border-[#7A2E40] pl-6">行程</h4><div className="flex gap-2 shrink-0"><input className="flex-1 p-3 border-4 rounded-2xl text-xl font-bold min-w-0" disabled={!mgmtSelectedAct} value={newOption} onChange={e=>setNewOption(e.target.value)} /><button onClick={addOption} className="bg-[#7A2E40] text-white p-3 rounded-2xl shrink-0" disabled={!mgmtSelectedAct}><Plus/></button></div><div className="max-h-96 overflow-y-auto space-y-2">{adminOptions.map(o => <div key={o} onClick={()=>setMgmtSelectedOpt(o)} className={`p-4 rounded-2xl text-xl font-bold cursor-pointer flex justify-between items-center ${mgmtSelectedOpt === o ? 'bg-[#7A2E40] text-white' : 'bg-slate-100'}`}><span>{o}</span><button onClick={(e)=>{e.stopPropagation(); handleDeleteOption(o)}} className={mgmtSelectedOpt === o ? "text-white/80 hover:text-white" : "text-slate-400 hover:text-red-500"}><Trash2 className="w-5 h-5"/></button></div>)}</div></div>
                  <div className="space-y-6 min-w-0"><h4 className="font-black text-3xl border-l-[15px] border-[#7A2E40] pl-6">內容</h4><div className="flex gap-2 shrink-0"><input className="flex-1 p-3 border-4 rounded-2xl text-xl font-bold min-w-0" disabled={!mgmtSelectedOpt} value={newContent} onChange={e=>setNewContent(e.target.value)} /><button onClick={addContent} className="bg-[#7A2E40] text-white p-3 rounded-2xl shrink-0" disabled={!mgmtSelectedOpt}><Plus/></button></div><div className="max-h-96 overflow-y-auto space-y-2">{adminContents.map(h => <div key={h.id} className="p-4 rounded-2xl text-xl font-bold flex justify-between shadow-sm border border-[#F2ECE4]"><span>{h.content}</span><button onClick={()=>handleDeleteContent(h.id)} className="text-slate-400 hover:text-red-500"><Trash2 className="w-5 h-5"/></button></div>)}</div></div>
+              </div>
+              
+              <div className="mt-16 bg-slate-900 p-8 rounded-[40px] font-mono text-sm text-green-400 overflow-x-auto">
+                 <h4 className="text-white font-bold mb-4 flex items-center gap-2"><AlertTriangle className="text-yellow-500"/> 若無法新增活動，請在 Supabase SQL Editor 執行此段指令：</h4>
+                 {/* 修正：增加 content 欄位新增指令 */}
+                 <code>ALTER TABLE "public"."activity_hierarchy" ADD COLUMN IF NOT EXISTS "content" text; CREATE POLICY "Enable all for authenticated" ON "public"."activity_hierarchy" FOR ALL TO authenticated USING (true) WITH CHECK (true);</code>
               </div>
            </div>
         )}
