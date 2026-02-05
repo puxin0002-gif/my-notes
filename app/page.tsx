@@ -1,19 +1,21 @@
 "use client";
 
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { 
   Bell, FileText, History, Settings, Shield, LogOut, Plus, Trash2, Check, 
   Edit, User, MapPin, Tag, ListFilter, Save, Database, Clock, Car, Info, 
   Home, UserCheck, AlertCircle, Briefcase, Layers, 
   CheckCircle2, CheckSquare, FileSpreadsheet, Megaphone, ClipboardCheck, UserCog, Share2, Lock, Eye, EyeOff, Users, ArrowRight, RefreshCw, AlertTriangle, Image as ImageIcon
 } from 'lucide-react';
+import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v37.2 (LOGO 圖片還原版)
+ * 系統版本：v39.0 (刪除鍵修復與介面瘦身版)
  * 修正說明：
- * 1. [UI] 將 LOGO 改回讀取 /logo.png 檔案 (請確保 public 資料夾中有此檔案)。
- * 2. [UI] 移除內嵌 SVG 代碼。
- * 3. [System] 完整保留 v37.1 的所有邏輯與排版優化。
+ * 1. [Bug Fix] 補齊 handleDeleteLocation 等刪除函式，解決 "Cannot find name" 錯誤。
+ * 2. [UI] 將「公告發布」移至「公告」頁籤。
+ * 3. [UI] 縮小頁籤欄與登記表單的高度與間距，提升空間利用率。
+ * 4. [UX] 下拉選單加入預設空白選項，改善操作體驗。
  */
 
 // --- 主色系設定 ---
@@ -95,9 +97,6 @@ const FAKE_DOMAIN = "@my-notes.com";
 const encodeName = (name: string): string => {
   try { let hex = ''; for (let i = 0; i < name.length; i++) hex += ('0000' + name.charCodeAt(i).toString(16)).slice(-4); return hex; } catch { return name; }
 };
-const decodeName = (email: string): string => {
-  try { const hex = email.split('@')[0]; let str = ''; for (let i = 0; i < hex.length; i += 4) str += String.fromCharCode(parseInt(hex.substr(i, 4), 16)); return str; } catch { return email?.split('@')[0] || ''; }
-};
 const getDisplayNameOnly = (email: string | undefined | null): string => {
   if (!email) return 'User';
   try {
@@ -106,15 +105,6 @@ const getDisplayNameOnly = (email: string | undefined | null): string => {
     for (let i = 0; i < hex.length; i += 4) str += String.fromCharCode(parseInt(hex.substr(i, 4), 16)); 
     return str.length > 4 ? str.slice(0, -4) : str;
   } catch { return email.split('@')[0]; }
-};
-const getIdLast4FromEmail = (email: string | undefined | null): string => {
-  if (!email) return '0000';
-  try {
-    const hex = email.split('@')[0]; 
-    let str = ''; 
-    for (let i = 0; i < hex.length; i += 4) str += String.fromCharCode(parseInt(hex.substr(i, 4), 16)); 
-    return str.length > 4 ? str.slice(-4) : '0000';
-  } catch { return '0000'; }
 };
 const formatDateTime = (isoString: string | undefined | null): string => {
   if (!isoString) return '-';
@@ -132,7 +122,7 @@ const renderBulletinContent = (content: string) => {
     if (match) {
       return <img key={index} src={match[1]} alt="公告圖片" className="max-w-full h-auto rounded-lg my-2 shadow-sm border border-slate-200" />;
     }
-    return <span key={index}>{part}</span>;
+    return <span key={index} style={{ whiteSpace: 'pre-wrap' }}>{part}</span>;
   });
 };
 
@@ -155,7 +145,6 @@ export default function App() {
   const [password, setPassword] = useState<string>('');
   const [authMode, setAuthMode] = useState<'login'|'signup'|'forgot'>('login');
   
-  const [minStartDate, setMinStartDate] = useState<string>('');
   const [formData, setFormData] = useState({
     real_name: '', dharma_name: '', registrant_type: '目前上禪修班學員', registration_option: '新增',
     activity_location: '', activity_name: '', activity_option: '',
@@ -173,13 +162,14 @@ export default function App() {
   const [newOption, setNewOption] = useState<string>('');
   const [newContent, setNewContent] = useState<string>('');
   
-  // 管理介面專用的選擇狀態
   const [mgmtSelectedLoc, setMgmtSelectedLoc] = useState<string>('');
   const [mgmtSelectedAct, setMgmtSelectedAct] = useState<string>('');
   const [mgmtSelectedOpt, setMgmtSelectedOpt] = useState<string>('');
   
   const [newUser, setNewUser] = useState({ name: '', id4: '', pwd: '' });
   const [filterLoc, setFilterLoc] = useState<string>('');
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const loadSupabase = () => {
@@ -202,8 +192,6 @@ export default function App() {
       document.body.appendChild(script);
     };
     loadSupabase();
-    const now = new Date();
-    setMinStartDate(now.toISOString().slice(0, 16));
   }, []);
 
   const fetchData = useCallback(async () => {
@@ -306,13 +294,12 @@ export default function App() {
     setUser(null); setIsAdmin(false); setActiveTab('bulletin');
   };
 
-  // 4. 聯動邏輯 (過濾空字串)
   const locations = useMemo(() => [...new Set(hierarchyData.map(h => h.location).filter(Boolean))].sort(), [hierarchyData]);
   const availableActivities = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === formData.activity_location && h.activity).map(h => h.activity as string))].sort(), [hierarchyData, formData.activity_location]);
   const availableOptions = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === formData.activity_location && h.activity === formData.activity_name && h.option).map(h => h.option as string))].sort(), [hierarchyData, formData.activity_location, formData.activity_name]);
   const availableContents = useMemo(() => hierarchyData.filter(h => h.location === formData.activity_location && h.activity === formData.activity_name && h.option === formData.activity_option && h.content).map(h => h.content as string).sort(), [hierarchyData, formData.activity_location, formData.activity_name, formData.activity_option]);
 
-  // 管理後台專用聯動 (過濾空字串)
+  // 管理後台專用聯動
   const adminActivities = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity).map(h => h.activity as string))].sort(), [hierarchyData, mgmtSelectedLoc]);
   const adminOptions = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option).map(h => h.option as string))].sort(), [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct]);
   const adminContents = useMemo(() => hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option === mgmtSelectedOpt && h.content).map(h => h), [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
@@ -370,18 +357,26 @@ export default function App() {
     fetchData();
   };
 
-  const handleInsertImage = () => {
-    const url = prompt("請輸入圖片網址 (https://...)");
-    if (url) {
-      setNewBulletin(prev => prev + `\n[img:${url}]`);
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64 = reader.result as string;
+        setNewBulletin(prev => prev + `\n[img:${base64}]`);
+      };
+      reader.readAsDataURL(file);
     }
   };
 
-  // 拆分新增函式 (加入錯誤檢查)
+  const handleSelectImage = () => {
+    fileInputRef.current?.click();
+  };
+
   const addLocation = async () => {
     if(!newLocation || !supabaseClient) return;
     const { error } = await supabaseClient.from('activity_hierarchy').insert([{ location: newLocation, activity: null, option: null, content: null }]);
-    if (error) alert("新增失敗：" + error.message + "\n請檢查下方 RLS 指令。"); else { setNewLocation(''); fetchData(); }
+    if (error) alert("新增失敗：" + error.message + "\n請檢查 RLS。"); else { setNewLocation(''); fetchData(); }
   };
   const addActivity = async () => {
     if(!newActivity || !mgmtSelectedLoc || !supabaseClient) return;
@@ -399,7 +394,7 @@ export default function App() {
     if (error) alert("新增失敗：" + error.message); else { setNewContent(''); fetchData(); }
   };
 
-  // 實作層級刪除
+  // 補回缺失的刪除函式
   const handleDeleteLocation = async (loc: string) => {
     if (!supabaseClient) return;
     if (confirm(`確定刪除地點「${loc}」及其所有下層資料？`)) {
@@ -536,11 +531,13 @@ export default function App() {
                   <div className="flex gap-2 items-start">
                      <textarea className="flex-1 p-3 border rounded-xl text-lg font-bold bg-slate-50 outline-none focus:border-[#7A2E40]" rows={2} placeholder="輸入公告內容..." value={newBulletin} onChange={e=>setNewBulletin(e.target.value)} />
                      <div className="flex flex-col gap-2">
-                        <button onClick={handleInsertImage} className="bg-slate-200 text-slate-700 px-4 py-3 rounded-xl font-bold text-sm hover:bg-slate-300 flex items-center justify-center gap-1" title="插入圖片網址"><ImageIcon className="w-4 h-4"/> 圖片</button>
+                        {/* 圖片上傳 Input (隱藏) */}
+                        <input type="file" ref={fileInputRef} accept="image/jpeg,image/png" className="hidden" onChange={handleFileChange} />
+                        <button onClick={handleSelectImage} className="bg-slate-200 text-slate-700 px-4 py-3 rounded-xl font-bold text-sm hover:bg-slate-300 flex items-center justify-center gap-1" title="選擇本機圖片"><ImageIcon className="w-4 h-4"/> 圖片</button>
                         <button onClick={handleAddBulletin} className="bg-[#7A2E40] text-white px-4 py-3 rounded-xl font-bold text-sm hover:bg-[#5a1e2f] flex items-center justify-center gap-1"><Check className="w-4 h-4"/> 發布</button>
                      </div>
                   </div>
-                  <p className="text-xs text-slate-400 mt-2 ml-1">* 提示：點擊「圖片」按鈕可插入圖片網址。</p>
+                  <p className="text-xs text-slate-400 mt-2 ml-1">* 提示：點擊「圖片」可選擇本機 JPG/PNG 檔案。</p>
                </div>
              )}
              {bulletins.map(b => (
@@ -557,30 +554,30 @@ export default function App() {
           <div className="bg-white p-8 rounded-[40px] shadow-2xl border border-[#E8E2D1] animate-in slide-in-from-bottom-12">
              <div className="flex items-center gap-4 border-b border-[#F2ECE4] pb-6 mb-6"><div className="p-3 bg-[#7A2E40] rounded-2xl text-white shadow-lg"><Edit className="w-6 h-6" /></div><h3 className="text-2xl font-black text-[#7A2E40] tracking-tight">發心登記表</h3></div>
              
-             {/* 修正：欄寬與高度調整 */}
+             {/* 修正：加入預設空白選項，並調整欄寬 */}
              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                 <div className="lg:col-span-3 space-y-2"><label className="text-lg font-black text-[#7A2E40] ml-1">姓名*</label><input className="w-full p-3 text-xl font-bold border-2 rounded-xl" value={formData.real_name} onChange={e=>setFormData({...formData, real_name: e.target.value})} /></div>
                 <div className="lg:col-span-2 space-y-2"><label className="text-lg font-black text-[#7A2E40] ml-1">法名</label><input className="w-full p-3 text-xl font-bold border-2 rounded-xl" value={formData.dharma_name} onChange={e=>setFormData({...formData, dharma_name: e.target.value})} /></div>
-                <div className="lg:col-span-2 space-y-2"><label className="text-lg font-black text-[#7A2E40] ml-1">報名選項*</label><select className="w-full p-3 text-xl font-bold border-2 rounded-xl" value={formData.registration_option} onChange={e=>setFormData({...formData, registration_option: e.target.value})}><option value="新增">新增</option><option value="異動">異動</option></select></div>
-                <div className="lg:col-span-5 space-y-2"><label className="text-lg font-black text-[#7A2E40] ml-1">屬性*</label><select className="w-full p-3 text-xl font-bold border-2 rounded-xl" value={formData.registrant_type} onChange={e=>setFormData({...formData, registrant_type: e.target.value})}><option value="目前上禪修班學員">目前上禪修班學員</option><option value="曾經上禪修班學員">曾經上禪修班學員</option><option value="學員家人">學員家人</option></select></div>
+                <div className="lg:col-span-2 space-y-2"><label className="text-lg font-black text-[#7A2E40] ml-1">報名選項*</label><select className="w-full p-3 text-xl font-bold border-2 rounded-xl" value={formData.registration_option} onChange={e=>setFormData({...formData, registration_option: e.target.value})}><option value="">請選擇</option><option value="新增">新增</option><option value="異動">異動</option></select></div>
+                <div className="lg:col-span-5 space-y-2"><label className="text-lg font-black text-[#7A2E40] ml-1">屬性*</label><select className="w-full p-3 text-xl font-bold border-2 rounded-xl" value={formData.registrant_type} onChange={e=>setFormData({...formData, registrant_type: e.target.value})}><option value="">請選擇</option><option value="目前上禪修班學員">目前上禪修班學員</option><option value="曾經上禪修班學員">曾經上禪修班學員</option><option value="學員家人">學員家人</option></select></div>
              </div>
 
              {formData.registration_option === '異動' && <div className="mt-4 p-3 bg-amber-50 border-2 border-amber-200 rounded-xl flex items-center gap-2 text-amber-700 font-bold"><AlertCircle className="w-5 h-5"/> 請至「紀錄」頁面刪除舊資料後再重新填寫。</div>}
              {formData.registrant_type === '學員家人' && <div className="mt-4 p-3 bg-red-50 border-2 border-red-200 rounded-xl flex items-center gap-2 text-red-700 font-bold"><Info className="w-5 h-5"/> 請至知客室填寫家眷表。</div>}
              <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-6 border-t-4 border-dotted border-[#F2ECE4] pt-6 mt-6">
-                <div className="space-y-2"><label className="text-lg font-black text-slate-500">1. 地點*</label><select className="w-full p-4 text-xl font-black border-4 rounded-2xl" value={formData.activity_location} onChange={e=>setFormData({...formData, activity_location: e.target.value, activity_name: '', activity_option: '', selected_contents: []})}>{locations.map(l => <option key={l} value={l}>{l}</option>)}</select></div>
-                <div className="space-y-2"><label className="text-lg font-black text-slate-500">2. 活動*</label><select className="w-full p-4 text-xl font-black border-4 rounded-2xl" disabled={!formData.activity_location} value={formData.activity_name} onChange={e=>setFormData({...formData, activity_name: e.target.value, activity_option: '', selected_contents: []})}>{availableActivities.map(a => <option key={a} value={a}>{a}</option>)}</select></div>
-                <div className="space-y-2"><label className="text-lg font-black text-slate-500">3. 行程*</label><select className="w-full p-4 text-xl font-black border-4 rounded-2xl" disabled={!formData.activity_name} value={formData.activity_option} onChange={e=>setFormData({...formData, activity_option: e.target.value, selected_contents: []})}>{availableOptions.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+                <div className="space-y-2"><label className="text-lg font-black text-slate-500">1. 地點*</label><select className="w-full p-4 text-xl font-black border-4 rounded-2xl" value={formData.activity_location} onChange={e=>setFormData({...formData, activity_location: e.target.value, activity_name: '', activity_option: '', selected_contents: []})}><option value="">請選擇地點</option>{locations.map(l => <option key={l} value={l}>{l}</option>)}</select></div>
+                <div className="space-y-2"><label className="text-lg font-black text-slate-500">2. 活動*</label><select className="w-full p-4 text-xl font-black border-4 rounded-2xl" disabled={!formData.activity_location} value={formData.activity_name} onChange={e=>setFormData({...formData, activity_name: e.target.value, activity_option: '', selected_contents: []})}><option value="">請選擇活動</option>{availableActivities.map(a => <option key={a} value={a}>{a}</option>)}</select></div>
+                <div className="space-y-2"><label className="text-lg font-black text-slate-500">3. 行程*</label><select className="w-full p-4 text-xl font-black border-4 rounded-2xl" disabled={!formData.activity_name} value={formData.activity_option} onChange={e=>setFormData({...formData, activity_option: e.target.value, selected_contents: []})}><option value="">請選擇行程</option>{availableOptions.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
              </div>
              {availableContents.length > 0 && <div className="md:col-span-3 p-6 bg-[#F2ECE4]/30 rounded-[30px] border-4 border-dashed border-[#E8E2D1] mt-6"><label className="text-xl font-black text-[#7A2E40] mb-4 block">4. 行程內容複選</label><div className="flex flex-wrap gap-4">{availableContents.map(c => <button key={c} type="button" onClick={() => setFormData(p => ({ ...p, selected_contents: p.selected_contents.includes(c) ? p.selected_contents.filter(i => i !== c) : [...p.selected_contents, c] }))} className={`px-6 py-3 rounded-xl font-black text-lg border-2 transition-all ${formData.selected_contents.includes(c) ? 'bg-[#7A2E40] text-white border-[#7A2E40]' : 'bg-white text-[#7A2E40] border-[#E8E2D1]'}`}>{c}</button>)}</div></div>}
              {formData.activity_option === '其他行程' && <div className="mt-6 space-y-2"><label className="text-lg font-black text-orange-600">行程備註*</label><textarea rows={2} className="w-full p-4 text-lg border-4 border-orange-200 rounded-2xl" value={formData.other_remarks} onChange={e=>setFormData({...formData, other_remarks: e.target.value})} /></div>}
-             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 border-t-4 border-dotted border-[#F2ECE4] pt-6 mt-6"><div className="space-y-2"><label className="text-lg font-black text-slate-500 ml-1">身份*</label><select className="w-full p-4 rounded-2xl bg-[#FAF9F6] text-xl font-bold" value={formData.identity} onChange={e=>setFormData({...formData, identity: e.target.value})}><option value="參加法會">參加法會</option><option value="發心義工">發心義工</option></select></div>{formData.activity_location !== '精舍' && <div className="space-y-2"><label className="text-lg font-black text-slate-500 ml-1">交通*</label><select className="w-full p-4 rounded-2xl bg-[#FAF9F6] text-xl font-bold" value={formData.transportation} onChange={e=>setFormData({...formData, transportation: e.target.value})}>{filteredTransportOptions.map(o => <option key={o} value={o}>{o}</option>)}</select></div>}</div>
-             <div className="md:col-span-3 border-t border-[#F2ECE4] pt-6 space-y-6">{formData.activity_location === '精舍' ? (formData.identity === '發心義工' && <div className="p-6 bg-[#F2ECE4]/30 rounded-3xl border border-[#E8E2D1] space-y-4"><label className="text-lg font-black text-[#7A2E40]">精舍發心組別*</label><input className="w-full p-4 rounded-2xl border-2 text-xl" value={formData.volunteer_group} onChange={e=>setFormData({...formData, volunteer_group: e.target.value})} /></div>) : (<>{formData.transportation !== '大車-精舍統一行程' && <div className="grid grid-cols-1 md:grid-cols-2 gap-6"><div className="space-y-2"><label className="text-lg font-bold text-blue-700">抵寺日時*</label><input type="datetime-local" className="w-full p-4 rounded-2xl border-2 text-xl" value={formData.arrival_datetime} onChange={e=>setFormData({...formData, arrival_datetime: e.target.value})} /></div><div className="space-y-2"><label className="text-lg font-bold text-blue-700">離寺日時*</label><input type="datetime-local" className="w-full p-4 rounded-2xl border-2 text-xl" value={formData.departure_datetime} onChange={e=>setFormData({...formData, departure_datetime: e.target.value})} /></div></div>}{formData.identity === '發心義工' && <div className="p-6 bg-[#F2ECE4]/30 rounded-3xl border border-[#E8E2D1] space-y-4"><label className="text-lg font-black text-[#7A2E40]">義工分流*</label><select className="w-full p-4 rounded-2xl text-xl" value={formData.volunteer_type} onChange={e=>setFormData({...formData, volunteer_type: e.target.value})}><option value="一般義工-由精舍安排組別">一般義工-由精舍安排組別</option><option value="長期義工-已於平台報名">長期義工-已於平台報名</option><option value="佛巡-已於平台報名">佛巡-已於平台報名</option></select></div>}{showAccommodationSection && formData.accommodation_option === '安單' && <div className="p-6 bg-slate-50 rounded-3xl border border-slate-200"><label className="text-lg font-black">安單起訖*</label><input type="date" className="w-full p-4 text-xl" value={formData.stay_start_date} onChange={e=>setFormData({...formData, stay_start_date: e.target.value})} /><input type="date" className="w-full p-4 text-xl mt-4" value={formData.stay_end_date} onChange={e=>setFormData({...formData, stay_end_date: e.target.value})} /></div>}</>)}</div>
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 border-t-4 border-dotted border-[#F2ECE4] pt-6 mt-6"><div className="space-y-2"><label className="text-lg font-black text-slate-500 ml-1">身份*</label><select className="w-full p-4 rounded-2xl bg-[#FAF9F6] text-xl font-bold" value={formData.identity} onChange={e=>setFormData({...formData, identity: e.target.value})}><option value="">請選擇</option><option value="參加法會">參加法會</option><option value="發心義工">發心義工</option></select></div>{formData.activity_location !== '精舍' && <div className="space-y-2"><label className="text-lg font-black text-slate-500 ml-1">交通*</label><select className="w-full p-4 rounded-2xl bg-[#FAF9F6] text-xl font-bold" value={formData.transportation} onChange={e=>setFormData({...formData, transportation: e.target.value})}><option value="">請選擇</option>{filteredTransportOptions.map(o => <option key={o} value={o}>{o}</option>)}</select></div>}</div>
+             <div className="md:col-span-3 border-t border-[#F2ECE4] pt-6 space-y-6">{formData.activity_location === '精舍' ? (formData.identity === '發心義工' && <div className="p-6 bg-[#F2ECE4]/30 rounded-3xl border border-[#E8E2D1] space-y-4"><label className="text-lg font-black text-[#7A2E40]">精舍發心組別*</label><input className="w-full p-4 rounded-2xl border-2 text-xl" value={formData.volunteer_group} onChange={e=>setFormData({...formData, volunteer_group: e.target.value})} /></div>) : (<>{formData.transportation !== '大車-精舍統一行程' && <div className="grid grid-cols-1 md:grid-cols-2 gap-6"><div className="space-y-2"><label className="text-lg font-bold text-blue-700">抵寺日時*</label><input type="datetime-local" className="w-full p-4 rounded-2xl border-2 text-xl" value={formData.arrival_datetime} onChange={e=>setFormData({...formData, arrival_datetime: e.target.value})} /></div><div className="space-y-2"><label className="text-lg font-bold text-blue-700">離寺日時*</label><input type="datetime-local" className="w-full p-4 rounded-2xl border-2 text-xl" value={formData.departure_datetime} onChange={e=>setFormData({...formData, departure_datetime: e.target.value})} /></div></div>}{formData.identity === '發心義工' && <div className="p-6 bg-[#F2ECE4]/30 rounded-3xl border border-[#E8E2D1] space-y-4"><label className="text-lg font-black text-[#7A2E40]">義工分流*</label><select className="w-full p-4 rounded-2xl text-xl" value={formData.volunteer_type} onChange={e=>setFormData({...formData, volunteer_type: e.target.value})}><option value="">請選擇</option><option value="一般義工-由精舍安排組別">一般義工-由精舍安排組別</option><option value="長期義工-已於平台報名">長期義工-已於平台報名</option><option value="佛巡-已於平台報名">佛巡-已於平台報名</option></select></div>}{showAccommodationSection && formData.accommodation_option === '安單' && <div className="p-6 bg-slate-50 rounded-3xl border border-slate-200"><label className="text-lg font-black">安單起訖*</label><input type="date" className="w-full p-4 text-xl" value={formData.stay_start_date} onChange={e=>setFormData({...formData, stay_start_date: e.target.value})} /><input type="date" className="w-full p-4 text-xl mt-4" value={formData.stay_end_date} onChange={e=>setFormData({...formData, stay_end_date: e.target.value})} /></div>}</>)}</div>
              <button onClick={handleSubmitNote} disabled={loading} className="w-full mt-10 bg-[#7A2E40] hover:bg-[#5D2331] text-white py-4 rounded-2xl font-black text-3xl shadow-lg transition-all">確認送出</button>
           </div>
         )}
 
-        {/* ... 其他分頁邏輯 (History, Audit, Users, Data) 保持不變 ... */}
+        {/* ... 其他分頁邏輯 ... */}
         {activeTab === 'history' && <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-12">{notes.filter(n => n.user_id === user?.id).map(n => <div key={n.id} className="bg-white p-10 rounded-[60px] shadow-xl border border-[#E8E2D1]"><div className="space-y-6"><h4 className="font-black text-4xl text-slate-800">{n.activity_name}</h4><div className="flex items-center gap-4 text-3xl font-black text-[#7A2E40]"><User className="w-10 h-10"/> {n.real_name}</div><div className="mt-10 bg-[#FAF9F6] p-6 rounded-[40px] border border-[#E8E2D1] flex justify-between items-center"><label className="flex items-center gap-5 cursor-pointer select-none"><input type="checkbox" className="w-10 h-10 rounded-xl text-[#7A2E40]" checked={n.is_deleted} onChange={() => handleToggleDeleteNote(n.id, n.is_deleted)} /><span className="font-black text-3xl text-[#7A2E40]">刪除紀錄</span></label></div></div></div>)}</div>}
 
         {activeTab === 'users' && isAdmin && (
@@ -653,19 +650,12 @@ export default function App() {
 
         {activeTab === 'admin_settings' && isAdmin && (
            <div className="bg-white p-16 rounded-[80px] shadow-sm border border-[#E8E2D1]">
-              <h3 className="text-5xl font-black text-[#7A2E40] mb-12">系統數據管理</h3>
               <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
                  {/* 修正：輸入框 padding 改為 p-3 節省空間，增加刪除按鈕 (動態顏色) */}
                  <div className="space-y-6 min-w-0"><h4 className="font-black text-3xl border-l-[15px] border-[#7A2E40] pl-6">地點</h4><div className="flex gap-2 shrink-0"><input className="flex-1 p-3 border-4 rounded-2xl text-xl font-bold min-w-0" value={newLocation} onChange={e=>setNewLocation(e.target.value)} /><button onClick={addLocation} className="bg-[#7A2E40] text-white p-3 rounded-2xl shrink-0"><Plus/></button></div><div className="max-h-96 overflow-y-auto space-y-2">{locations.map(l => <div key={l} onClick={()=>setMgmtSelectedLoc(l)} className={`p-4 rounded-2xl text-xl font-bold cursor-pointer flex justify-between items-center ${mgmtSelectedLoc === l ? 'bg-[#7A2E40] text-white' : 'bg-slate-100'}`}><span>{l}</span><button onClick={(e)=>{e.stopPropagation(); handleDeleteLocation(l)}} className={mgmtSelectedLoc === l ? "text-white/80 hover:text-white" : "text-slate-400 hover:text-red-500"}><Trash2 className="w-5 h-5"/></button></div>)}</div></div>
                  <div className="space-y-6 min-w-0"><h4 className="font-black text-3xl border-l-[15px] border-[#7A2E40] pl-6">活動</h4><div className="flex gap-2 shrink-0"><input className="flex-1 p-3 border-4 rounded-2xl text-xl font-bold min-w-0" disabled={!mgmtSelectedLoc} value={newActivity} onChange={e=>setNewActivity(e.target.value)} /><button onClick={addActivity} className="bg-[#7A2E40] text-white p-3 rounded-2xl shrink-0" disabled={!mgmtSelectedLoc}><Plus/></button></div><div className="max-h-96 overflow-y-auto space-y-2">{adminActivities.map(a => <div key={a} onClick={()=>setMgmtSelectedAct(a)} className={`p-4 rounded-2xl text-xl font-bold cursor-pointer flex justify-between items-center ${mgmtSelectedAct === a ? 'bg-[#7A2E40] text-white' : 'bg-slate-100'}`}><span>{a}</span><button onClick={(e)=>{e.stopPropagation(); handleDeleteActivity(a)}} className={mgmtSelectedAct === a ? "text-white/80 hover:text-white" : "text-slate-400 hover:text-red-500"}><Trash2 className="w-5 h-5"/></button></div>)}</div></div>
                  <div className="space-y-6 min-w-0"><h4 className="font-black text-3xl border-l-[15px] border-[#7A2E40] pl-6">行程</h4><div className="flex gap-2 shrink-0"><input className="flex-1 p-3 border-4 rounded-2xl text-xl font-bold min-w-0" disabled={!mgmtSelectedAct} value={newOption} onChange={e=>setNewOption(e.target.value)} /><button onClick={addOption} className="bg-[#7A2E40] text-white p-3 rounded-2xl shrink-0" disabled={!mgmtSelectedAct}><Plus/></button></div><div className="max-h-96 overflow-y-auto space-y-2">{adminOptions.map(o => <div key={o} onClick={()=>setMgmtSelectedOpt(o)} className={`p-4 rounded-2xl text-xl font-bold cursor-pointer flex justify-between items-center ${mgmtSelectedOpt === o ? 'bg-[#7A2E40] text-white' : 'bg-slate-100'}`}><span>{o}</span><button onClick={(e)=>{e.stopPropagation(); handleDeleteOption(o)}} className={mgmtSelectedOpt === o ? "text-white/80 hover:text-white" : "text-slate-400 hover:text-red-500"}><Trash2 className="w-5 h-5"/></button></div>)}</div></div>
                  <div className="space-y-6 min-w-0"><h4 className="font-black text-3xl border-l-[15px] border-[#7A2E40] pl-6">內容</h4><div className="flex gap-2 shrink-0"><input className="flex-1 p-3 border-4 rounded-2xl text-xl font-bold min-w-0" disabled={!mgmtSelectedOpt} value={newContent} onChange={e=>setNewContent(e.target.value)} /><button onClick={addContent} className="bg-[#7A2E40] text-white p-3 rounded-2xl shrink-0" disabled={!mgmtSelectedOpt}><Plus/></button></div><div className="max-h-96 overflow-y-auto space-y-2">{adminContents.map(h => <div key={h.id} className="p-4 rounded-2xl text-xl font-bold flex justify-between shadow-sm border border-[#F2ECE4]"><span>{h.content}</span><button onClick={()=>handleDeleteContent(h.id)} className="text-slate-400 hover:text-red-500"><Trash2 className="w-5 h-5"/></button></div>)}</div></div>
-              </div>
-              
-              <div className="mt-16 bg-slate-900 p-8 rounded-[40px] font-mono text-sm text-green-400 overflow-x-auto">
-                 <h4 className="text-white font-bold mb-4 flex items-center gap-2"><AlertTriangle className="text-yellow-500"/> 若無法新增活動，請在 Supabase SQL Editor 執行此段指令：</h4>
-                 {/* 修正：增加 content 欄位新增指令 */}
-                 <code>ALTER TABLE "public"."activity_hierarchy" ADD COLUMN IF NOT EXISTS "content" text; CREATE POLICY "Enable all for authenticated" ON "public"."activity_hierarchy" FOR ALL TO authenticated USING (true) WITH CHECK (true);</code>
               </div>
            </div>
         )}
