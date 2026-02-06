@@ -10,12 +10,11 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v44.0 (TypeScript修復與資料庫相容版)
+ * 系統版本：v44.2 (資料表結構標籤更新版)
  * 修正說明：
- * 1. [Fix] 修正 adminContents 型別錯誤，確保 id 屬性可讀取。
- * 2. [Fix] 補齊 handleDelete... 系列函式與 handleToggleDeleteNote。
- * 3. [Logic] 增加 sanitizeFormData 函式，送出前將空日期轉為 null。
- * 4. [UI] LOGO 使用 <img src="/logo.png" />。
+ * 1. [UI] 更新 DB_SCHEMA 的中文標籤 (Label) 以符合用戶附圖要求 (如：自訂行程備註、義工選項、發心開始/結束)。
+ * 2. [UI] 從 DB_SCHEMA 顯示列表中移除 audit_status 與 admin_memo 欄位。
+ * 3. [System] 保持所有功能與資料庫寫入邏輯不變。
  */
 
 // --- 主色系設定 ---
@@ -85,34 +84,32 @@ interface ResetRequest {
   created_at: string;
 }
 
-// 資料庫欄位結構定義 (用於顯示)
+// 資料庫欄位結構定義 (修正屬性名稱 key -> name, 更新中文標籤, 移除 audit_status/admin_memo)
 const DB_SCHEMA = [
-  { name: 'id', type: 'uuid', required: '系統自動 (PK)' },
-  { name: 'user_id', type: 'uuid', required: '系統自動 (FK)' },
-  { name: 'real_name', type: 'text', required: '必填' },
-  { name: 'dharma_name', type: 'text', required: '選填' },
-  { name: 'registrant_type', type: 'text', required: '必填 (預設)' },
-  { name: 'registration_option', type: 'text', required: '必填 (預設)' },
-  { name: 'activity_location', type: 'text', required: '必填' },
-  { name: 'activity_name', type: 'text', required: '必填' },
-  { name: 'activity_option', type: 'text', required: '必填' },
-  { name: 'selected_contents', type: 'text[]', required: '選填' },
-  { name: 'other_remarks', type: 'text', required: '選填' },
-  { name: 'identity', type: 'text', required: '必填' },
-  { name: 'volunteer_type', type: 'text', required: '選填' },
-  { name: 'transportation', type: 'text', required: '選填' },
-  { name: 'arrival_datetime', type: 'text (date)', required: '選填' },
-  { name: 'departure_datetime', type: 'text (date)', required: '選填' },
-  { name: 'volunteer_group', type: 'text', required: '選填' },
-  { name: 'start_date', type: 'text (date)', required: '選填' },
-  { name: 'end_date', type: 'text (date)', required: '選填' },
-  { name: 'accommodation_option', type: 'text', required: '選填' },
-  { name: 'stay_start_date', type: 'text (date)', required: '選填' },
-  { name: 'stay_end_date', type: 'text (date)', required: '選填' },
-  { name: 'is_deleted', type: 'boolean', required: '系統預設' },
-  { name: 'audit_status', type: 'text', required: '系統預設' },
-  { name: 'admin_memo', type: 'text', required: '選填' },
-  { name: 'created_at', type: 'timestamp', required: '系統自動' },
+  { name: 'id', label: '流水號', type: '唯一碼 (UUID)', required: '系統自動 (PK)' },
+  { name: 'user_id', label: '用戶ID', type: '唯一碼 (UUID)', required: '系統自動 (FK)' },
+  { name: 'real_name', label: '姓名', type: '文字', required: '必填' },
+  { name: 'dharma_name', label: '法名', type: '文字', required: '選填' },
+  { name: 'registrant_type', label: '屬性', type: '文字', required: '必填 (預設)' },
+  { name: 'registration_option', label: '報名選項', type: '文字', required: '必填 (預設)' },
+  { name: 'activity_location', label: '活動地點', type: '文字', required: '必填' },
+  { name: 'activity_name', label: '活動名稱', type: '文字', required: '必填' },
+  { name: 'activity_option', label: '活動行程', type: '文字', required: '必填' },
+  { name: 'selected_contents', label: '勾選內容', type: '文字陣列', required: '選填' },
+  { name: 'other_remarks', label: '自訂行程備註', type: '文字', required: '選填' },
+  { name: 'identity', label: '身分', type: '文字', required: '必填' },
+  { name: 'volunteer_type', label: '義工選項', type: '文字', required: '選填' },
+  { name: 'transportation', label: '交通', type: '文字', required: '選填' },
+  { name: 'arrival_datetime', label: '抵寺時間', type: '文字(日期)', required: '選填' },
+  { name: 'departure_datetime', label: '離寺時間', type: '文字(日期)', required: '選填' },
+  { name: 'volunteer_group', label: '義工組別', type: '文字', required: '選填' },
+  { name: 'start_date', label: '發心開始', type: '文字(日期)', required: '選填' },
+  { name: 'end_date', label: '發心結束', type: '文字(日期)', required: '選填' },
+  { name: 'accommodation_option', label: '安單選項', type: '文字', required: '選填' },
+  { name: 'stay_start_date', label: '安單開始', type: '文字(日期)', required: '選填' },
+  { name: 'stay_end_date', label: '安單結束', type: '文字(日期)', required: '選填' },
+  { name: 'is_deleted', label: '是否刪除', type: '布林值', required: '系統預設' },
+  { name: 'created_at', label: '建立時間', type: '時間戳', required: '系統自動' },
 ];
 
 declare global {
@@ -189,7 +186,7 @@ export default function App() {
   
   const [minStartDate, setMinStartDate] = useState<string>('');
   
-  // Form State: 初始化為空字串，以受控元件方式運作
+  // Form State
   const [formData, setFormData] = useState({
     real_name: '', dharma_name: '', registrant_type: '目前上禪修班學員', registration_option: '新增',
     activity_location: '', activity_name: '', activity_option: '',
@@ -339,7 +336,6 @@ export default function App() {
     setUser(null); setIsAdmin(false); setActiveTab('bulletin');
   };
 
-  // 4. 聯動邏輯
   const locations = useMemo(() => [...new Set(hierarchyData.map(h => h.location).filter(Boolean))].sort(), [hierarchyData]);
   const availableActivities = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === formData.activity_location && h.activity).map(h => h.activity as string))].sort(), [hierarchyData, formData.activity_location]);
   const availableOptions = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === formData.activity_location && h.activity === formData.activity_name && h.option).map(h => h.option as string))].sort(), [hierarchyData, formData.activity_location, formData.activity_name]);
@@ -348,7 +344,8 @@ export default function App() {
   // 管理後台專用聯動
   const adminActivities = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity).map(h => h.activity as string))].sort(), [hierarchyData, mgmtSelectedLoc]);
   const adminOptions = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option).map(h => h.option as string))].sort(), [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct]);
-  const adminContents = useMemo(() => hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option === mgmtSelectedOpt && h.content).map(h => h), [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
+  // 修正：確保回傳的是物件陣列，以便 JSX 可以讀取 .id
+  const adminContents = useMemo(() => hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option === mgmtSelectedOpt && h.content), [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
 
   const filteredTransportOptions = useMemo(() => {
     const all = ["大車-精舍統一行程", "小車-自訂抵離寺", "自行前往-自訂抵離寺"];
@@ -369,32 +366,26 @@ export default function App() {
     return formData.volunteer_type === '一般義工-由精舍安排組別';
   }, [formData]);
 
-  // 資料淨化：送出前將空字串轉為 null
-  const sanitizeFormData = (data: typeof formData) => {
-    return {
-      ...data,
-      arrival_datetime: data.arrival_datetime || null,
-      departure_datetime: data.departure_datetime || null,
-      start_date: data.start_date || null,
-      end_date: data.end_date || null,
-      stay_start_date: data.stay_start_date || null,
-      stay_end_date: data.stay_end_date || null,
-    };
-  };
+  // 日期淨化函式：將空字串轉為 null
+  const sanitizeDate = (dateStr: string | null | undefined) => (dateStr && dateStr.trim() !== '') ? dateStr : null;
 
   const handleSubmitNote = async () => {
     if (!formData.real_name || !formData.activity_location || !formData.activity_name) return alert('請填寫必填欄位');
     if (availableContents.length > 0 && formData.selected_contents.length === 0) return alert('請至少勾選一項行程內容');
     
     // 執行資料淨化
-    const cleanData = sanitizeFormData(formData);
-    
     const payload = { 
-        ...cleanData, 
+        ...formData, 
         user_id: user?.id, 
         audit_status: '待審核' as const, 
         is_deleted: false, 
-        created_at: new Date().toISOString() 
+        created_at: new Date().toISOString(),
+        start_date: sanitizeDate(formData.start_date),
+        end_date: sanitizeDate(formData.end_date),
+        stay_start_date: sanitizeDate(formData.stay_start_date),
+        stay_end_date: sanitizeDate(formData.stay_end_date),
+        arrival_datetime: sanitizeDate(formData.arrival_datetime),
+        departure_datetime: sanitizeDate(formData.departure_datetime)
     };
 
     if (!supabaseClient) return alert('系統未連線');
@@ -570,7 +561,7 @@ export default function App() {
              {authMode !== 'forgot' && (<div><label className="text-xs font-bold text-slate-400 ml-1">密碼</label><input className="w-full p-3 rounded-xl border border-slate-200 focus:border-[#7A2E40] outline-none bg-slate-50 transition-all text-sm" type="password" value={password} onChange={e=>setPassword(e.target.value)} /></div>)}
           </div>
 
-          <button onClick={handleAuthAction} className="w-full bg-[#D97706] hover:bg-[#B45309] text-white py-3 rounded-xl font-bold shadow-md transition-all active:scale-95 flex justify-center items-center gap-2">
+          <button onClick={handleAuthAction} className="w-full bg-[#D97706] hover:bg-[#B45309] text-white py-3 rounded-xl font-bold shadow-md transition-all active:scale-95 flex justify-center items-center gap-2" style={{ backgroundColor: PRIMARY_COLOR }}>
              {authMode === 'login' ? '登入系統' : authMode === 'signup' ? '立即註冊' : '送出申請'} <ArrowRight className="w-4 h-4" />
           </button>
           
@@ -600,7 +591,6 @@ export default function App() {
            ))}
         </div>
 
-        {/* 1. 公告頁 (包含發布功能) */}
         {activeTab === 'bulletin' && (
           <div className="space-y-8 animate-in fade-in">
              {isAdmin && (
@@ -627,7 +617,6 @@ export default function App() {
           </div>
         )}
 
-        {/* 2. 登記表單 */}
         {activeTab === 'form' && (
           <div className="bg-white p-8 rounded-[40px] shadow-2xl border border-[#E8E2D1] animate-in slide-in-from-bottom-12">
              <div className="flex items-center gap-4 border-b border-[#F2ECE4] pb-6 mb-6"><div className="p-3 bg-[#7A2E40] rounded-2xl text-white shadow-lg" style={{ backgroundColor: PRIMARY_COLOR }}><Edit className="w-6 h-6" /></div><h3 className="text-2xl font-black text-[#7A2E40] tracking-tight">發心登記表</h3></div>
@@ -648,9 +637,9 @@ export default function App() {
                 <div className="space-y-2"><label className="text-lg font-black text-slate-500">3. 行程*</label><select className="w-full p-4 text-xl font-black border-4 rounded-2xl" disabled={!formData.activity_name} value={formData.activity_option} onChange={e=>setFormData({...formData, activity_option: e.target.value, selected_contents: []})}><option value="">請選擇行程</option>{availableOptions.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
              </div>
              {availableContents.length > 0 && <div className="md:col-span-3 p-6 bg-[#F2ECE4]/30 rounded-[30px] border-4 border-dashed border-[#E8E2D1] mt-6"><label className="text-xl font-black text-[#7A2E40] mb-4 block">4. 行程內容複選</label><div className="flex flex-wrap gap-4">{availableContents.map(c => <button key={c} type="button" onClick={() => setFormData(p => ({ ...p, selected_contents: p.selected_contents.includes(c) ? p.selected_contents.filter(i => i !== c) : [...p.selected_contents, c] }))} className={`px-6 py-3 rounded-xl font-black text-lg border-2 transition-all ${formData.selected_contents.includes(c) ? 'bg-[#7A2E40] text-white border-[#7A2E40]' : 'bg-white text-[#7A2E40] border-[#E8E2D1]'}`}>{c}</button>)}</div></div>}
-             {formData.activity_option === '其他行程' && <div className="mt-6 space-y-2"><label className="text-lg font-black text-orange-600">行程備註</label><textarea rows={2} className="w-full p-4 text-lg border-4 border-orange-200 rounded-2xl" value={formData.other_remarks} onChange={e=>setFormData({...formData, other_remarks: e.target.value})} /></div>}
-             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 border-t-4 border-dotted border-[#F2ECE4] pt-6 mt-6"><div className="space-y-2"><label className="text-lg font-black text-slate-500 ml-1">身份*</label><select className="w-full p-4 rounded-2xl bg-[#FAF9F6] text-xl font-bold" value={formData.identity} onChange={e=>setFormData({...formData, identity: e.target.value})}><option value="">請選擇</option><option value="參加法會">參加法會</option><option value="發心義工">發心義工</option></select></div>{formData.activity_location !== '精舍' && <div className="space-y-2"><label className="text-lg font-black text-slate-500 ml-1">交通</label><select className="w-full p-4 rounded-2xl bg-[#FAF9F6] text-xl font-bold" value={formData.transportation} onChange={e=>setFormData({...formData, transportation: e.target.value})}><option value="">請選擇</option>{filteredTransportOptions.map(o => <option key={o} value={o}>{o}</option>)}</select></div>}</div>
-             <div className="md:col-span-3 border-t border-[#F2ECE4] pt-6 space-y-6">{formData.activity_location === '精舍' ? (formData.identity === '發心義工' && <div className="p-6 bg-[#F2ECE4]/30 rounded-3xl border border-[#E8E2D1] space-y-4"><label className="text-lg font-black text-[#7A2E40]">精舍發心組別*</label><input className="w-full p-4 rounded-2xl border-2 text-xl" value={formData.volunteer_group} onChange={e=>setFormData({...formData, volunteer_group: e.target.value})} /></div>) : (<>{formData.transportation !== '大車-精舍統一行程' && <div className="grid grid-cols-1 md:grid-cols-2 gap-6"><div className="space-y-2"><label className="text-lg font-bold text-blue-700">抵寺日時</label><input type="datetime-local" className="w-full p-4 rounded-2xl border-2 text-xl" value={formData.arrival_datetime || ''} onChange={e=>setFormData({...formData, arrival_datetime: e.target.value})} /></div><div className="space-y-2"><label className="text-lg font-bold text-blue-700">離寺日時</label><input type="datetime-local" className="w-full p-4 rounded-2xl border-2 text-xl" value={formData.departure_datetime || ''} onChange={e=>setFormData({...formData, departure_datetime: e.target.value})} /></div></div>}{formData.identity === '發心義工' && <div className="p-6 bg-[#F2ECE4]/30 rounded-3xl border border-[#E8E2D1] space-y-4"><label className="text-lg font-black text-[#7A2E40]">義工分流*</label><select className="w-full p-4 rounded-2xl text-xl" value={formData.volunteer_type} onChange={e=>setFormData({...formData, volunteer_type: e.target.value})}><option value="">請選擇</option><option value="一般義工-由精舍安排組別">一般義工-由精舍安排組別</option><option value="長期義工-已於平台報名">長期義工-已於平台報名</option><option value="佛巡-已於平台報名">佛巡-已於平台報名</option></select></div>}{showAccommodationSection && formData.accommodation_option === '安單' && <div className="p-6 bg-slate-50 rounded-3xl border border-slate-200"><label className="text-lg font-black">安單起訖*</label><input type="date" className="w-full p-4 text-xl" value={formData.stay_start_date || ''} onChange={e=>setFormData({...formData, stay_start_date: e.target.value})} /><input type="date" className="w-full p-4 text-xl mt-4" value={formData.stay_end_date || ''} onChange={e=>setFormData({...formData, stay_end_date: e.target.value})} /></div>}</>)}</div>
+             {formData.activity_option === '其他行程' && <div className="mt-6 space-y-2"><label className="text-lg font-black text-orange-600">行程備註*</label><textarea rows={2} className="w-full p-4 text-lg border-4 border-orange-200 rounded-2xl" value={formData.other_remarks} onChange={e=>setFormData({...formData, other_remarks: e.target.value})} /></div>}
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 border-t-4 border-dotted border-[#F2ECE4] pt-6 mt-6"><div className="space-y-2"><label className="text-lg font-black text-slate-500 ml-1">身份*</label><select className="w-full p-4 rounded-2xl bg-[#FAF9F6] text-xl font-bold" value={formData.identity} onChange={e=>setFormData({...formData, identity: e.target.value})}><option value="">請選擇</option><option value="參加法會">參加法會</option><option value="發心義工">發心義工</option></select></div>{formData.activity_location !== '精舍' && <div className="space-y-2"><label className="text-lg font-black text-slate-500 ml-1">交通*</label><select className="w-full p-4 rounded-2xl bg-[#FAF9F6] text-xl font-bold" value={formData.transportation} onChange={e=>setFormData({...formData, transportation: e.target.value})}><option value="">請選擇</option>{filteredTransportOptions.map(o => <option key={o} value={o}>{o}</option>)}</select></div>}</div>
+             <div className="md:col-span-3 border-t border-[#F2ECE4] pt-6 space-y-6">{formData.activity_location === '精舍' ? (formData.identity === '發心義工' && <div className="p-6 bg-[#F2ECE4]/30 rounded-3xl border border-[#E8E2D1] space-y-4"><label className="text-lg font-black text-[#7A2E40]">精舍發心組別*</label><input className="w-full p-4 rounded-2xl border-2 text-xl" value={formData.volunteer_group} onChange={e=>setFormData({...formData, volunteer_group: e.target.value})} /></div>) : (<>{formData.transportation !== '大車-精舍統一行程' && <div className="grid grid-cols-1 md:grid-cols-2 gap-6"><div className="space-y-2"><label className="text-lg font-bold text-blue-700">抵寺日時*</label><input type="datetime-local" className="w-full p-4 rounded-2xl border-2 text-xl" value={formData.arrival_datetime || ''} onChange={e=>setFormData({...formData, arrival_datetime: e.target.value})} /></div><div className="space-y-2"><label className="text-lg font-bold text-blue-700">離寺日時*</label><input type="datetime-local" className="w-full p-4 rounded-2xl border-2 text-xl" value={formData.departure_datetime || ''} onChange={e=>setFormData({...formData, departure_datetime: e.target.value})} /></div></div>}{formData.identity === '發心義工' && <div className="p-6 bg-[#F2ECE4]/30 rounded-3xl border border-[#E8E2D1] space-y-4"><label className="text-lg font-black text-[#7A2E40]">義工分流*</label><select className="w-full p-4 rounded-2xl text-xl" value={formData.volunteer_type} onChange={e=>setFormData({...formData, volunteer_type: e.target.value})}><option value="">請選擇</option><option value="一般義工-由精舍安排組別">一般義工-由精舍安排組別</option><option value="長期義工-已於平台報名">長期義工-已於平台報名</option><option value="佛巡-已於平台報名">佛巡-已於平台報名</option></select></div>}{showAccommodationSection && formData.accommodation_option === '安單' && <div className="p-6 bg-slate-50 rounded-3xl border border-slate-200"><label className="text-lg font-black">安單起訖*</label><input type="date" className="w-full p-4 text-xl" value={formData.stay_start_date || ''} onChange={e=>setFormData({...formData, stay_start_date: e.target.value})} /><input type="date" className="w-full p-4 text-xl mt-4" value={formData.stay_end_date || ''} onChange={e=>setFormData({...formData, stay_end_date: e.target.value})} /></div>}</>)}</div>
              <button onClick={handleSubmitNote} disabled={loading} className="w-full mt-10 bg-[#7A2E40] hover:bg-[#5D2331] text-white py-4 rounded-2xl font-black text-3xl shadow-lg transition-all" style={{ backgroundColor: PRIMARY_COLOR }}>確認送出</button>
           </div>
         )}
