@@ -10,15 +10,15 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v42.1 (日期Null處理與色彩微調版)
+ * 系統版本：v42.2 (日期Null處理完整版與色彩更新)
  * 修正說明：
- * 1. [DB Compat] 送出前強制檢查日期欄位，空值一律轉為 null，避免資料庫型別錯誤。
- * 2. [Design] 主色系調整為 #872234 (紅+10%, 黑+5%)。
- * 3. [UI] LOGO 維持圖片讀取 (/logo.png)。
+ * 1. [DB Compat] 送出前強制將所有日期欄位 (含 start_date/end_date) 的空值轉為 null。
+ * 2. [Design] 主色系調整為 #4f093c。
+ * 3. [UI] 移除未使用的 SVG Logo，維持圖片讀取 (/logo.png)。
  */
 
-// --- 主色系設定 (調整後：深緋紅) ---
-const PRIMARY_COLOR = "#872234"; 
+// --- 主色系設定 (調整後) ---
+const PRIMARY_COLOR = "#4f093c"; 
 
 // --- 型別定義 ---
 interface ActivityHierarchy {
@@ -345,13 +345,15 @@ export default function App() {
     if (!formData.real_name || !formData.activity_location || !formData.activity_name) return alert('請填寫必填欄位');
     if (availableContents.length > 0 && formData.selected_contents.length === 0) return alert('請至少勾選一項行程內容');
     
-    // 關鍵修正：將所有日期欄位的空字串強制轉換為 null，避免 DB 型別錯誤
+    // 關鍵修正：將所有日期欄位的空字串強制轉換為 null，並包含 start_date / end_date
     const payload = { 
         ...formData, 
         user_id: user?.id, 
         audit_status: '待審核' as const, 
         is_deleted: false, 
         created_at: new Date().toISOString(),
+        start_date: sanitizeDate(formData.start_date),
+        end_date: sanitizeDate(formData.end_date),
         stay_start_date: sanitizeDate(formData.stay_start_date),
         stay_end_date: sanitizeDate(formData.stay_end_date),
         arrival_datetime: sanitizeDate(formData.arrival_datetime),
