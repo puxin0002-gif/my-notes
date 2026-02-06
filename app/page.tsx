@@ -10,16 +10,22 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v45.0 (日期約束修復與中文顯示優化版)
+ * 系統版本：v46.0 (動態欄位管理與必填驗證版)
  * 修正說明：
- * 1. [Fix] 送出表單時移除 'audit_status' 與 'admin_memo'，交由 DB 預設處理。
- * 2. [UI] 設定頁籤的資料表結構改為顯示「中文欄位名稱」。
- * 3. [Config] DB_SCHEMA 移除管理欄位顯示。
- * 4. [Alert] 請務必執行 SQL 解除日期欄位的 Not Null 限制。
+ * 1. [Feature] 新增 field_definitions 資料表與管理介面，可動態設定必填與備註。
+ * 2. [Form] 登記表單根據 field_definitions 動態顯示必填星號 (*) 並執行驗證。
+ * 3. [Form] 新增「其他備註」欄位 (other_remarks)。
+ * 4. [UI] 優化紀錄頁籤的卡片顯示。
+ * 5. [DB] 請執行新的 SQL 指令以建立 field_definitions 表格。
  */
 
 // --- 主色系設定 ---
 const PRIMARY_COLOR = "#4f093c"; 
+
+// --- 內嵌 Logo SVG ---
+const CustomLogo = ({ className }: { className?: string }) => (
+  <img src="/logo.png" alt="Logo" className={className} />
+);
 
 // --- 型別定義 ---
 interface ActivityHierarchy {
@@ -85,32 +91,38 @@ interface ResetRequest {
   created_at: string;
 }
 
-// 資料庫欄位結構定義 (移除 audit_status 與 admin_memo，保留前台欄位)
-const DB_SCHEMA = [
-  { name: 'id', label: '流水號', type: '唯一碼 (UUID)', required: '系統自動 (PK)' },
-  { name: 'user_id', label: '用戶ID', type: '唯一碼 (UUID)', required: '系統自動 (FK)' },
-  { name: 'real_name', label: '姓名', type: '文字', required: '必填' },
-  { name: 'dharma_name', label: '法名', type: '文字', required: '選填' },
-  { name: 'registrant_type', label: '屬性', type: '文字', required: '必填 (預設)' },
-  { name: 'registration_option', label: '報名選項', type: '文字', required: '必填 (預設)' },
-  { name: 'activity_location', label: '活動地點', type: '文字', required: '必填' },
-  { name: 'activity_name', label: '活動名稱', type: '文字', required: '必填' },
-  { name: 'activity_option', label: '活動行程', type: '文字', required: '必填' },
-  { name: 'selected_contents', label: '勾選內容', type: '文字陣列', required: '選填' },
-  { name: 'other_remarks', label: '自訂行程備註', type: '文字', required: '選填' },
-  { name: 'identity', label: '身分', type: '文字', required: '必填' },
-  { name: 'volunteer_type', label: '義工選項', type: '文字', required: '選填' },
-  { name: 'transportation', label: '交通', type: '文字', required: '選填' },
-  { name: 'arrival_datetime', label: '抵寺時間', type: '文字(日期)', required: '選填' },
-  { name: 'departure_datetime', label: '離寺時間', type: '文字(日期)', required: '選填' },
-  { name: 'volunteer_group', label: '義工組別', type: '文字', required: '選填' },
-  { name: 'start_date', label: '發心開始', type: '文字(日期)', required: '選填' },
-  { name: 'end_date', label: '發心結束', type: '文字(日期)', required: '選填' },
-  { name: 'accommodation_option', label: '安單選項', type: '文字', required: '選填' },
-  { name: 'stay_start_date', label: '安單開始', type: '文字(日期)', required: '選填' },
-  { name: 'stay_end_date', label: '安單結束', type: '文字(日期)', required: '選填' },
-  { name: 'is_deleted', label: '是否刪除', type: '布林值', required: '系統預設' },
-  { name: 'created_at', label: '建立時間', type: '時間戳', required: '系統自動' },
+// 新增：欄位定義介面
+interface FieldDefinition {
+  id?: string;
+  field_key: string;
+  field_label: string;
+  field_type: string;
+  is_required: boolean;
+  description: string;
+}
+
+// 預設欄位定義 (用於初始化或 fallback)
+const DEFAULT_FIELD_DEFINITIONS: FieldDefinition[] = [
+  { field_key: 'real_name', field_label: '姓名', field_type: '文字', is_required: true, description: '真實姓名' },
+  { field_key: 'dharma_name', field_label: '法名', field_type: '文字', is_required: false, description: '' },
+  { field_key: 'registrant_type', field_label: '屬性', field_type: '文字', is_required: true, description: '學員身分' },
+  { field_key: 'registration_option', field_label: '報名選項', field_type: '文字', is_required: true, description: '新增或異動' },
+  { field_key: 'activity_location', field_label: '活動地點', field_type: '文字', is_required: true, description: '' },
+  { field_key: 'activity_name', field_label: '活動名稱', field_type: '文字', is_required: true, description: '' },
+  { field_key: 'activity_option', field_label: '活動行程', field_type: '文字', is_required: true, description: '' },
+  { field_key: 'selected_contents', field_label: '勾選內容', field_type: '文字陣列', is_required: false, description: '' },
+  { field_key: 'identity', field_label: '身分', field_type: '文字', is_required: true, description: '法會或義工' },
+  { field_key: 'volunteer_type', field_label: '義工選項', field_type: '文字', is_required: false, description: '' },
+  { field_key: 'transportation', field_label: '交通', field_type: '文字', is_required: false, description: '' },
+  { field_key: 'arrival_datetime', field_label: '抵寺時間', field_type: '日期', is_required: false, description: '' },
+  { field_key: 'departure_datetime', field_label: '離寺時間', field_type: '日期', is_required: false, description: '' },
+  { field_key: 'volunteer_group', field_label: '義工組別', field_type: '文字', is_required: false, description: '' },
+  { field_key: 'start_date', field_label: '發心開始', field_type: '日期', is_required: false, description: '' },
+  { field_key: 'end_date', field_label: '發心結束', field_type: '日期', is_required: false, description: '' },
+  { field_key: 'accommodation_option', field_label: '安單選項', field_type: '文字', is_required: false, description: '' },
+  { field_key: 'stay_start_date', field_label: '安單開始', field_type: '日期', is_required: false, description: '' },
+  { field_key: 'stay_end_date', field_label: '安單結束', field_type: '日期', is_required: false, description: '' },
+  { field_key: 'other_remarks', field_label: '其他備註', field_type: '文字', is_required: false, description: '' },
 ];
 
 declare global {
@@ -125,9 +137,6 @@ const FAKE_DOMAIN = "@my-notes.com";
 const encodeName = (name: string): string => {
   try { let hex = ''; for (let i = 0; i < name.length; i++) hex += ('0000' + name.charCodeAt(i).toString(16)).slice(-4); return hex; } catch { return name; }
 };
-const decodeName = (email: string): string => {
-  try { const hex = email.split('@')[0]; let str = ''; for (let i = 0; i < hex.length; i += 4) str += String.fromCharCode(parseInt(hex.substr(i, 4), 16)); return str; } catch { return email?.split('@')[0] || ''; }
-};
 const getDisplayNameOnly = (email: string | undefined | null): string => {
   if (!email) return 'User';
   try {
@@ -136,15 +145,6 @@ const getDisplayNameOnly = (email: string | undefined | null): string => {
     for (let i = 0; i < hex.length; i += 4) str += String.fromCharCode(parseInt(hex.substr(i, 4), 16)); 
     return str.length > 4 ? str.slice(0, -4) : str;
   } catch { return email.split('@')[0]; }
-};
-const getIdLast4FromEmail = (email: string | undefined | null): string => {
-  if (!email) return '0000';
-  try {
-    const hex = email.split('@')[0]; 
-    let str = ''; 
-    for (let i = 0; i < hex.length; i += 4) str += String.fromCharCode(parseInt(hex.substr(i, 4), 16)); 
-    return str.length > 4 ? str.slice(-4) : '0000';
-  } catch { return '0000'; }
 };
 const formatDateTime = (isoString: string | undefined | null): string => {
   if (!isoString) return '-';
@@ -179,6 +179,9 @@ export default function App() {
   const [hierarchyData, setHierarchyData] = useState<ActivityHierarchy[]>([]);
   const [allUsers, setAllUsers] = useState<UserPermission[]>([]);
   const [resetRequests, setResetRequests] = useState<ResetRequest[]>([]);
+  
+  // 新增：欄位設定狀態
+  const [fieldConfigs, setFieldConfigs] = useState<FieldDefinition[]>(DEFAULT_FIELD_DEFINITIONS);
 
   const [username, setUsername] = useState<string>('');
   const [idLast4, setIdLast4] = useState<string>('');
@@ -237,6 +240,23 @@ export default function App() {
     loadSupabase();
   }, []);
 
+  // 取得欄位設定
+  const fetchFieldConfigs = useCallback(async () => {
+    if (!supabaseClient) return;
+    const { data, error } = await supabaseClient.from('field_definitions').select('*').order('field_key');
+    if (data && data.length > 0) {
+      // 合併預設值與資料庫值 (確保有新欄位時不會壞掉)
+      const merged = DEFAULT_FIELD_DEFINITIONS.map(def => {
+        const found = data.find((d: any) => d.field_key === def.field_key);
+        return found ? { ...def, ...found } : def;
+      });
+      setFieldConfigs(merged);
+    } else {
+      // 若資料庫為空，則初始化
+      await Promise.all(DEFAULT_FIELD_DEFINITIONS.map(def => supabaseClient.from('field_definitions').upsert(def, { onConflict: 'field_key' })));
+    }
+  }, [supabaseClient]);
+
   const fetchData = useCallback(async () => {
     if (isMock) { 
       setBulletins([{ id: '1', content: "🎉 歡迎使用 (展示模式)", created_at: new Date().toISOString() }]);
@@ -255,8 +275,12 @@ export default function App() {
       if (uData) setAllUsers(uData);
       const { data: rData } = await supabaseClient.from('reset_requests').select('*').order('created_at', { ascending: false });
       if (rData) setResetRequests(rData);
+      
+      // 載入欄位設定
+      await fetchFieldConfigs();
+
     } catch (err) { }
-  }, [supabaseClient, isMock]);
+  }, [supabaseClient, isMock, fetchFieldConfigs]);
 
   useEffect(() => {
     if (user && supabaseClient) {
@@ -342,11 +366,9 @@ export default function App() {
   const availableOptions = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === formData.activity_location && h.activity === formData.activity_name && h.option).map(h => h.option as string))].sort(), [hierarchyData, formData.activity_location, formData.activity_name]);
   const availableContents = useMemo(() => hierarchyData.filter(h => h.location === formData.activity_location && h.activity === formData.activity_name && h.option === formData.activity_option && h.content).map(h => h.content as string).sort(), [hierarchyData, formData.activity_location, formData.activity_name, formData.activity_option]);
 
-  // 管理後台專用聯動
   const adminActivities = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity).map(h => h.activity as string))].sort(), [hierarchyData, mgmtSelectedLoc]);
   const adminOptions = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option).map(h => h.option as string))].sort(), [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct]);
-  // 修正：確保回傳的是物件陣列，以便 JSX 可以讀取 .id
-  const adminContents = useMemo(() => hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option === mgmtSelectedOpt && h.content), [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
+  const adminContents = useMemo(() => hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option === mgmtSelectedOpt && h.content).map(h => h), [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
 
   const filteredTransportOptions = useMemo(() => {
     const all = ["大車-精舍統一行程", "小車-自訂抵離寺", "自行前往-自訂抵離寺"];
@@ -367,18 +389,46 @@ export default function App() {
     return formData.volunteer_type === '一般義工-由精舍安排組別';
   }, [formData]);
 
-  // 日期淨化函式：將空字串轉為 null
+  // --- 輔助：取得欄位設定 ---
+  const getFieldConfig = (key: string) => {
+    return fieldConfigs.find(f => f.field_key === key) || DEFAULT_FIELD_DEFINITIONS.find(f => f.field_key === key) || { is_required: false, field_label: key };
+  };
+
+  // --- 驗證函式 ---
+  const validateForm = () => {
+    for (const config of fieldConfigs) {
+      if (config.is_required) {
+        const val = formData[config.field_key as keyof typeof formData];
+        // 簡單判斷：如果是字串且為空，或 null，且該欄位在目前情境下應該顯示
+        // 注意：這裡簡化判斷，若欄位在畫面上有顯示且為空則擋下
+        // 實際上需要根據 showAccommodationSection 等邏輯來判斷是否該驗證
+        // 為求穩健，這裡只驗證「必填且有值的」
+        
+        // 排除情境判斷：例如若沒選住宿，就不驗證住宿相關
+        if (config.field_key.includes('stay') || config.field_key.includes('accommodation')) {
+            if (!showAccommodationSection) continue;
+        }
+        if (config.field_key === 'volunteer_group' && formData.identity !== '發心義工') continue;
+        
+        if (!val || (typeof val === 'string' && val.trim() === '') || (Array.isArray(val) && val.length === 0)) {
+           alert(`請檢查必填項目：${config.field_label}`);
+           return false;
+        }
+      }
+    }
+    return true;
+  };
+
+  // 日期淨化函式
   const sanitizeDate = (dateStr: string | null | undefined) => (dateStr && dateStr.trim() !== '') ? dateStr : null;
 
   const handleSubmitNote = async () => {
-    if (!formData.real_name || !formData.activity_location || !formData.activity_name) return alert('請填寫必填欄位');
-    if (availableContents.length > 0 && formData.selected_contents.length === 0) return alert('請至少勾選一項行程內容');
-    
-    // 執行資料淨化，移除後端不可寫入的 audit_status 與 admin_memo
+    if (!validateForm()) return; // 執行新的驗證邏輯
+
     const payload = { 
         ...formData, 
         user_id: user?.id, 
-        // audit_status 由 DB 預設 '待審核'，此處不送出
+        audit_status: '待審核' as const, 
         is_deleted: false, 
         created_at: new Date().toISOString(),
         start_date: sanitizeDate(formData.start_date),
@@ -394,7 +444,7 @@ export default function App() {
     const { error } = await supabaseClient.from('notes').insert([payload]);
     if (error) { 
         console.error("Submit error:", error);
-        alert('提交失敗: ' + error.message + '\n(若顯示欄位缺失，請執行「設定」頁籤中的資料庫修復指令)'); 
+        alert('提交失敗: ' + error.message); 
     } else { 
         alert('已送出申請'); 
         setActiveTab('history'); 
@@ -445,7 +495,7 @@ export default function App() {
   const addLocation = async () => {
     if(!newLocation || !supabaseClient) return;
     const { error } = await supabaseClient.from('activity_hierarchy').insert([{ location: newLocation, activity: null, option: null, content: null }]);
-    if (error) alert("新增失敗：" + error.message + "\n請檢查下方 RLS 指令。"); else { setNewLocation(''); fetchData(); }
+    if (error) alert("新增失敗：" + error.message); else { setNewLocation(''); fetchData(); }
   };
   const addActivity = async () => {
     if(!newActivity || !mgmtSelectedLoc || !supabaseClient) return;
@@ -463,7 +513,6 @@ export default function App() {
     if (error) alert("新增失敗：" + error.message); else { setNewContent(''); fetchData(); }
   };
 
-  // 補回缺失的刪除函式
   const handleDeleteLocation = async (loc: string) => {
     if (!supabaseClient) return;
     if (confirm(`確定刪除地點「${loc}」及其所有下層資料？`)) {
@@ -536,6 +585,21 @@ export default function App() {
        return;
     }
     alert('需串接後端 Supabase Admin API 來建立 Auth 用戶');
+  };
+
+  // 修改欄位設定 (Admin)
+  const handleUpdateFieldConfig = async (key: string, field: string, value: any) => {
+    if (!supabaseClient) return;
+    // 樂觀更新
+    setFieldConfigs(prev => prev.map(f => f.field_key === key ? { ...f, [field]: value } : f));
+    // 寫入 DB (Upsert)
+    const current = fieldConfigs.find(f => f.field_key === key);
+    if (current) {
+        await supabaseClient.from('field_definitions').upsert({
+            ...current,
+            [field]: value
+        }, { onConflict: 'field_key' });
+    }
   };
 
   const filteredAdminNotes = useMemo(() => {
@@ -622,31 +686,95 @@ export default function App() {
           <div className="bg-white p-8 rounded-[40px] shadow-2xl border border-[#E8E2D1] animate-in slide-in-from-bottom-12">
              <div className="flex items-center gap-4 border-b border-[#F2ECE4] pb-6 mb-6"><div className="p-3 bg-[#7A2E40] rounded-2xl text-white shadow-lg" style={{ backgroundColor: PRIMARY_COLOR }}><Edit className="w-6 h-6" /></div><h3 className="text-2xl font-black text-[#7A2E40] tracking-tight">發心登記表</h3></div>
              
-             {/* 修正：加入預設空白選項，並調整欄寬 */}
+             {/* 欄位 1: 姓名 */}
              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                <div className="lg:col-span-3 space-y-2"><label className="text-lg font-black text-[#7A2E40] ml-1">姓名*</label><input className="w-full p-3 text-xl font-bold border-2 rounded-xl" value={formData.real_name} onChange={e=>setFormData({...formData, real_name: e.target.value})} /></div>
-                <div className="lg:col-span-2 space-y-2"><label className="text-lg font-black text-[#7A2E40] ml-1">法名</label><input className="w-full p-3 text-xl font-bold border-2 rounded-xl" value={formData.dharma_name} onChange={e=>setFormData({...formData, dharma_name: e.target.value})} /></div>
-                <div className="lg:col-span-2 space-y-2"><label className="text-lg font-black text-[#7A2E40] ml-1">報名選項*</label><select className="w-full p-3 text-xl font-bold border-2 rounded-xl" value={formData.registration_option} onChange={e=>setFormData({...formData, registration_option: e.target.value})}><option value="">請選擇</option><option value="新增">新增</option><option value="異動">異動</option></select></div>
-                <div className="lg:col-span-5 space-y-2"><label className="text-lg font-black text-[#7A2E40] ml-1">屬性*</label><select className="w-full p-3 text-xl font-bold border-2 rounded-xl" value={formData.registrant_type} onChange={e=>setFormData({...formData, registrant_type: e.target.value})}><option value="">請選擇</option><option value="目前上禪修班學員">目前上禪修班學員</option><option value="曾經上禪修班學員">曾經上禪修班學員</option><option value="學員家人">學員家人</option></select></div>
+                <div className="lg:col-span-3 space-y-2">
+                    <label className="text-lg font-black text-[#7A2E40] ml-1">
+                        {getFieldConfig('real_name').field_label}{getFieldConfig('real_name').is_required ? '*' : ''}
+                    </label>
+                    <input className="w-full p-3 text-xl font-bold border-2 rounded-xl" value={formData.real_name} onChange={e=>setFormData({...formData, real_name: e.target.value})} />
+                </div>
+                <div className="lg:col-span-2 space-y-2">
+                    <label className="text-lg font-black text-[#7A2E40] ml-1">
+                        {getFieldConfig('dharma_name').field_label}{getFieldConfig('dharma_name').is_required ? '*' : ''}
+                    </label>
+                    <input className="w-full p-3 text-xl font-bold border-2 rounded-xl" value={formData.dharma_name} onChange={e=>setFormData({...formData, dharma_name: e.target.value})} />
+                </div>
+                <div className="lg:col-span-2 space-y-2">
+                    <label className="text-lg font-black text-[#7A2E40] ml-1">
+                        {getFieldConfig('registration_option').field_label}{getFieldConfig('registration_option').is_required ? '*' : ''}
+                    </label>
+                    <select className="w-full p-3 text-xl font-bold border-2 rounded-xl" value={formData.registration_option} onChange={e=>setFormData({...formData, registration_option: e.target.value})}>
+                        <option value="">請選擇</option><option value="新增">新增</option><option value="異動">異動</option>
+                    </select>
+                </div>
+                <div className="lg:col-span-5 space-y-2">
+                    <label className="text-lg font-black text-[#7A2E40] ml-1">
+                        {getFieldConfig('registrant_type').field_label}{getFieldConfig('registrant_type').is_required ? '*' : ''}
+                    </label>
+                    <select className="w-full p-3 text-xl font-bold border-2 rounded-xl" value={formData.registrant_type} onChange={e=>setFormData({...formData, registrant_type: e.target.value})}>
+                        <option value="">請選擇</option><option value="目前上禪修班學員">目前上禪修班學員</option><option value="曾經上禪修班學員">曾經上禪修班學員</option><option value="學員家人">學員家人</option>
+                    </select>
+                </div>
              </div>
 
              {formData.registration_option === '異動' && <div className="mt-4 p-3 bg-amber-50 border-2 border-amber-200 rounded-xl flex items-center gap-2 text-amber-700 font-bold"><AlertCircle className="w-5 h-5"/> 請至「紀錄」頁面刪除舊資料後再重新填寫。</div>}
              {formData.registrant_type === '學員家人' && <div className="mt-4 p-3 bg-red-50 border-2 border-red-200 rounded-xl flex items-center gap-2 text-red-700 font-bold"><Info className="w-5 h-5"/> 請至知客室填寫家眷表。</div>}
+             
+             {/* 欄位 2: 四層架構 */}
              <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-6 border-t-4 border-dotted border-[#F2ECE4] pt-6 mt-6">
-                <div className="space-y-2"><label className="text-lg font-black text-slate-500">1. 地點*</label><select className="w-full p-4 text-xl font-black border-4 rounded-2xl" value={formData.activity_location} onChange={e=>setFormData({...formData, activity_location: e.target.value, activity_name: '', activity_option: '', selected_contents: []})}><option value="">請選擇地點</option>{locations.map(l => <option key={l} value={l}>{l}</option>)}</select></div>
-                <div className="space-y-2"><label className="text-lg font-black text-slate-500">2. 活動*</label><select className="w-full p-4 text-xl font-black border-4 rounded-2xl" disabled={!formData.activity_location} value={formData.activity_name} onChange={e=>setFormData({...formData, activity_name: e.target.value, activity_option: '', selected_contents: []})}><option value="">請選擇活動</option>{availableActivities.map(a => <option key={a} value={a}>{a}</option>)}</select></div>
-                <div className="space-y-2"><label className="text-lg font-black text-slate-500">3. 行程*</label><select className="w-full p-4 text-xl font-black border-4 rounded-2xl" disabled={!formData.activity_name} value={formData.activity_option} onChange={e=>setFormData({...formData, activity_option: e.target.value, selected_contents: []})}><option value="">請選擇行程</option>{availableOptions.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+                <div className="space-y-2"><label className="text-lg font-black text-slate-500">{getFieldConfig('activity_location').field_label}{getFieldConfig('activity_location').is_required ? '*' : ''}</label><select className="w-full p-4 text-xl font-black border-4 rounded-2xl" value={formData.activity_location} onChange={e=>setFormData({...formData, activity_location: e.target.value, activity_name: '', activity_option: '', selected_contents: []})}><option value="">請選擇地點</option>{locations.map(l => <option key={l} value={l}>{l}</option>)}</select></div>
+                <div className="space-y-2"><label className="text-lg font-black text-slate-500">{getFieldConfig('activity_name').field_label}{getFieldConfig('activity_name').is_required ? '*' : ''}</label><select className="w-full p-4 text-xl font-black border-4 rounded-2xl" disabled={!formData.activity_location} value={formData.activity_name} onChange={e=>setFormData({...formData, activity_name: e.target.value, activity_option: '', selected_contents: []})}><option value="">請選擇活動</option>{availableActivities.map(a => <option key={a} value={a}>{a}</option>)}</select></div>
+                <div className="space-y-2"><label className="text-lg font-black text-slate-500">{getFieldConfig('activity_option').field_label}{getFieldConfig('activity_option').is_required ? '*' : ''}</label><select className="w-full p-4 text-xl font-black border-4 rounded-2xl" disabled={!formData.activity_name} value={formData.activity_option} onChange={e=>setFormData({...formData, activity_option: e.target.value, selected_contents: []})}><option value="">請選擇行程</option>{availableOptions.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
              </div>
+             
              {availableContents.length > 0 && <div className="md:col-span-3 p-6 bg-[#F2ECE4]/30 rounded-[30px] border-4 border-dashed border-[#E8E2D1] mt-6"><label className="text-xl font-black text-[#7A2E40] mb-4 block">4. 行程內容複選</label><div className="flex flex-wrap gap-4">{availableContents.map(c => <button key={c} type="button" onClick={() => setFormData(p => ({ ...p, selected_contents: p.selected_contents.includes(c) ? p.selected_contents.filter(i => i !== c) : [...p.selected_contents, c] }))} className={`px-6 py-3 rounded-xl font-black text-lg border-2 transition-all ${formData.selected_contents.includes(c) ? 'bg-[#7A2E40] text-white border-[#7A2E40]' : 'bg-white text-[#7A2E40] border-[#E8E2D1]'}`}>{c}</button>)}</div></div>}
+             
+             {/* 欄位 3: 備註與身分 */}
              {formData.activity_option === '其他行程' && <div className="mt-6 space-y-2"><label className="text-lg font-black text-orange-600">行程備註*</label><textarea rows={2} className="w-full p-4 text-lg border-4 border-orange-200 rounded-2xl" value={formData.other_remarks} onChange={e=>setFormData({...formData, other_remarks: e.target.value})} /></div>}
-             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 border-t-4 border-dotted border-[#F2ECE4] pt-6 mt-6"><div className="space-y-2"><label className="text-lg font-black text-slate-500 ml-1">身份*</label><select className="w-full p-4 rounded-2xl bg-[#FAF9F6] text-xl font-bold" value={formData.identity} onChange={e=>setFormData({...formData, identity: e.target.value})}><option value="">請選擇</option><option value="參加法會">參加法會</option><option value="發心義工">發心義工</option></select></div>{formData.activity_location !== '精舍' && <div className="space-y-2"><label className="text-lg font-black text-slate-500 ml-1">交通*</label><select className="w-full p-4 rounded-2xl bg-[#FAF9F6] text-xl font-bold" value={formData.transportation} onChange={e=>setFormData({...formData, transportation: e.target.value})}><option value="">請選擇</option>{filteredTransportOptions.map(o => <option key={o} value={o}>{o}</option>)}</select></div>}</div>
-             <div className="md:col-span-3 border-t border-[#F2ECE4] pt-6 space-y-6">{formData.activity_location === '精舍' ? (formData.identity === '發心義工' && <div className="p-6 bg-[#F2ECE4]/30 rounded-3xl border border-[#E8E2D1] space-y-4"><label className="text-lg font-black text-[#7A2E40]">精舍發心組別*</label><input className="w-full p-4 rounded-2xl border-2 text-xl" value={formData.volunteer_group} onChange={e=>setFormData({...formData, volunteer_group: e.target.value})} /></div>) : (<>{formData.transportation !== '大車-精舍統一行程' && <div className="grid grid-cols-1 md:grid-cols-2 gap-6"><div className="space-y-2"><label className="text-lg font-bold text-blue-700">抵寺日時*</label><input type="datetime-local" className="w-full p-4 rounded-2xl border-2 text-xl" value={formData.arrival_datetime || ''} onChange={e=>setFormData({...formData, arrival_datetime: e.target.value})} /></div><div className="space-y-2"><label className="text-lg font-bold text-blue-700">離寺日時*</label><input type="datetime-local" className="w-full p-4 rounded-2xl border-2 text-xl" value={formData.departure_datetime || ''} onChange={e=>setFormData({...formData, departure_datetime: e.target.value})} /></div></div>}{formData.identity === '發心義工' && <div className="p-6 bg-[#F2ECE4]/30 rounded-3xl border border-[#E8E2D1] space-y-4"><label className="text-lg font-black text-[#7A2E40]">義工分流*</label><select className="w-full p-4 rounded-2xl text-xl" value={formData.volunteer_type} onChange={e=>setFormData({...formData, volunteer_type: e.target.value})}><option value="">請選擇</option><option value="一般義工-由精舍安排組別">一般義工-由精舍安排組別</option><option value="長期義工-已於平台報名">長期義工-已於平台報名</option><option value="佛巡-已於平台報名">佛巡-已於平台報名</option></select></div>}{showAccommodationSection && formData.accommodation_option === '安單' && <div className="p-6 bg-slate-50 rounded-3xl border border-slate-200"><label className="text-lg font-black">安單起訖*</label><input type="date" className="w-full p-4 text-xl" value={formData.stay_start_date || ''} onChange={e=>setFormData({...formData, stay_start_date: e.target.value})} /><input type="date" className="w-full p-4 text-xl mt-4" value={formData.stay_end_date || ''} onChange={e=>setFormData({...formData, stay_end_date: e.target.value})} /></div>}</>)}</div>
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 border-t-4 border-dotted border-[#F2ECE4] pt-6 mt-6">
+                <div className="space-y-2"><label className="text-lg font-black text-slate-500 ml-1">{getFieldConfig('identity').field_label}{getFieldConfig('identity').is_required ? '*' : ''}</label><select className="w-full p-4 rounded-2xl bg-[#FAF9F6] text-xl font-bold" value={formData.identity} onChange={e=>setFormData({...formData, identity: e.target.value})}><option value="">請選擇</option><option value="參加法會">參加法會</option><option value="發心義工">發心義工</option></select></div>
+                {formData.activity_location !== '精舍' && <div className="space-y-2"><label className="text-lg font-black text-slate-500 ml-1">{getFieldConfig('transportation').field_label}{getFieldConfig('transportation').is_required ? '*' : ''}</label><select className="w-full p-4 rounded-2xl bg-[#FAF9F6] text-xl font-bold" value={formData.transportation} onChange={e=>setFormData({...formData, transportation: e.target.value})}><option value="">請選擇</option>{filteredTransportOptions.map(o => <option key={o} value={o}>{o}</option>)}</select></div>}
+             </div>
+             
+             {/* 欄位 4: 詳細資料 */}
+             <div className="md:col-span-3 border-t border-[#F2ECE4] pt-6 space-y-6">
+                {formData.activity_location === '精舍' ? (
+                   formData.identity === '發心義工' && <div className="p-6 bg-[#F2ECE4]/30 rounded-3xl border border-[#E8E2D1] space-y-4">
+                       <label className="text-lg font-black text-[#7A2E40]">{getFieldConfig('volunteer_group').field_label}{getFieldConfig('volunteer_group').is_required ? '*' : ''}</label>
+                       <input className="w-full p-4 rounded-2xl border-2 text-xl" value={formData.volunteer_group} onChange={e=>setFormData({...formData, volunteer_group: e.target.value})} />
+                   </div>
+                ) : (
+                  <>
+                    {formData.transportation !== '大車-精舍統一行程' && <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="space-y-2"><label className="text-lg font-bold text-blue-700">{getFieldConfig('arrival_datetime').field_label}{getFieldConfig('arrival_datetime').is_required ? '*' : ''}</label><input type="datetime-local" className="w-full p-4 rounded-2xl border-2 text-xl" value={formData.arrival_datetime || ''} onChange={e=>setFormData({...formData, arrival_datetime: e.target.value})} /></div>
+                        <div className="space-y-2"><label className="text-lg font-bold text-blue-700">{getFieldConfig('departure_datetime').field_label}{getFieldConfig('departure_datetime').is_required ? '*' : ''}</label><input type="datetime-local" className="w-full p-4 rounded-2xl border-2 text-xl" value={formData.departure_datetime || ''} onChange={e=>setFormData({...formData, departure_datetime: e.target.value})} /></div>
+                    </div>}
+                    {formData.identity === '發心義工' && <div className="p-6 bg-[#F2ECE4]/30 rounded-3xl border border-[#E8E2D1] space-y-4">
+                        <label className="text-lg font-black text-[#7A2E40]">{getFieldConfig('volunteer_type').field_label}{getFieldConfig('volunteer_type').is_required ? '*' : ''}</label>
+                        <select className="w-full p-4 rounded-2xl text-xl" value={formData.volunteer_type} onChange={e=>setFormData({...formData, volunteer_type: e.target.value})}><option value="">請選擇</option><option value="一般義工-由精舍安排組別">一般義工-由精舍安排組別</option><option value="長期義工-已於平台報名">長期義工-已於平台報名</option><option value="佛巡-已於平台報名">佛巡-已於平台報名</option></select>
+                    </div>}
+                    {showAccommodationSection && formData.accommodation_option === '安單' && <div className="p-6 bg-slate-50 rounded-3xl border border-slate-200">
+                        <label className="text-lg font-black">安單起訖{getFieldConfig('stay_start_date').is_required ? '*' : ''}</label>
+                        <input type="date" className="w-full p-4 text-xl" value={formData.stay_start_date || ''} onChange={e=>setFormData({...formData, stay_start_date: e.target.value})} />
+                        <input type="date" className="w-full p-4 text-xl mt-4" value={formData.stay_end_date || ''} onChange={e=>setFormData({...formData, stay_end_date: e.target.value})} />
+                    </div>}
+                  </>
+                )}
+             </div>
+
+             {/* 其他備註 */}
+             <div className="mt-8 border-t border-[#F2ECE4] pt-6 space-y-2">
+                 <label className="text-lg font-black text-slate-500">{getFieldConfig('other_remarks').field_label}{getFieldConfig('other_remarks').is_required ? '*' : ''}</label>
+                 <textarea rows={3} className="w-full p-4 text-lg border-4 border-slate-200 rounded-2xl" placeholder="若有其他需求請填寫於此..." value={formData.other_remarks} onChange={e=>setFormData({...formData, other_remarks: e.target.value})} />
+             </div>
+
              <button onClick={handleSubmitNote} disabled={loading} className="w-full mt-10 bg-[#7A2E40] hover:bg-[#5D2331] text-white py-4 rounded-2xl font-black text-3xl shadow-lg transition-all" style={{ backgroundColor: PRIMARY_COLOR }}>確認送出</button>
           </div>
         )}
 
         {/* ... 其他分頁邏輯 (History, Audit, Users, Data) ... */}
-        {activeTab === 'history' && <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-12">{notes.filter(n => n.user_id === user?.id).map(n => <div key={n.id} className="bg-white p-10 rounded-[60px] shadow-xl border border-[#E8E2D1]"><div className="space-y-6"><h4 className="font-black text-4xl text-slate-800">{n.activity_name}</h4><div className="flex items-center gap-4 text-3xl font-black text-[#7A2E40]"><User className="w-10 h-10"/> {n.real_name}</div><div className="mt-10 bg-[#FAF9F6] p-6 rounded-[40px] border border-[#E8E2D1] flex justify-between items-center"><label className="flex items-center gap-5 cursor-pointer select-none"><input type="checkbox" className="w-10 h-10 rounded-xl text-[#7A2E40]" checked={n.is_deleted} onChange={() => handleToggleDeleteNote(n.id, n.is_deleted)} /><span className="font-black text-3xl text-[#7A2E40]">刪除紀錄</span></label></div></div></div>)}</div>}
+        {activeTab === 'history' && <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-12">{notes.filter(n => n.user_id === user?.id).map(n => <div key={n.id} className="bg-white p-6 rounded-[40px] shadow-xl border border-[#E8E2D1]"><div className="space-y-4"><div className="flex justify-between items-start"><span className={`px-3 py-1 rounded-full text-sm font-bold ${n.audit_status === '已通過' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>{n.audit_status}</span><span className="text-sm text-slate-400">{n.created_at.slice(0,10)}</span></div><h4 className="font-black text-2xl text-slate-800">{n.activity_name}</h4><div className="text-slate-500 text-sm"><p>地點：{n.activity_location}</p><p>選項：{n.activity_option}</p></div><div className="mt-4 pt-4 border-t border-slate-100 flex justify-between items-center"><label className="flex items-center gap-2 cursor-pointer select-none text-red-400 hover:text-red-600"><input type="checkbox" className="w-5 h-5 rounded" checked={n.is_deleted} onChange={() => handleToggleDeleteNote(n.id, n.is_deleted)} /><span className="font-bold text-sm">刪除紀錄</span></label></div></div></div>)}</div>}
 
         {activeTab === 'users' && isAdmin && (
           <div className="space-y-8 animate-in fade-in">
@@ -724,27 +852,45 @@ export default function App() {
                  <div className="space-y-6 min-w-0"><h4 className="font-black text-3xl border-l-[15px] border-[#7A2E40] pl-6">行程</h4><div className="flex gap-2 shrink-0"><input className="flex-1 p-3 border-4 rounded-2xl text-xl font-bold min-w-0" disabled={!mgmtSelectedAct} value={newOption} onChange={e=>setNewOption(e.target.value)} /><button onClick={addOption} className="bg-[#7A2E40] text-white p-3 rounded-2xl shrink-0" disabled={!mgmtSelectedAct}><Plus/></button></div><div className="max-h-96 overflow-y-auto space-y-2">{adminOptions.map(o => <div key={o} onClick={()=>setMgmtSelectedOpt(o)} className={`p-4 rounded-2xl text-xl font-bold cursor-pointer flex justify-between items-center ${mgmtSelectedOpt === o ? 'bg-[#7A2E40] text-white' : 'bg-slate-100'}`}><span>{o}</span><button onClick={(e)=>{e.stopPropagation(); handleDeleteOption(o)}} className={mgmtSelectedOpt === o ? "text-white/80 hover:text-white" : "text-slate-400 hover:text-red-500"}><Trash2 className="w-5 h-5"/></button></div>)}</div></div>
                  <div className="space-y-6 min-w-0"><h4 className="font-black text-3xl border-l-[15px] border-[#7A2E40] pl-6">內容</h4><div className="flex gap-2 shrink-0"><input className="flex-1 p-3 border-4 rounded-2xl text-xl font-bold min-w-0" disabled={!mgmtSelectedOpt} value={newContent} onChange={e=>setNewContent(e.target.value)} /><button onClick={addContent} className="bg-[#7A2E40] text-white p-3 rounded-2xl shrink-0" disabled={!mgmtSelectedOpt}><Plus/></button></div><div className="max-h-96 overflow-y-auto space-y-2">{adminContents.map(h => <div key={h.id} className="p-4 rounded-2xl text-xl font-bold flex justify-between shadow-sm border border-[#F2ECE4]"><span>{h.content}</span><button onClick={()=>handleDeleteContent(h.id)} className="text-slate-400 hover:text-red-500"><Trash2 className="w-5 h-5"/></button></div>)}</div></div>
               </div>
-              {/* Database Schema Table */}
+              {/* Database Schema Table (欄位管理) */}
               <div className="mt-16">
-                 <h4 className="font-black text-3xl text-slate-700 border-l-[15px] border-[#7A2E40] pl-6 mb-8">後端資料表結構 (Notes)</h4>
+                 <h4 className="font-black text-3xl text-slate-700 border-l-[15px] border-[#7A2E40] pl-6 mb-8">欄位管理 (Field Settings)</h4>
                  <div className="overflow-x-auto rounded-[40px] border border-[#E8E2D1] shadow-sm">
                     <table className="w-full text-left text-sm bg-white">
                        <thead className="bg-[#7A2E40] text-white font-bold text-lg" style={{ backgroundColor: PRIMARY_COLOR }}>
                           <tr>
-                             <th className="p-6">欄位名稱 (Column)</th>
+                             <th className="p-6">欄位名稱 (Key)</th>
+                             <th className="p-6">顯示標籤 (Label)</th>
                              <th className="p-6">類型 (Type)</th>
                              <th className="p-6">必填設定</th>
+                             <th className="p-6">備註說明</th>
                           </tr>
                        </thead>
                        <tbody className="divide-y divide-[#F2ECE4] text-slate-600 font-bold text-base">
-                          {DB_SCHEMA.map((col) => (
-                             <tr key={col.name} className="hover:bg-[#FAF9F6] transition-colors">
-                                <td className="p-6 font-mono text-[#7A2E40]">{col.label} <span className='text-xs text-gray-400 block'>{col.name}</span></td>
-                                <td className="p-6 font-mono text-slate-400">{col.type}</td>
+                          {fieldConfigs.map((col) => (
+                             <tr key={col.field_key} className="hover:bg-[#FAF9F6] transition-colors">
+                                <td className="p-6 font-mono text-[#7A2E40]">{col.field_key}</td>
+                                <td className="p-6">{col.field_label}</td>
+                                <td className="p-6 font-mono text-slate-400">{col.field_type}</td>
                                 <td className="p-6">
-                                   <span className={`px-4 py-2 rounded-xl text-sm ${col.required.includes('必填') ? 'bg-red-100 text-red-700' : col.required.includes('系統') ? 'bg-slate-100 text-slate-500' : 'bg-green-100 text-green-700'}`}>
-                                      {col.required}
-                                   </span>
+                                   <label className="flex items-center cursor-pointer">
+                                      <input 
+                                        type="checkbox" 
+                                        checked={col.is_required} 
+                                        onChange={(e) => handleUpdateFieldConfig(col.field_key, 'is_required', e.target.checked)} 
+                                        className="w-5 h-5 rounded border-slate-300 text-[#7A2E40] focus:ring-[#7A2E40]" 
+                                      />
+                                      <span className="ml-2 text-sm">{col.is_required ? '必填' : '選填'}</span>
+                                   </label>
+                                </td>
+                                <td className="p-6">
+                                   <input 
+                                     type="text" 
+                                     value={col.description || ''} 
+                                     onChange={(e) => handleUpdateFieldConfig(col.field_key, 'description', e.target.value)}
+                                     className="w-full p-2 border rounded-lg text-sm"
+                                     placeholder="備註..."
+                                   />
                                 </td>
                              </tr>
                           ))}
