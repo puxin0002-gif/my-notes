@@ -20,6 +20,19 @@ import { createClient } from '@supabase/supabase-js';
 // --- 主色系設定 ---
 const PRIMARY_COLOR = "#7A2E40"; 
 
+// --- 內嵌 Logo SVG ---
+const CustomLogo = ({ className }: { className?: string }) => (
+  <svg viewBox="0 0 100 100" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="50" cy="50" r="48" fill="#7A2E40"/>
+    <path d="M25 65 Q50 85 75 65 L70 55 Q50 70 30 55 Z" fill="#E8E2D1"/>
+    <path d="M35 55 L40 30 L60 30 L65 55 Z" fill="#E8E2D1" opacity="0.9"/>
+    <circle cx="50" cy="20" r="8" fill="#D97706"/>
+    <path d="M50 12 V28" stroke="#7A2E40" strokeWidth="2"/>
+    <path d="M42 20 H58" stroke="#7A2E40" strokeWidth="2"/>
+    <path d="M50 8 V4 M20 50 H16 M80 50 H84" stroke="white" strokeWidth="2" opacity="0.5"/>
+  </svg>
+);
+
 // --- 型別定義 ---
 interface ActivityHierarchy {
   id: string;
@@ -335,21 +348,24 @@ export default function App() {
     return formData.volunteer_type === '一般義工-由精舍安排組別';
   }, [formData]);
 
+  // 日期淨化函式：將空字串轉為 null
+  const sanitizeDate = (dateStr: string) => (dateStr && dateStr.trim() !== '') ? dateStr : null;
+
   const handleSubmitNote = async () => {
     if (!formData.real_name || !formData.activity_location || !formData.activity_name) return alert('請填寫必填欄位');
     if (availableContents.length > 0 && formData.selected_contents.length === 0) return alert('請至少勾選一項行程內容');
     
-    // 關鍵修正：將空字串的日期欄位轉換為 null，避免資料庫報錯
+    // 關鍵修正：將空字串的日期欄位轉換為 null
     const payload = { 
         ...formData, 
         user_id: user?.id, 
         audit_status: '待審核' as const, 
         is_deleted: false, 
         created_at: new Date().toISOString(),
-        stay_start_date: formData.stay_start_date || null,
-        stay_end_date: formData.stay_end_date || null,
-        arrival_datetime: formData.arrival_datetime || null,
-        departure_datetime: formData.departure_datetime || null
+        stay_start_date: sanitizeDate(formData.stay_start_date),
+        stay_end_date: sanitizeDate(formData.stay_end_date),
+        arrival_datetime: sanitizeDate(formData.arrival_datetime),
+        departure_datetime: sanitizeDate(formData.departure_datetime)
     };
 
     if (!supabaseClient) return alert('系統未連線');
@@ -426,6 +442,7 @@ export default function App() {
     if (error) alert("新增失敗：" + error.message); else { setNewContent(''); fetchData(); }
   };
 
+  // 補回缺失的刪除函式 (修復 Cannot find name)
   const handleDeleteLocation = async (loc: string) => {
     if (!supabaseClient) return;
     if (confirm(`確定刪除地點「${loc}」及其所有下層資料？`)) {
