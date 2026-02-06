@@ -10,28 +10,15 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v40.4 (資料庫結構全面修復版)
+ * 系統版本：v41.0 (日期空值修正與欄位補全版)
  * 修正說明：
- * 1. [SQL Fix] 提供包含所有 24 個欄位的完整 SQL 補全指令，特別是 selected_contents (text[])。
- * 2. [SQL Fix] 加入 RLS 權限開放指令，確保 notes 表格可寫入。
- * 3. [UX] 增加 Schema Cache 重整提示。
+ * 1. [Fix] 送出表單前將空字串的日期欄位轉換為 null，解決 "invalid input syntax for type date" 錯誤。
+ * 2. [DB] 請務必執行 SQL 補齊 registrant_type 等所有缺失欄位。
+ * 3. [UI] 保持 LOGO 為圖片讀取。
  */
 
 // --- 主色系設定 ---
 const PRIMARY_COLOR = "#7A2E40"; 
-
-// --- 內嵌 Logo SVG ---
-const CustomLogo = ({ className }: { className?: string }) => (
-  <svg viewBox="0 0 100 100" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
-    <circle cx="50" cy="50" r="48" fill="#7A2E40"/>
-    <path d="M25 65 Q50 85 75 65 L70 55 Q50 70 30 55 Z" fill="#E8E2D1"/>
-    <path d="M35 55 L40 30 L60 30 L65 55 Z" fill="#E8E2D1" opacity="0.9"/>
-    <circle cx="50" cy="20" r="8" fill="#D97706"/>
-    <path d="M50 12 V28" stroke="#7A2E40" strokeWidth="2"/>
-    <path d="M42 20 H58" stroke="#7A2E40" strokeWidth="2"/>
-    <path d="M50 8 V4 M20 50 H16 M80 50 H84" stroke="white" strokeWidth="2" opacity="0.5"/>
-  </svg>
-);
 
 // --- 型別定義 ---
 interface ActivityHierarchy {
@@ -351,14 +338,26 @@ export default function App() {
   const handleSubmitNote = async () => {
     if (!formData.real_name || !formData.activity_location || !formData.activity_name) return alert('請填寫必填欄位');
     if (availableContents.length > 0 && formData.selected_contents.length === 0) return alert('請至少勾選一項行程內容');
-    const payload = { ...formData, user_id: user?.id, audit_status: '待審核' as const, is_deleted: false, created_at: new Date().toISOString() };
+    
+    // 關鍵修正：將空字串的日期欄位轉換為 null，避免資料庫報錯
+    const payload = { 
+        ...formData, 
+        user_id: user?.id, 
+        audit_status: '待審核' as const, 
+        is_deleted: false, 
+        created_at: new Date().toISOString(),
+        stay_start_date: formData.stay_start_date || null,
+        stay_end_date: formData.stay_end_date || null,
+        arrival_datetime: formData.arrival_datetime || null,
+        departure_datetime: formData.departure_datetime || null
+    };
+
     if (!supabaseClient) return alert('系統未連線');
     
-    // 寫入嘗試
     const { error } = await supabaseClient.from('notes').insert([payload]);
     if (error) { 
         console.error("Submit error:", error);
-        alert('提交失敗: ' + error.message + '\n(若顯示欄位缺失，請執行下方的 SQL 修復指令，並到 Supabase 重整 API)'); 
+        alert('提交失敗: ' + error.message + '\n(若顯示欄位缺失，請執行下方的 SQL 修復指令)'); 
     } else { 
         alert('已送出申請'); 
         setActiveTab('history'); 
@@ -427,7 +426,6 @@ export default function App() {
     if (error) alert("新增失敗：" + error.message); else { setNewContent(''); fetchData(); }
   };
 
-  // 補回缺失的刪除函式 (修復 Cannot find name)
   const handleDeleteLocation = async (loc: string) => {
     if (!supabaseClient) return;
     if (confirm(`確定刪除地點「${loc}」及其所有下層資料？`)) {
@@ -609,7 +607,7 @@ export default function App() {
           </div>
         )}
 
-        {/* ... 其他分頁邏輯 (History, Audit, Users, Data) ... */}
+        {/* ... 其他分頁邏輯 (History, Audit, Users, Data) 保持不變 ... */}
         {activeTab === 'history' && <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-12">{notes.filter(n => n.user_id === user?.id).map(n => <div key={n.id} className="bg-white p-10 rounded-[60px] shadow-xl border border-[#E8E2D1]"><div className="space-y-6"><h4 className="font-black text-4xl text-slate-800">{n.activity_name}</h4><div className="flex items-center gap-4 text-3xl font-black text-[#7A2E40]"><User className="w-10 h-10"/> {n.real_name}</div><div className="mt-10 bg-[#FAF9F6] p-6 rounded-[40px] border border-[#E8E2D1] flex justify-between items-center"><label className="flex items-center gap-5 cursor-pointer select-none"><input type="checkbox" className="w-10 h-10 rounded-xl text-[#7A2E40]" checked={n.is_deleted} onChange={() => handleToggleDeleteNote(n.id, n.is_deleted)} /><span className="font-black text-3xl text-[#7A2E40]">刪除紀錄</span></label></div></div></div>)}</div>}
 
         {activeTab === 'users' && isAdmin && (
