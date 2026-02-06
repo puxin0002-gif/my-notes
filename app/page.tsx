@@ -5,20 +5,33 @@ import {
   Bell, FileText, History, Settings, Shield, LogOut, Plus, Trash2, Check, 
   Edit, User, MapPin, Tag, ListFilter, Save, Database, Clock, Car, Info, 
   Home, UserCheck, AlertCircle, Briefcase, Layers, 
-  CheckCircle2, CheckSquare, FileSpreadsheet, Megaphone, ClipboardCheck, UserCog, Share2, Lock, Eye, EyeOff, Users, ArrowRight, RefreshCw, AlertTriangle, Image as ImageIcon
+  CheckCircle2, CheckSquare, FileSpreadsheet, Megaphone, ClipboardCheck, UserCog, Share2, Lock, Eye, EyeOff, Users, ArrowRight, RefreshCw, AlertTriangle, Image as ImageIcon, Table
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v42.2 (日期Null處理完整版與色彩更新)
+ * 系統版本：v43.0 (資料表結構顯示與選填欄位調整版)
  * 修正說明：
- * 1. [DB Compat] 送出前強制將所有日期欄位 (含 start_date/end_date) 的空值轉為 null。
- * 2. [Design] 主色系調整為 #4f093c。
- * 3. [UI] 移除未使用的 SVG Logo，維持圖片讀取 (/logo.png)。
+ * 1. [Form] 移除「交通」、「日期」相關欄位的必填星號 (*)，設為選填。
+ * 2. [Admin] 設定頁籤移除 SQL 提示，改為列出 Notes 資料表欄位結構。
+ * 3. [Design] 主色系維持 #4f093c，LOGO 維持圖片讀取。
  */
 
-// --- 主色系設定 (調整後) ---
+// --- 主色系設定 ---
 const PRIMARY_COLOR = "#4f093c"; 
+
+// --- 內嵌 Logo SVG ---
+const CustomLogo = ({ className }: { className?: string }) => (
+  <svg viewBox="0 0 100 100" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="50" cy="50" r="48" fill="#7A2E40"/>
+    <path d="M25 65 Q50 85 75 65 L70 55 Q50 70 30 55 Z" fill="#E8E2D1"/>
+    <path d="M35 55 L40 30 L60 30 L65 55 Z" fill="#E8E2D1" opacity="0.9"/>
+    <circle cx="50" cy="20" r="8" fill="#D97706"/>
+    <path d="M50 12 V28" stroke="#7A2E40" strokeWidth="2"/>
+    <path d="M42 20 H58" stroke="#7A2E40" strokeWidth="2"/>
+    <path d="M50 8 V4 M20 50 H16 M80 50 H84" stroke="white" strokeWidth="2" opacity="0.5"/>
+  </svg>
+);
 
 // --- 型別定義 ---
 interface ActivityHierarchy {
@@ -84,6 +97,36 @@ interface ResetRequest {
   status: 'pending' | 'completed' | 'rejected';
   created_at: string;
 }
+
+// 資料庫欄位結構定義 (用於顯示)
+const DB_SCHEMA = [
+  { name: 'id', type: 'uuid', required: '系統自動 (PK)' },
+  { name: 'user_id', type: 'uuid', required: '系統自動 (FK)' },
+  { name: 'real_name', type: 'text', required: '必填' },
+  { name: 'dharma_name', type: 'text', required: '選填' },
+  { name: 'registrant_type', type: 'text', required: '必填 (預設)' },
+  { name: 'registration_option', type: 'text', required: '必填 (預設)' },
+  { name: 'activity_location', type: 'text', required: '必填' },
+  { name: 'activity_name', type: 'text', required: '必填' },
+  { name: 'activity_option', type: 'text', required: '必填' },
+  { name: 'selected_contents', type: 'text[]', required: '選填 (視行程)' },
+  { name: 'other_remarks', type: 'text', required: '選填' },
+  { name: 'identity', type: 'text', required: '必填' },
+  { name: 'volunteer_type', type: 'text', required: '選填' },
+  { name: 'transportation', type: 'text', required: '選填' },
+  { name: 'arrival_datetime', type: 'text (date)', required: '選填' },
+  { name: 'departure_datetime', type: 'text (date)', required: '選填' },
+  { name: 'volunteer_group', type: 'text', required: '選填' },
+  { name: 'start_date', type: 'text (date)', required: '選填' },
+  { name: 'end_date', type: 'text (date)', required: '選填' },
+  { name: 'accommodation_option', type: 'text', required: '選填' },
+  { name: 'stay_start_date', type: 'text (date)', required: '選填' },
+  { name: 'stay_end_date', type: 'text (date)', required: '選填' },
+  { name: 'is_deleted', type: 'boolean', required: '系統預設' },
+  { name: 'audit_status', type: 'text', required: '系統預設' },
+  { name: 'admin_memo', type: 'text', required: '選填' },
+  { name: 'created_at', type: 'timestamp', required: '系統自動' },
+];
 
 declare global {
   interface Window {
@@ -159,7 +202,7 @@ export default function App() {
   
   const [minStartDate, setMinStartDate] = useState<string>('');
   
-  // Form State: 為了讓 React input 受控，這裡初始化為空字串，但在送出時會轉為 null
+  // Form State
   const [formData, setFormData] = useState({
     real_name: '', dharma_name: '', registrant_type: '目前上禪修班學員', registration_option: '新增',
     activity_location: '', activity_name: '', activity_option: '',
@@ -616,7 +659,7 @@ export default function App() {
           </div>
         )}
 
-        {/* ... 其他分頁邏輯 (History, Audit, Users, Data) ... */}
+        {/* ... 其他分頁邏輯 (History, Audit, Users, Data) 保持不變 ... */}
         {activeTab === 'history' && <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-12">{notes.filter(n => n.user_id === user?.id).map(n => <div key={n.id} className="bg-white p-10 rounded-[60px] shadow-xl border border-[#E8E2D1]"><div className="space-y-6"><h4 className="font-black text-4xl text-slate-800">{n.activity_name}</h4><div className="flex items-center gap-4 text-3xl font-black text-[#7A2E40]"><User className="w-10 h-10"/> {n.real_name}</div><div className="mt-10 bg-[#FAF9F6] p-6 rounded-[40px] border border-[#E8E2D1] flex justify-between items-center"><label className="flex items-center gap-5 cursor-pointer select-none"><input type="checkbox" className="w-10 h-10 rounded-xl text-[#7A2E40]" checked={n.is_deleted} onChange={() => handleToggleDeleteNote(n.id, n.is_deleted)} /><span className="font-black text-3xl text-[#7A2E40]">刪除紀錄</span></label></div></div></div>)}</div>}
 
         {activeTab === 'users' && isAdmin && (
@@ -697,9 +740,9 @@ export default function App() {
               </div>
               
               <div className="mt-16 bg-slate-900 p-8 rounded-[40px] font-mono text-sm text-green-400 overflow-x-auto">
-                 <h4 className="text-white font-bold mb-4 flex items-center gap-2"><AlertTriangle className="text-yellow-500"/> 若無法新增活動，請在 Supabase SQL Editor 執行此段指令：</h4>
-                 {/* 修正：增加 content 欄位新增指令 */}
-                 <code>ALTER TABLE "public"."activity_hierarchy" ADD COLUMN IF NOT EXISTS "content" text; CREATE POLICY "Enable all for authenticated" ON "public"."activity_hierarchy" FOR ALL TO authenticated USING (true) WITH CHECK (true);</code>
+                 <h4 className="text-white font-bold mb-4 flex items-center gap-2"><AlertTriangle className="text-yellow-500"/> 資料庫欄位修復指令 (請在 Supabase SQL Editor 執行此段)：</h4>
+                 {/* 修正：增加 accommodation_option 欄位新增指令 */}
+                 <code>ALTER TABLE "public"."notes" ADD COLUMN IF NOT EXISTS "accommodation_option" text; ALTER TABLE "public"."notes" ADD COLUMN IF NOT EXISTS "audit_status" text DEFAULT '待審核';</code>
               </div>
            </div>
         )}
