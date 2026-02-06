@@ -5,33 +5,20 @@ import {
   Bell, FileText, History, Settings, Shield, LogOut, Plus, Trash2, Check, 
   Edit, User, MapPin, Tag, ListFilter, Save, Database, Clock, Car, Info, 
   Home, UserCheck, AlertCircle, Briefcase, Layers, 
-  CheckCircle2, CheckSquare, FileSpreadsheet, Megaphone, ClipboardCheck, UserCog, Share2, Lock, Eye, EyeOff, Users, ArrowRight, RefreshCw, AlertTriangle, Image as ImageIcon, Table
+  CheckCircle2, CheckSquare, FileSpreadsheet, Megaphone, ClipboardCheck, UserCog, Share2, Lock, Eye, EyeOff, Users, ArrowRight, RefreshCw, AlertTriangle, Image as ImageIcon, Table as TableIcon
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v43.0 (資料表結構顯示與選填欄位調整版)
+ * 系統版本：v43.2 (LOGO 圖片還原版)
  * 修正說明：
- * 1. [Form] 移除「交通」、「日期」相關欄位的必填星號 (*)，設為選填。
- * 2. [Admin] 設定頁籤移除 SQL 提示，改為列出 Notes 資料表欄位結構。
- * 3. [Design] 主色系維持 #4f093c，LOGO 維持圖片讀取。
+ * 1. [UI] 將 LOGO 改回使用 <img src="/logo.png" /> (請確保 public 資料夾中有此檔案)。
+ * 2. [UI] 移除內嵌 SVG 代碼。
+ * 3. [System] 完整保留資料表結構說明與選填設定。
  */
 
 // --- 主色系設定 ---
 const PRIMARY_COLOR = "#4f093c"; 
-
-// --- 內嵌 Logo SVG ---
-const CustomLogo = ({ className }: { className?: string }) => (
-  <svg viewBox="0 0 100 100" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
-    <circle cx="50" cy="50" r="48" fill="#7A2E40"/>
-    <path d="M25 65 Q50 85 75 65 L70 55 Q50 70 30 55 Z" fill="#E8E2D1"/>
-    <path d="M35 55 L40 30 L60 30 L65 55 Z" fill="#E8E2D1" opacity="0.9"/>
-    <circle cx="50" cy="20" r="8" fill="#D97706"/>
-    <path d="M50 12 V28" stroke="#7A2E40" strokeWidth="2"/>
-    <path d="M42 20 H58" stroke="#7A2E40" strokeWidth="2"/>
-    <path d="M50 8 V4 M20 50 H16 M80 50 H84" stroke="white" strokeWidth="2" opacity="0.5"/>
-  </svg>
-);
 
 // --- 型別定義 ---
 interface ActivityHierarchy {
@@ -57,7 +44,6 @@ interface Note {
   identity: string;
   volunteer_type?: string;
   transportation: string;
-  // 日期欄位允許 null
   arrival_datetime: string | null;
   departure_datetime: string | null;
   volunteer_group?: string;
@@ -109,7 +95,7 @@ const DB_SCHEMA = [
   { name: 'activity_location', type: 'text', required: '必填' },
   { name: 'activity_name', type: 'text', required: '必填' },
   { name: 'activity_option', type: 'text', required: '必填' },
-  { name: 'selected_contents', type: 'text[]', required: '選填 (視行程)' },
+  { name: 'selected_contents', type: 'text[]', required: '選填' },
   { name: 'other_remarks', type: 'text', required: '選填' },
   { name: 'identity', type: 'text', required: '必填' },
   { name: 'volunteer_type', type: 'text', required: '選填' },
@@ -201,8 +187,6 @@ export default function App() {
   const [authMode, setAuthMode] = useState<'login'|'signup'|'forgot'>('login');
   
   const [minStartDate, setMinStartDate] = useState<string>('');
-  
-  // Form State
   const [formData, setFormData] = useState({
     real_name: '', dharma_name: '', registrant_type: '目前上禪修班學員', registration_option: '新增',
     activity_location: '', activity_name: '', activity_option: '',
@@ -360,7 +344,7 @@ export default function App() {
   // 管理後台專用聯動
   const adminActivities = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity).map(h => h.activity as string))].sort(), [hierarchyData, mgmtSelectedLoc]);
   const adminOptions = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option).map(h => h.option as string))].sort(), [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct]);
-  const adminContents = useMemo(() => hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option === mgmtSelectedOpt && h.content).map(h => h), [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
+  const adminContents = useMemo(() => hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option === mgmtSelectedOpt && h.content).map(h => h.content as string).sort(), [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
 
   const filteredTransportOptions = useMemo(() => {
     const all = ["大車-精舍統一行程", "小車-自訂抵離寺", "自行前往-自訂抵離寺"];
@@ -636,7 +620,6 @@ export default function App() {
           <div className="bg-white p-8 rounded-[40px] shadow-2xl border border-[#E8E2D1] animate-in slide-in-from-bottom-12">
              <div className="flex items-center gap-4 border-b border-[#F2ECE4] pb-6 mb-6"><div className="p-3 bg-[#7A2E40] rounded-2xl text-white shadow-lg" style={{ backgroundColor: PRIMARY_COLOR }}><Edit className="w-6 h-6" /></div><h3 className="text-2xl font-black text-[#7A2E40] tracking-tight">發心登記表</h3></div>
              
-             {/* 修正：加入預設空白選項，並調整欄寬 */}
              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                 <div className="lg:col-span-3 space-y-2"><label className="text-lg font-black text-[#7A2E40] ml-1">姓名*</label><input className="w-full p-3 text-xl font-bold border-2 rounded-xl" value={formData.real_name} onChange={e=>setFormData({...formData, real_name: e.target.value})} /></div>
                 <div className="lg:col-span-2 space-y-2"><label className="text-lg font-black text-[#7A2E40] ml-1">法名</label><input className="w-full p-3 text-xl font-bold border-2 rounded-xl" value={formData.dharma_name} onChange={e=>setFormData({...formData, dharma_name: e.target.value})} /></div>
@@ -659,7 +642,7 @@ export default function App() {
           </div>
         )}
 
-        {/* ... 其他分頁邏輯 (History, Audit, Users, Data) 保持不變 ... */}
+        {/* ... 其他分頁邏輯 (History, Audit, Users, Data) ... */}
         {activeTab === 'history' && <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-12">{notes.filter(n => n.user_id === user?.id).map(n => <div key={n.id} className="bg-white p-10 rounded-[60px] shadow-xl border border-[#E8E2D1]"><div className="space-y-6"><h4 className="font-black text-4xl text-slate-800">{n.activity_name}</h4><div className="flex items-center gap-4 text-3xl font-black text-[#7A2E40]"><User className="w-10 h-10"/> {n.real_name}</div><div className="mt-10 bg-[#FAF9F6] p-6 rounded-[40px] border border-[#E8E2D1] flex justify-between items-center"><label className="flex items-center gap-5 cursor-pointer select-none"><input type="checkbox" className="w-10 h-10 rounded-xl text-[#7A2E40]" checked={n.is_deleted} onChange={() => handleToggleDeleteNote(n.id, n.is_deleted)} /><span className="font-black text-3xl text-[#7A2E40]">刪除紀錄</span></label></div></div></div>)}</div>}
 
         {activeTab === 'users' && isAdmin && (
@@ -738,11 +721,33 @@ export default function App() {
                  <div className="space-y-6 min-w-0"><h4 className="font-black text-3xl border-l-[15px] border-[#7A2E40] pl-6">行程</h4><div className="flex gap-2 shrink-0"><input className="flex-1 p-3 border-4 rounded-2xl text-xl font-bold min-w-0" disabled={!mgmtSelectedAct} value={newOption} onChange={e=>setNewOption(e.target.value)} /><button onClick={addOption} className="bg-[#7A2E40] text-white p-3 rounded-2xl shrink-0" disabled={!mgmtSelectedAct}><Plus/></button></div><div className="max-h-96 overflow-y-auto space-y-2">{adminOptions.map(o => <div key={o} onClick={()=>setMgmtSelectedOpt(o)} className={`p-4 rounded-2xl text-xl font-bold cursor-pointer flex justify-between items-center ${mgmtSelectedOpt === o ? 'bg-[#7A2E40] text-white' : 'bg-slate-100'}`}><span>{o}</span><button onClick={(e)=>{e.stopPropagation(); handleDeleteOption(o)}} className={mgmtSelectedOpt === o ? "text-white/80 hover:text-white" : "text-slate-400 hover:text-red-500"}><Trash2 className="w-5 h-5"/></button></div>)}</div></div>
                  <div className="space-y-6 min-w-0"><h4 className="font-black text-3xl border-l-[15px] border-[#7A2E40] pl-6">內容</h4><div className="flex gap-2 shrink-0"><input className="flex-1 p-3 border-4 rounded-2xl text-xl font-bold min-w-0" disabled={!mgmtSelectedOpt} value={newContent} onChange={e=>setNewContent(e.target.value)} /><button onClick={addContent} className="bg-[#7A2E40] text-white p-3 rounded-2xl shrink-0" disabled={!mgmtSelectedOpt}><Plus/></button></div><div className="max-h-96 overflow-y-auto space-y-2">{adminContents.map(h => <div key={h.id} className="p-4 rounded-2xl text-xl font-bold flex justify-between shadow-sm border border-[#F2ECE4]"><span>{h.content}</span><button onClick={()=>handleDeleteContent(h.id)} className="text-slate-400 hover:text-red-500"><Trash2 className="w-5 h-5"/></button></div>)}</div></div>
               </div>
-              
-              <div className="mt-16 bg-slate-900 p-8 rounded-[40px] font-mono text-sm text-green-400 overflow-x-auto">
-                 <h4 className="text-white font-bold mb-4 flex items-center gap-2"><AlertTriangle className="text-yellow-500"/> 資料庫欄位修復指令 (請在 Supabase SQL Editor 執行此段)：</h4>
-                 {/* 修正：增加 accommodation_option 欄位新增指令 */}
-                 <code>ALTER TABLE "public"."notes" ADD COLUMN IF NOT EXISTS "accommodation_option" text; ALTER TABLE "public"."notes" ADD COLUMN IF NOT EXISTS "audit_status" text DEFAULT '待審核';</code>
+              {/* Database Schema Table */}
+              <div className="mt-16">
+                 <h4 className="font-black text-3xl text-slate-700 border-l-[15px] border-[#7A2E40] pl-6 mb-8">後端資料表結構 (Notes)</h4>
+                 <div className="overflow-x-auto rounded-[40px] border border-[#E8E2D1] shadow-sm">
+                    <table className="w-full text-left text-sm bg-white">
+                       <thead className="bg-[#7A2E40] text-white font-bold text-lg" style={{ backgroundColor: PRIMARY_COLOR }}>
+                          <tr>
+                             <th className="p-6">欄位名稱 (Column)</th>
+                             <th className="p-6">類型 (Type)</th>
+                             <th className="p-6">必填設定</th>
+                          </tr>
+                       </thead>
+                       <tbody className="divide-y divide-[#F2ECE4] text-slate-600 font-bold text-base">
+                          {DB_SCHEMA.map((col) => (
+                             <tr key={col.name} className="hover:bg-[#FAF9F6] transition-colors">
+                                <td className="p-6 font-mono text-[#7A2E40]">{col.name}</td>
+                                <td className="p-6 font-mono text-slate-400">{col.type}</td>
+                                <td className="p-6">
+                                   <span className={`px-4 py-2 rounded-xl text-sm ${col.required.includes('必填') ? 'bg-red-100 text-red-700' : col.required.includes('系統') ? 'bg-slate-100 text-slate-500' : 'bg-green-100 text-green-700'}`}>
+                                      {col.required}
+                                   </span>
+                                </td>
+                             </tr>
+                          ))}
+                       </tbody>
+                    </table>
+                 </div>
               </div>
            </div>
         )}
