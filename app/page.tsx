@@ -10,11 +10,12 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v44.2 (資料表結構標籤更新版)
+ * 系統版本：v45.0 (日期約束修復與中文顯示優化版)
  * 修正說明：
- * 1. [UI] 更新 DB_SCHEMA 的中文標籤 (Label) 以符合用戶附圖要求 (如：自訂行程備註、義工選項、發心開始/結束)。
- * 2. [UI] 從 DB_SCHEMA 顯示列表中移除 audit_status 與 admin_memo 欄位。
- * 3. [System] 保持所有功能與資料庫寫入邏輯不變。
+ * 1. [Fix] 送出表單時移除 'audit_status' 與 'admin_memo'，交由 DB 預設處理。
+ * 2. [UI] 設定頁籤的資料表結構改為顯示「中文欄位名稱」。
+ * 3. [Config] DB_SCHEMA 移除管理欄位顯示。
+ * 4. [Alert] 請務必執行 SQL 解除日期欄位的 Not Null 限制。
  */
 
 // --- 主色系設定 ---
@@ -84,7 +85,7 @@ interface ResetRequest {
   created_at: string;
 }
 
-// 資料庫欄位結構定義 (修正屬性名稱 key -> name, 更新中文標籤, 移除 audit_status/admin_memo)
+// 資料庫欄位結構定義 (移除 audit_status 與 admin_memo，保留前台欄位)
 const DB_SCHEMA = [
   { name: 'id', label: '流水號', type: '唯一碼 (UUID)', required: '系統自動 (PK)' },
   { name: 'user_id', label: '用戶ID', type: '唯一碼 (UUID)', required: '系統自動 (FK)' },
@@ -373,11 +374,11 @@ export default function App() {
     if (!formData.real_name || !formData.activity_location || !formData.activity_name) return alert('請填寫必填欄位');
     if (availableContents.length > 0 && formData.selected_contents.length === 0) return alert('請至少勾選一項行程內容');
     
-    // 執行資料淨化
+    // 執行資料淨化，移除後端不可寫入的 audit_status 與 admin_memo
     const payload = { 
         ...formData, 
         user_id: user?.id, 
-        audit_status: '待審核' as const, 
+        // audit_status 由 DB 預設 '待審核'，此處不送出
         is_deleted: false, 
         created_at: new Date().toISOString(),
         start_date: sanitizeDate(formData.start_date),
@@ -738,7 +739,7 @@ export default function App() {
                        <tbody className="divide-y divide-[#F2ECE4] text-slate-600 font-bold text-base">
                           {DB_SCHEMA.map((col) => (
                              <tr key={col.name} className="hover:bg-[#FAF9F6] transition-colors">
-                                <td className="p-6 font-mono text-[#7A2E40]">{col.name}</td>
+                                <td className="p-6 font-mono text-[#7A2E40]">{col.label} <span className='text-xs text-gray-400 block'>{col.name}</span></td>
                                 <td className="p-6 font-mono text-slate-400">{col.type}</td>
                                 <td className="p-6">
                                    <span className={`px-4 py-2 rounded-xl text-sm ${col.required.includes('必填') ? 'bg-red-100 text-red-700' : col.required.includes('系統') ? 'bg-slate-100 text-slate-500' : 'bg-green-100 text-green-700'}`}>
