@@ -59,7 +59,8 @@ interface Note {
   stay_start_date?: string | null;
   stay_end_date?: string | null;
   is_deleted: boolean;
-  audit_status: string;
+  // audit_status 已從前端寫入移除，僅讀取
+  audit_status: string; 
   sign_name?: string;
   id_2?: string;
   created_at: string;
@@ -125,20 +126,69 @@ const DEFAULT_FIELD_DEFINITIONS: FieldDefinition[] = [
   { field_key: 'memo', field_label: '其他備註', field_type: '文字', is_required: false, description: '固定顯示' },
 ];
 
-// 預設表單狀態
-const INITIAL_FORM_DATA = {
-  real_name: '', dharma_name: '', registrant_type: '目前上禪修班學員', registration_option: '新增',
-  activity_location: '', activity_name: '', activity_option: '',
-  selected_contents: [] as string[], 
-  other_remarks: '', memo: '',
-  identity: '參加法會', 
-  volunteer_type: '一般義工-由精舍安排組別', transportation: '',
-  arrival_datetime: '', departure_datetime: '', volunteer_group: '', 
-  start_date: '', end_date: '', accommodation_option: '不安單', 
-  stay_start_date: '', stay_end_date: ''
-};
+const DB_SCHEMA = [
+  { name: 'id', label: '流水號', type: '唯一碼 (UUID)', required: '系統自動 (PK)' },
+  { name: 'user_id', label: '用戶ID', type: '唯一碼 (UUID)', required: '系統自動 (FK)' },
+  { name: 'real_name', label: '姓名', type: '文字', required: '必填' },
+  { name: 'dharma_name', label: '法名', type: '文字', required: '選填' },
+  { name: 'registrant_type', label: '屬性', type: '文字', required: '必填 (預設)' },
+  { name: 'registration_option', label: '報名選項', type: '文字', required: '必填 (預設)' },
+  { name: 'activity_location', label: '活動地點', type: '文字', required: '必填' },
+  { name: 'activity_name', label: '活動名稱', type: '文字', required: '必填' },
+  { name: 'activity_option', label: '活動行程', type: '文字', required: '必填' },
+  { name: 'selected_contents', label: '勾選內容', type: '文字陣列', required: '選填' },
+  { name: 'other_remarks', label: '自訂備註', type: '文字', required: '選填' },
+  { name: 'identity', label: '身分', type: '文字', required: '必填' },
+  { name: 'volunteer_type', label: '義工選項', type: '文字', required: '選填' },
+  { name: 'transportation', label: '交通', type: '文字', required: '選填' },
+  { name: 'arrival_datetime', label: '抵寺時間', type: '文字(日期)', required: '選填' },
+  { name: 'departure_datetime', label: '離寺時間', type: '文字(日期)', required: '選填' },
+  { name: 'volunteer_group', label: '義工組別', type: '文字', required: '選填' },
+  { name: 'start_date', label: '發心開始', type: '文字(日期)', required: '選填' },
+  { name: 'end_date', label: '發心結束', type: '文字(日期)', required: '選填' },
+  { name: 'accommodation_option', label: '安單選項', type: '文字', required: '選填' },
+  { name: 'stay_start_date', label: '安單開始', type: '文字(日期)', required: '選填' },
+  { name: 'stay_end_date', label: '安單結束', type: '文字(日期)', required: '選填' },
+  { name: 'memo', label: '其他備註', type: '文字', required: '選填' },
+  { name: 'sign_name', label: '登入者', type: '文字', required: '系統自動' },
+  { name: 'id_2', label: '登入者ID', type: '文字', required: '系統自動' },
+  { name: 'is_deleted', label: '是否刪除', type: '布林值', required: '系統預設' },
+  { name: 'created_at', label: '建立時間', type: '時間戳', required: '系統自動' },
+];
 
-// 格式化日期函式
+declare global {
+  interface Window {
+    supabase: any;
+  }
+}
+
+const FAKE_DOMAIN = "@my-notes.com";
+
+// --- 輔助函式 ---
+const encodeName = (name: string): string => {
+  try { let hex = ''; for (let i = 0; i < name.length; i++) hex += ('0000' + name.charCodeAt(i).toString(16)).slice(-4); return hex; } catch { return name; }
+};
+const decodeName = (email: string): string => {
+  try { const hex = email.split('@')[0]; let str = ''; for (let i = 0; i < hex.length; i += 4) str += String.fromCharCode(parseInt(hex.substr(i, 4), 16)); return str; } catch { return email?.split('@')[0] || ''; }
+};
+const getDisplayNameOnly = (email: string | undefined | null): string => {
+  if (!email) return 'User';
+  try {
+    const hex = email.split('@')[0]; 
+    let str = ''; 
+    for (let i = 0; i < hex.length; i += 4) str += String.fromCharCode(parseInt(hex.substr(i, 4), 16)); 
+    return str.length > 4 ? str.slice(0, -4) : str;
+  } catch { return email.split('@')[0]; }
+};
+const getIdLast4FromEmail = (email: string | undefined | null): string => {
+  if (!email) return '0000';
+  try {
+    const hex = email.split('@')[0]; 
+    let str = ''; 
+    for (let i = 0; i < hex.length; i += 4) str += String.fromCharCode(parseInt(hex.substr(i, 4), 16)); 
+    return str.length > 4 ? str.slice(-4) : '0000';
+  } catch { return '0000'; }
+};
 const formatDateTime = (isoString: string | undefined | null): string => {
   if (!isoString) return '-';
   try {
@@ -159,21 +209,18 @@ const renderBulletinContent = (content: string) => {
   });
 };
 
-const getDisplayNameOnly = (email: string | undefined | null): string => {
-    if (!email) return 'User';
-    try {
-      const hex = email.split('@')[0]; 
-      let str = ''; 
-      for (let i = 0; i < hex.length; i += 4) str += String.fromCharCode(parseInt(hex.substr(i, 4), 16)); 
-      return str.length > 4 ? str.slice(0, -4) : str;
-    } catch { return email.split('@')[0]; }
+// 預設表單狀態
+const INITIAL_FORM_DATA = {
+  real_name: '', dharma_name: '', registrant_type: '目前上禪修班學員', registration_option: '新增',
+  activity_location: '', activity_name: '', activity_option: '',
+  selected_contents: [] as string[], 
+  other_remarks: '', memo: '',
+  identity: '參加法會', 
+  volunteer_type: '一般義工-由精舍安排組別', transportation: '',
+  arrival_datetime: '', departure_datetime: '', volunteer_group: '', 
+  start_date: '', end_date: '', accommodation_option: '不安單', 
+  stay_start_date: '', stay_end_date: ''
 };
-
-const encodeName = (name: string): string => {
-    try { let hex = ''; for (let i = 0; i < name.length; i++) hex += ('0000' + name.charCodeAt(i).toString(16)).slice(-4); return hex; } catch { return name; }
-};
-
-const FAKE_DOMAIN = "@my-notes.com";
 
 export default function App() {
   const [supabaseClient, setSupabaseClient] = useState<any>(null);
@@ -217,7 +264,6 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    // Client-side only date initialization
     setTodayDate(new Date().toISOString().split('T')[0]);
 
     const loadSupabase = () => {
@@ -358,10 +404,9 @@ export default function App() {
   const availableOptions = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === formData.activity_location && h.activity === formData.activity_name && h.option).map(h => h.option as string))].sort(), [hierarchyData, formData.activity_location, formData.activity_name]);
   const availableContents = useMemo(() => hierarchyData.filter(h => h.location === formData.activity_location && h.activity === formData.activity_name && h.option === formData.activity_option && h.content).map(h => h.content as string).sort(), [hierarchyData, formData.activity_location, formData.activity_name, formData.activity_option]);
 
-  // 管理後台專用聯動
   const adminActivities = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity).map(h => h.activity as string))].sort(), [hierarchyData, mgmtSelectedLoc]);
   const adminOptions = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option).map(h => h.option as string))].sort(), [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct]);
-  // 修正：adminContents 需包含完整物件以提供 id 給刪除函式
+  // 修正：adminContents 需包含完整物件以提供 id
   const adminContents = useMemo(() => hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option === mgmtSelectedOpt && h.content), [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
 
   const filteredTransportOptions = useMemo(() => {
@@ -379,6 +424,7 @@ export default function App() {
     setFormData(prev => ({ ...prev, transportation: hasLargeBus ? "大車-精舍統一行程" : "小車-自訂抵離寺" }));
   }, [filteredTransportOptions]);
 
+  // 日期同步邏輯
   useEffect(() => { 
       if (formData.arrival_datetime) {
           const datePart = formData.arrival_datetime.split('T')[0];
@@ -393,6 +439,7 @@ export default function App() {
       }
   }, [formData.departure_datetime]);
 
+  // 欄位顯示邏輯
   const fieldVisibility = useMemo(() => {
     const isJingshe = formData.activity_location === '精舍';
     const isZhongtai = formData.activity_location === '中台';
@@ -414,6 +461,7 @@ export default function App() {
 
   const getFieldConfig = (key: string) => fieldConfigs.find(f => f.field_key === key) || { is_required: false, field_label: key };
 
+  // 驗證邏輯
   const validateForm = () => {
     for (const config of fieldConfigs) {
       if (config.is_required) {
@@ -478,7 +526,10 @@ export default function App() {
 
     if (!supabaseClient) return alert('系統未連線');
     
-    const { error } = await supabaseClient.from('notes').insert([payload]);
+    // 移除 audit_status 讓 DB 使用預設值
+    const { audit_status, ...finalPayload } = payload as any;
+
+    const { error } = await supabaseClient.from('notes').insert([finalPayload]);
     if (error) { 
         console.error("Submit error:", error);
         alert('提交失敗: ' + error.message); 
@@ -582,6 +633,7 @@ export default function App() {
   
   const handleExport = () => {
     const headers = "姓名,地點,活動,行程,勾選內容,身分,交通,時間";
+    // 修正：移除 audit_status
     const rows = notes.map(n => `"${n.real_name}","${n.activity_location}","${n.activity_name}","${n.activity_option}","${n.selected_contents?.join(';') || ''}","${n.identity}","${n.transportation}","${n.created_at}"`);
     const csvContent = "\uFEFF" + headers + "\n" + rows.join("\n");
     const link = document.createElement("a");
@@ -742,10 +794,11 @@ export default function App() {
         {activeTab === 'history' && <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-12">{notes.filter(n => n.user_id === user?.id).map(n => <div key={n.id} className="bg-white p-6 rounded-[40px] shadow-xl border border-[#E8E2D1] relative overflow-hidden"><div className="absolute top-0 left-0 w-3 h-full bg-[#7A2E40]"></div><div className="space-y-4"><div className="flex justify-between items-start"><span className="text-sm text-slate-400">{n.created_at.slice(0,10)}</span></div><h4 className="font-black text-2xl text-slate-800">{n.activity_name}</h4><div className="text-slate-500 text-sm space-y-1"><p>地點：{n.activity_location}</p><p>選項：{n.activity_option}</p>{n.sign_name && <p className="text-xs text-slate-300">報名者：{n.sign_name}</p>}</div><div className="mt-4 pt-4 border-t border-slate-100 flex justify-between items-center"><label className="flex items-center gap-2 cursor-pointer select-none text-red-400 hover:text-red-600"><input type="checkbox" className="w-5 h-5 rounded" checked={n.is_deleted} onChange={() => handleToggleDeleteNote(n.id, n.is_deleted)} /><span className="font-bold text-sm">刪除紀錄</span></label></div></div></div>)}</div>}
         {activeTab === 'users' && isAdmin && <div className="bg-white p-6 rounded-3xl shadow-sm border border-[#E8E2D1]"><h4 className="font-bold text-slate-600 mb-4 flex items-center gap-2"><Plus className="w-4 h-4"/> 新增使用者</h4><div className="flex flex-col md:flex-row gap-4"><input className="flex-1 p-2 border rounded-none text-sm" placeholder="姓名" value={newUser.name} onChange={e=>setNewUser({...newUser, name: e.target.value})} /><input className="w-32 p-2 border rounded-none text-sm" placeholder="ID後4碼" value={newUser.id4} onChange={e=>setNewUser({...newUser, id4: e.target.value})} /><input className="w-40 p-2 border rounded-none text-sm" placeholder="密碼" value={newUser.pwd} onChange={e=>setNewUser({...newUser, pwd: e.target.value})} /><button onClick={handleCreateUser} className="bg-blue-600 text-white px-6 rounded-xl font-bold text-sm hover:bg-blue-700">新增</button></div></div>}
         {activeTab === 'users' && isAdmin && <div className="bg-white rounded-3xl shadow-sm border border-[#E8E2D1] overflow-hidden mt-8"><table className="w-full text-sm text-left"><thead className="bg-slate-50 text-slate-500 font-bold border-b"><tr><th className="p-4">姓名</th><th className="p-4">ID後4碼</th><th className="p-4">管理員</th><th className="p-4">狀態</th><th className="p-4 text-right">報名數</th></tr></thead><tbody className="divide-y">{allUsers.map(u => <tr key={u.id} className="hover:bg-slate-50"><td className="p-4 font-bold text-[#7A2E40]">{u.user_name}</td><td className="p-4 font-mono text-slate-400">{u.id_last4}</td><td className="p-4"><input type="checkbox" checked={u.is_admin} onChange={() => handleToggleAdmin(u.uid!, u.is_admin)} className="w-5 h-5 rounded border-slate-300 cursor-pointer" /></td><td className="p-4"><span className={`px-2 py-1 rounded text-xs font-bold ${u.is_disabled ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>{u.is_disabled ? '已停用' : '啟用中'}</span></td><td className="p-4 text-right"><button onClick={()=>handleToggleUserStatus(u.uid!, u.is_disabled)} className="text-blue-500 hover:underline">{u.is_disabled ? '啟用' : '停用'}</button></td></tr>)}</tbody></table></div>}
+        
+        {/* 審核頁籤：僅顯示密碼重設 (已移除報名表審核) */}
         {activeTab === 'audit' && isAdmin && <div className="space-y-12 animate-in fade-in"><div className="bg-[#7A2E40] p-10 rounded-[50px] flex justify-between items-center shadow-xl"><h2 className="text-4xl font-black text-white">審核中心 (密碼重設)</h2></div><div className="grid grid-cols-1 md:grid-cols-2 gap-12">{resetRequests.filter(r => r.status === 'pending').map(r => <div key={r.id} className="bg-white p-12 rounded-[60px] shadow-lg border-4 border-blue-200 relative overflow-hidden"><div className="absolute top-0 right-0 px-12 py-5 rounded-bl-[60px] font-black text-white text-xl bg-blue-500">重設密碼</div><div className="text-blue-900 font-black text-5xl mb-4">{r.user_name}</div><div className="text-slate-400 text-2xl font-mono">ID: {r.id_last4}</div><div className="flex gap-4 mt-8"><button onClick={()=>handleResetAction(r.id, 'approve')} className="flex-1 py-6 bg-blue-50 text-blue-700 font-black text-3xl rounded-[30px] border-4 border-blue-600 hover:bg-blue-600 hover:text-white transition-all">批准</button><button onClick={()=>handleResetAction(r.id, 'reject')} className="flex-1 py-6 bg-slate-50 text-slate-700 font-black text-3xl rounded-[30px] border-4 border-slate-600 hover:bg-slate-600 hover:text-white transition-all">拒絕</button></div></div>)}</div></div>}
         
         {activeTab === 'admin_data' && isAdmin && <div className="bg-white p-10 rounded-[60px] shadow-sm border border-[#E8E2D1] animate-in fade-in"><div className="flex justify-between items-center mb-10 gap-6 border-b border-[#F2ECE4] pb-8"><h3 className="text-2xl font-black text-[#7A2E40]">資料總覽</h3><div className="flex gap-4"><select className="p-2 bg-[#FAF9F6] border rounded-none text-xs font-bold" value={filterLoc} onChange={e=>setFilterLoc(e.target.value)}><option value="">所有地點</option>{locations.map(l => <option key={l} value={l}>{l}</option>)}</select><button onClick={handleExport} className="bg-emerald-600 text-white px-6 py-2 rounded-2xl flex items-center gap-2 text-sm font-black hover:bg-emerald-700">匯出</button></div></div><div className="overflow-x-auto rounded-3xl border border-[#F2ECE4]"><table className="w-full text-left text-sm"><thead><tr className="bg-[#7A2E40] text-white"><th>姓名</th><th>地點</th><th>活動</th><th>行程</th><th>備註</th></tr></thead><tbody>{filteredAdminNotes.map(n => <tr key={n.id} className="hover:bg-slate-50"><td className="p-4">{n.real_name}</td><td className="p-4">{n.activity_location}</td><td className="p-4">{n.activity_name}</td><td className="p-4">{n.activity_option}</td><td className="p-4">{n.memo || '-'}</td></tr>)}</tbody></table></div></div>}
-        
         {activeTab === 'admin_settings' && isAdmin && (
            <div className="bg-white p-16 rounded-[80px] shadow-sm border border-[#E8E2D1]">
               <h3 className="text-2xl font-black text-[#7A2E40] mb-2">1、報名行程設定</h3>
