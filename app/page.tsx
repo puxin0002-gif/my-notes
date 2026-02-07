@@ -10,12 +10,14 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v58.0 (精舍義工欄位與日期同步邏輯修正版)
+ * 系統版本：v59.0 (日期邏輯與表單驗證強化版)
  * 修正說明：
- * 1. [Logic] 修正欄位顯示：地點「精舍」且身分「發心義工」時，顯示「義工組別」，隱藏「發心起迄」。
- * 2. [Logic] 優化日期同步：填寫抵離時間時，僅當發心/安單日期為「空白」時才自動填入，避免覆蓋既有資料。
- * 3. [UI] 保持 LOGO 圓形、欄高 p-2、主色系 #4f093c。
- * 4. [System] 保持所有資料庫與管理功能正常運作。
+ * 1. [Validation] 送出前強制檢查所有「可見」的日期欄位，若為空則阻擋。
+ * 2. [Logic] 日期防呆：開始日限今日以後，結束日限開始日之後。
+ * 3. [Logic] 日期同步：輸入抵離時間時，自動填入空白的發心/安單日期。
+ * 4. [Logic] 安單選項預設「不安單」，選「須安單」才顯示日期。
+ * 5. [UI] LOGO 圓形，欄高降低 (p-2)。
+ * 6. [System] 送出時自動清空隱藏欄位，並重置表單。
  */
 
 // --- 主色系設定 ---
@@ -168,6 +170,9 @@ const FAKE_DOMAIN = "@my-notes.com";
 const encodeName = (name: string): string => {
   try { let hex = ''; for (let i = 0; i < name.length; i++) hex += ('0000' + name.charCodeAt(i).toString(16)).slice(-4); return hex; } catch { return name; }
 };
+const decodeName = (email: string): string => {
+  try { const hex = email.split('@')[0]; let str = ''; for (let i = 0; i < hex.length; i += 4) str += String.fromCharCode(parseInt(hex.substr(i, 4), 16)); return str; } catch { return email?.split('@')[0] || ''; }
+};
 const getDisplayNameOnly = (email: string | undefined | null): string => {
   if (!email) return 'User';
   try {
@@ -176,6 +181,15 @@ const getDisplayNameOnly = (email: string | undefined | null): string => {
     for (let i = 0; i < hex.length; i += 4) str += String.fromCharCode(parseInt(hex.substr(i, 4), 16)); 
     return str.length > 4 ? str.slice(0, -4) : str;
   } catch { return email.split('@')[0]; }
+};
+const getIdLast4FromEmail = (email: string | undefined | null): string => {
+  if (!email) return '0000';
+  try {
+    const hex = email.split('@')[0]; 
+    let str = ''; 
+    for (let i = 0; i < hex.length; i += 4) str += String.fromCharCode(parseInt(hex.substr(i, 4), 16)); 
+    return str.length > 4 ? str.slice(-4) : '0000';
+  } catch { return '0000'; }
 };
 const formatDateTime = (isoString: string | undefined | null): string => {
   if (!isoString) return '-';
@@ -436,7 +450,7 @@ export default function App() {
       }
   }, [formData.departure_datetime]);
 
-  // 欄位顯示邏輯 (更新)
+  // 欄位顯示邏輯 (修正)
   const fieldVisibility = useMemo(() => {
     const isJingshe = formData.activity_location === '精舍';
     const isZhongtai = formData.activity_location === '中台';
@@ -447,11 +461,9 @@ export default function App() {
 
     return {
       transportation: !isJingshe,
-      // 義工組別：只要是發心義工就出現 (不限地點)
-      volunteerGroup: isVolunteer,
+      volunteerGroup: isVolunteer, // 只要是發心義工就顯示，不限地點
       volunteerType: isZhongtai && isVolunteer,
-      // 發心起訖：地點「非精舍」且身分「發心義工」才出現
-      volunteerDates: !isJingshe && isVolunteer, 
+      volunteerDates: !isJingshe && isVolunteer, // 地點非精舍且是義工才顯示
       arrivalDeparture: !isJingshe && !isBus,    
       accommodation: !isJingshe && !isBus && !isOneDay,
       accommodationDates: (!isJingshe && !isBus && !isOneDay) && needsAccommodation 
@@ -463,6 +475,7 @@ export default function App() {
   // 驗證邏輯：只檢查「可見」的必填欄位
   const validateForm = () => {
     for (const config of fieldConfigs) {
+      // 若該欄位被設定為必填，且目前是顯示狀態，則檢查
       if (config.is_required) {
         if (config.field_key === 'transportation' && !fieldVisibility.transportation) continue;
         if (config.field_key === 'volunteer_group' && !fieldVisibility.volunteerGroup) continue;
@@ -497,6 +510,17 @@ export default function App() {
            alert(`請檢查必填項目：${config.field_label}`);
            return false;
         }
+      }
+      
+      // 強制檢查：即使後台未設必填，若欄位出現，必須填寫日期 (根據您的要求1)
+      if (fieldVisibility.volunteerDates && ['start_date', 'end_date'].includes(config.field_key) && !formData[config.field_key as keyof typeof formData]) {
+          alert(`請填寫：${config.field_label}`); return false;
+      }
+      if (fieldVisibility.arrivalDeparture && ['arrival_datetime', 'departure_datetime'].includes(config.field_key) && !formData[config.field_key as keyof typeof formData]) {
+          alert(`請填寫：${config.field_label}`); return false;
+      }
+      if (fieldVisibility.accommodationDates && ['stay_start_date', 'stay_end_date'].includes(config.field_key) && !formData[config.field_key as keyof typeof formData]) {
+          alert(`請填寫：${config.field_label}`); return false;
       }
     }
     return true;
@@ -808,7 +832,7 @@ export default function App() {
           </div>
         )}
 
-        {/* ... 其他分頁 ... */}
+        {/* ... 其他分頁邏輯 ... */}
         {activeTab === 'history' && <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-12">{notes.filter(n => n.user_id === user?.id).map(n => <div key={n.id} className="bg-white p-6 rounded-[40px] shadow-xl border border-[#E8E2D1] relative overflow-hidden"><div className="absolute top-0 left-0 w-3 h-full bg-[#7A2E40]"></div><div className="space-y-4"><div className="flex justify-between items-start"><span className="text-sm text-slate-400">{n.created_at.slice(0,10)}</span></div><h4 className="font-black text-2xl text-slate-800">{n.activity_name}</h4><div className="text-slate-500 text-sm space-y-1"><p>地點：{n.activity_location}</p><p>選項：{n.activity_option}</p>{n.sign_name && <p className="text-xs text-slate-300">報名者：{n.sign_name}</p>}</div><div className="mt-4 pt-4 border-t border-slate-100 flex justify-between items-center"><label className="flex items-center gap-2 cursor-pointer select-none text-red-400 hover:text-red-600"><input type="checkbox" className="w-5 h-5 rounded" checked={n.is_deleted} onChange={() => handleToggleDeleteNote(n.id, n.is_deleted)} /><span className="font-bold text-sm">刪除紀錄</span></label></div></div></div>)}</div>}
         {activeTab === 'users' && isAdmin && <div className="bg-white p-6 rounded-3xl shadow-sm border border-[#E8E2D1]"><h4 className="font-bold text-slate-600 mb-4 flex items-center gap-2"><Plus className="w-4 h-4"/> 新增使用者</h4><div className="flex flex-col md:flex-row gap-4"><input className="flex-1 p-2 border rounded-none text-sm" placeholder="姓名" value={newUser.name} onChange={e=>setNewUser({...newUser, name: e.target.value})} /><input className="w-32 p-2 border rounded-none text-sm" placeholder="ID後4碼" value={newUser.id4} onChange={e=>setNewUser({...newUser, id4: e.target.value})} /><input className="w-40 p-2 border rounded-none text-sm" placeholder="密碼" value={newUser.pwd} onChange={e=>setNewUser({...newUser, pwd: e.target.value})} /><button onClick={handleCreateUser} className="bg-blue-600 text-white px-6 rounded-xl font-bold text-sm hover:bg-blue-700">新增</button></div></div>}
         {activeTab === 'users' && isAdmin && <div className="bg-white rounded-3xl shadow-sm border border-[#E8E2D1] overflow-hidden mt-8"><table className="w-full text-sm text-left"><thead className="bg-slate-50 text-slate-500 font-bold border-b"><tr><th className="p-4">姓名</th><th className="p-4">ID後4碼</th><th className="p-4">管理員</th><th className="p-4">狀態</th><th className="p-4 text-right">報名數</th></tr></thead><tbody className="divide-y">{allUsers.map(u => <tr key={u.id} className="hover:bg-slate-50"><td className="p-4 font-bold text-[#7A2E40]">{u.user_name}</td><td className="p-4 font-mono text-slate-400">{u.id_last4}</td><td className="p-4"><input type="checkbox" checked={u.is_admin} onChange={() => handleToggleAdmin(u.uid!, u.is_admin)} className="w-5 h-5 rounded border-slate-300 cursor-pointer" /></td><td className="p-4"><span className={`px-2 py-1 rounded text-xs font-bold ${u.is_disabled ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>{u.is_disabled ? '已停用' : '啟用中'}</span></td><td className="p-4 text-right"><button onClick={()=>handleToggleUserStatus(u.uid!, u.is_disabled)} className="text-blue-500 hover:underline">{u.is_disabled ? '啟用' : '停用'}</button></td></tr>)}</tbody></table></div>}
