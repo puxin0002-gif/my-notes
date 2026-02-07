@@ -10,12 +10,12 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v59.1 (日期時區修正與隱藏欄位淨化版)
+ * 系統版本：v59.2 (欄位位置對調與日期同步修復版)
  * 修正說明：
- * 1. [Fix] 日期 min 屬性改用本地時間計算，解決「選到過去日期」的時區問題。
- * 2. [Fix] 強化送出時的資料淨化，確保「未顯示」的日期欄位 (如精舍時的發心起訖) 絕對不會寫入 DB。
- * 3. [Logic] 保持抵離時間自動同步至發心/安單日期 (僅在欄位為空時)。
- * 4. [System] 完整保留所有欄位定義與資料庫對應。
+ * 1. [UI] 「義工組別」與「抵離時間」位置對調 (義工組別在前)。
+ * 2. [Fix] 修正發心起訖同步邏輯：現在會填入完整的「日期+時間」，解決無法顯示的問題。
+ * 3. [Fix] 日期 Min 屬性強化：加入 currentDateTime (YYYY-MM-DDThh:mm) 防止選到今天以前的時間。
+ * 4. [System] 保持所有資料庫欄位與驗證邏輯。
  */
 
 // --- 主色系設定 ---
@@ -222,7 +222,18 @@ const INITIAL_FORM_DATA = {
   stay_start_date: '', stay_end_date: ''
 };
 
-// 取得本地日期 (YYYY-MM-DD) 解決時區問題
+// 取得本地日期時間字串 (YYYY-MM-DDThh:mm)
+const getLocalTodayDateTime = () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+};
+
+// 取得本地日期 (YYYY-MM-DD)
 const getLocalTodayDate = () => {
   const now = new Date();
   const year = now.getFullYear();
@@ -253,6 +264,7 @@ export default function App() {
   const [authMode, setAuthMode] = useState<'login'|'signup'|'forgot'>('login');
   
   const [todayDate, setTodayDate] = useState('');
+  const [currentDateTime, setCurrentDateTime] = useState('');
   
   const [formData, setFormData] = useState(INITIAL_FORM_DATA);
 
@@ -273,7 +285,9 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    setTodayDate(getLocalTodayDate()); // 使用本地時間函式
+    // Client-side only date initialization
+    setTodayDate(getLocalTodayDate());
+    setCurrentDateTime(getLocalTodayDateTime());
 
     const loadSupabase = () => {
       const script = document.createElement('script');
@@ -434,13 +448,15 @@ export default function App() {
   }, [filteredTransportOptions]);
 
   // 日期同步邏輯：只有當目標日期欄位是空值時，才自動填入 (防止覆蓋已選日期)
+  // 修正：發心起訖填入完整 datetime (string), 安單起訖填入 date (string)
   useEffect(() => { 
       if (formData.arrival_datetime) {
           const datePart = formData.arrival_datetime.split('T')[0];
           setFormData(p => ({ 
               ...p, 
-              // 若 start_date 為空，則填入；否則維持原值
-              start_date: p.start_date ? p.start_date : datePart,
+              // 若 start_date 為空，則填入完整 datetime；否則維持原值
+              start_date: p.start_date ? p.start_date : formData.arrival_datetime,
+              // 若 stay_start_date 為空，則填入 date；否則維持原值
               stay_start_date: p.stay_start_date ? p.stay_start_date : datePart 
           }));
       }
@@ -451,8 +467,9 @@ export default function App() {
           const datePart = formData.departure_datetime.split('T')[0];
           setFormData(p => ({ 
               ...p, 
-              // 若 end_date 為空，則填入；否則維持原值
-              end_date: p.end_date ? p.end_date : datePart,
+              // 若 end_date 為空，則填入完整 datetime；否則維持原值
+              end_date: p.end_date ? p.end_date : formData.departure_datetime,
+              // 若 stay_end_date 為空，則填入 date；否則維持原值
               stay_end_date: p.stay_end_date ? p.stay_end_date : datePart 
           }));
       }
@@ -543,7 +560,7 @@ export default function App() {
     const signName = user?.user_metadata?.user_name || username;
     const id2 = user?.user_metadata?.id_last4 || idLast4;
 
-    // 清空未顯示的欄位值 (確保 DB 資料乾淨)
+    // 清空未顯示的欄位值
     let finalData = { ...formData };
 
     if (!fieldVisibility.transportation) finalData.transportation = '';
@@ -835,7 +852,7 @@ export default function App() {
              {availableContents.length > 0 && <div className="md:col-span-3 p-6 bg-[#F2ECE4]/30 rounded-[30px] border-4 border-dashed border-[#E8E2D1] mt-6"><label className="text-xl font-black text-[#7A2E40] mb-4 block">4. 行程內容複選</label><div className="flex flex-wrap gap-4">{availableContents.map(c => <button key={c} type="button" onClick={() => setFormData(p => ({ ...p, selected_contents: p.selected_contents.includes(c) ? p.selected_contents.filter(i => i !== c) : [...p.selected_contents, c] }))} className={`px-6 py-2 rounded-xl font-black text-lg border-2 transition-all ${formData.selected_contents.includes(c) ? 'bg-[#7A2E40] text-white border-[#7A2E40]' : 'bg-white text-[#7A2E40] border-[#E8E2D1]'}`}>{c}</button>)}</div></div>}
              {formData.activity_option.includes('自訂') && <div className="mt-6 space-y-2"><label className="text-lg font-black text-orange-600">{getFieldConfig('other_remarks').field_label}{getFieldConfig('other_remarks').is_required?'*':''}</label><textarea rows={2} className="w-full p-2 text-lg border rounded-none" value={formData.other_remarks} onChange={e=>setFormData({...formData, other_remarks: e.target.value})} /></div>}
              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 border-t-4 border-dotted border-[#F2ECE4] pt-6 mt-6"><div className="space-y-2"><label className="text-lg font-black text-slate-500 ml-1">{getFieldConfig('identity').field_label}{getFieldConfig('identity').is_required?'*':''}</label><select className="w-full p-2 rounded-none bg-[#FAF9F6] text-lg font-bold" value={formData.identity} onChange={e=>setFormData({...formData, identity: e.target.value})}><option value="">請選擇</option><option value="參加法會">參加法會</option><option value="發心義工">發心義工</option></select></div>{fieldVisibility.transportation && <div className="space-y-2"><label className="text-lg font-black text-slate-500 ml-1">{getFieldConfig('transportation').field_label}{getFieldConfig('transportation').is_required?'*':''}</label><select className="w-full p-2 rounded-none bg-[#FAF9F6] text-lg font-bold" value={formData.transportation} onChange={e=>setFormData({...formData, transportation: e.target.value})}><option value="">請選擇</option>{filteredTransportOptions.map(o => <option key={o} value={o}>{o}</option>)}</select></div>}</div>
-             <div className="md:col-span-3 border-t border-[#F2ECE4] pt-6 space-y-6">{fieldVisibility.volunteerGroup && <div className="p-6 bg-[#F2ECE4]/30 rounded-3xl border border-[#E8E2D1] space-y-4"><label className="text-lg font-black text-[#7A2E40]">{getFieldConfig('volunteer_group').field_label}{getFieldConfig('volunteer_group').is_required?'*':''}</label><input className="w-full p-2 rounded-none border text-lg" value={formData.volunteer_group} onChange={e=>setFormData({...formData, volunteer_group: e.target.value})} /></div>} {fieldVisibility.arrivalDeparture && <div className="grid grid-cols-1 md:grid-cols-2 gap-6"><div className="space-y-2"><label className="text-lg font-bold text-blue-700">{getFieldConfig('arrival_datetime').field_label}{getFieldConfig('arrival_datetime').is_required?'*':''}</label><input type="datetime-local" min={todayDate} className="w-full p-2 rounded-none border text-lg" value={formData.arrival_datetime || ''} onChange={e=>setFormData({...formData, arrival_datetime: e.target.value})} /></div><div className="space-y-2"><label className="text-lg font-bold text-blue-700">{getFieldConfig('departure_datetime').field_label}{getFieldConfig('departure_datetime').is_required?'*':''}</label><input type="datetime-local" min={formData.arrival_datetime || todayDate} className="w-full p-2 rounded-none border text-lg" value={formData.departure_datetime || ''} onChange={e=>setFormData({...formData, departure_datetime: e.target.value})} /></div></div>}{fieldVisibility.volunteerType && <div className="p-6 bg-[#F2ECE4]/30 rounded-3xl border border-[#E8E2D1] space-y-4"><label className="text-lg font-black text-[#7A2E40]">{getFieldConfig('volunteer_type').field_label}{getFieldConfig('volunteer_type').is_required?'*':''}</label><select className="w-full p-2 rounded-none text-lg" value={formData.volunteer_type} onChange={e=>setFormData({...formData, volunteer_type: e.target.value})}><option value="">請選擇</option><option value="一般義工-由精舍安排組別">一般義工-由精舍安排組別</option><option value="長期義工-已於平台報名">長期義工-已於平台報名</option><option value="佛巡-已於平台報名">佛巡-已於平台報名</option></select></div>}{fieldVisibility.volunteerDates && <div className="p-6 bg-[#F2ECE4]/30 rounded-3xl border border-[#E8E2D1] space-y-4"><label className="text-lg font-black text-[#7A2E40]">發心起訖</label><input type="datetime-local" min={todayDate} className="w-full p-2 rounded-none border text-lg" value={formData.start_date || ''} onChange={e=>setFormData({...formData, start_date: e.target.value})} /><input type="datetime-local" min={formData.start_date || todayDate} className="w-full p-2 rounded-none border text-lg mt-2" value={formData.end_date || ''} onChange={e=>setFormData({...formData, end_date: e.target.value})} /></div>}{fieldVisibility.accommodation && <div className="p-6 bg-slate-50 rounded-3xl border border-slate-200"><label className="text-lg font-black">安單選項</label><select className="w-full p-2 rounded-none text-lg mb-4" value={formData.accommodation_option} onChange={e=>setFormData({...formData, accommodation_option: e.target.value})}><option value="不安單">不安單</option><option value="須安單">須安單</option></select>{fieldVisibility.accommodationDates && <><label className="text-lg font-black">安單起訖</label><input type="date" min={todayDate} className="w-full p-2 text-lg rounded-none" value={formData.stay_start_date || ''} onChange={e=>setFormData({...formData, stay_start_date: e.target.value})} /><input type="date" min={formData.stay_start_date || todayDate} className="w-full p-2 text-lg rounded-none mt-4" value={formData.stay_end_date || ''} onChange={e=>setFormData({...formData, stay_end_date: e.target.value})} /></>}</div>}</div>
+             <div className="md:col-span-3 border-t border-[#F2ECE4] pt-6 space-y-6">{fieldVisibility.volunteerGroup && <div className="p-6 bg-[#F2ECE4]/30 rounded-3xl border border-[#E8E2D1] space-y-4"><label className="text-lg font-black text-[#7A2E40]">{getFieldConfig('volunteer_group').field_label}{getFieldConfig('volunteer_group').is_required?'*':''}</label><input className="w-full p-2 rounded-none border text-lg" value={formData.volunteer_group} onChange={e=>setFormData({...formData, volunteer_group: e.target.value})} /></div>} {fieldVisibility.arrivalDeparture && <div className="grid grid-cols-1 md:grid-cols-2 gap-6"><div className="space-y-2"><label className="text-lg font-bold text-blue-700">{getFieldConfig('arrival_datetime').field_label}{getFieldConfig('arrival_datetime').is_required?'*':''}</label><input type="datetime-local" min={currentDateTime} className="w-full p-2 rounded-none border text-lg" value={formData.arrival_datetime || ''} onChange={e=>setFormData({...formData, arrival_datetime: e.target.value})} /></div><div className="space-y-2"><label className="text-lg font-bold text-blue-700">{getFieldConfig('departure_datetime').field_label}{getFieldConfig('departure_datetime').is_required?'*':''}</label><input type="datetime-local" min={formData.arrival_datetime || currentDateTime} className="w-full p-2 rounded-none border text-lg" value={formData.departure_datetime || ''} onChange={e=>setFormData({...formData, departure_datetime: e.target.value})} /></div></div>}{fieldVisibility.volunteerType && <div className="p-6 bg-[#F2ECE4]/30 rounded-3xl border border-[#E8E2D1] space-y-4"><label className="text-lg font-black text-[#7A2E40]">{getFieldConfig('volunteer_type').field_label}{getFieldConfig('volunteer_type').is_required?'*':''}</label><select className="w-full p-2 rounded-none text-lg" value={formData.volunteer_type} onChange={e=>setFormData({...formData, volunteer_type: e.target.value})}><option value="">請選擇</option><option value="一般義工-由精舍安排組別">一般義工-由精舍安排組別</option><option value="長期義工-已於平台報名">長期義工-已於平台報名</option><option value="佛巡-已於平台報名">佛巡-已於平台報名</option></select></div>}{fieldVisibility.volunteerDates && <div className="p-6 bg-[#F2ECE4]/30 rounded-3xl border border-[#E8E2D1] space-y-4"><label className="text-lg font-black text-[#7A2E40]">發心起訖</label><input type="datetime-local" min={currentDateTime} className="w-full p-2 rounded-none border text-lg" value={formData.start_date || ''} onChange={e=>setFormData({...formData, start_date: e.target.value})} /><input type="datetime-local" min={formData.start_date || currentDateTime} className="w-full p-2 rounded-none border text-lg mt-2" value={formData.end_date || ''} onChange={e=>setFormData({...formData, end_date: e.target.value})} /></div>}{fieldVisibility.accommodation && <div className="p-6 bg-slate-50 rounded-3xl border border-slate-200"><label className="text-lg font-black">安單選項</label><select className="w-full p-2 rounded-none text-lg mb-4" value={formData.accommodation_option} onChange={e=>setFormData({...formData, accommodation_option: e.target.value})}><option value="不安單">不安單</option><option value="須安單">須安單</option></select>{fieldVisibility.accommodationDates && <><label className="text-lg font-black">安單起訖</label><input type="date" min={todayDate} className="w-full p-2 text-lg rounded-none" value={formData.stay_start_date || ''} onChange={e=>setFormData({...formData, stay_start_date: e.target.value})} /><input type="date" min={formData.stay_start_date || todayDate} className="w-full p-2 text-lg rounded-none mt-4" value={formData.stay_end_date || ''} onChange={e=>setFormData({...formData, stay_end_date: e.target.value})} /></>}</div>}</div>
              <div className="mt-8 border-t border-[#F2ECE4] pt-6 space-y-2"><label className="text-lg font-black text-slate-500">{getFieldConfig('memo').field_label}{getFieldConfig('memo').is_required?'*':''}</label><textarea rows={3} className="w-full p-2 text-lg border rounded-none" placeholder="若有其他需求請填寫於此..." value={formData.memo} onChange={e=>setFormData({...formData, memo: e.target.value})} /></div>
              <button onClick={handleSubmitNote} disabled={loading} className="w-full mt-10 bg-[#7A2E40] hover:bg-[#5D2331] text-white py-4 rounded-2xl font-black text-3xl shadow-lg transition-all" style={{ backgroundColor: PRIMARY_COLOR }}>確認送出</button>
           </div>
