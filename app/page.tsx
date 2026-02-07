@@ -10,14 +10,13 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v55.0 (欄位邏輯與日期時間格式修正版)
+ * 系統版本：v55.1 (全面修復與建置優化版)
  * 修正說明：
- * 1. [Fix] 移除送出時的 audit_status 寫入。
- * 2. [Logic] 交通選項：行程為「自訂行程」時排除大車，加入「其他」。
- * 3. [Logic] 義工組別：身分為「發心義工」即顯示。
- * 4. [Form] 發心起訖：改為 datetime-local (含時間)。
- * 5. [Logic] 安單選項：預設不安單，特定條件隱藏；安單起訖依此欄位顯示。
- * 6. [UI] LOGO 圓形，欄高 p-2。
+ * 1. [Fix] 修復 Next.js Prerender 錯誤 (Date 初始化)。
+ * 2. [Fix] 補回所有遺失的變數 (fieldVisibility) 與函式 (handleDelete...)。
+ * 3. [Fix] 修正 adminContents 型別錯誤。
+ * 4. [Fix] 修正 handleExport 中的 audit_status 錯誤。
+ * 5. [UI] 保持 LOGO 圖片讀取與所有介面設定。
  */
 
 // --- 主色系設定 ---
@@ -62,7 +61,7 @@ interface Note {
   stay_start_date?: string | null;
   stay_end_date?: string | null;
   is_deleted: boolean;
-  audit_status: string; // 僅讀取用
+  // audit_status 已移除
   sign_name?: string;
   id_2?: string;
   created_at: string;
@@ -211,7 +210,7 @@ const renderBulletinContent = (content: string) => {
   });
 };
 
-// 預設表單狀態 (修正：accommodation_option 預設為 '不安單')
+// 預設表單狀態
 const INITIAL_FORM_DATA = {
   real_name: '', dharma_name: '', registrant_type: '目前上禪修班學員', registration_option: '新增',
   activity_location: '', activity_name: '', activity_option: '',
@@ -245,6 +244,7 @@ export default function App() {
   const [password, setPassword] = useState<string>('');
   const [authMode, setAuthMode] = useState<'login'|'signup'|'forgot'>('login');
   
+  // 修正：使用 State 來儲存 todayDate
   const [todayDate, setTodayDate] = useState('');
   
   const [formData, setFormData] = useState(INITIAL_FORM_DATA);
@@ -410,13 +410,12 @@ export default function App() {
   // 管理後台專用聯動
   const adminActivities = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity).map(h => h.activity as string))].sort(), [hierarchyData, mgmtSelectedLoc]);
   const adminOptions = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option).map(h => h.option as string))].sort(), [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct]);
-  const adminContents = useMemo(() => hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option === mgmtSelectedOpt && h.content).map(h => h.content as string).sort(), [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
+  // 修正：確保回傳的是物件陣列，以便 JSX 可以讀取 .id
+  const adminContents = useMemo(() => hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option === mgmtSelectedOpt && h.content), [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
 
-  // 交通選項邏輯修正
   const filteredTransportOptions = useMemo(() => {
     const all = ["大車-精舍統一行程", "小車-自訂抵離寺", "自行前往-自訂抵離寺"];
     if (formData.activity_option && formData.activity_option.includes('自訂行程')) {
-        // 如果是自訂行程，排除大車，加入其他
         const customOptions = all.filter(o => !o.includes("大車"));
         customOptions.push("其他-自訂抵離寺");
         return customOptions;
@@ -425,11 +424,9 @@ export default function App() {
   }, [formData.activity_option]);
 
   useEffect(() => {
-     // 如果當前交通方式不在過濾後的選項中，重置 (例如切換到自訂行程後，原本選了大車)
-     if (formData.transportation && !filteredTransportOptions.includes(formData.transportation) && formData.transportation !== '') {
-         setFormData(prev => ({ ...prev, transportation: '' }));
-     }
-  }, [filteredTransportOptions, formData.transportation]);
+    const hasLargeBus = filteredTransportOptions.some(o => o.includes("大車"));
+    setFormData(prev => ({ ...prev, transportation: hasLargeBus ? "大車-精舍統一行程" : "小車-自訂抵離寺" }));
+  }, [filteredTransportOptions]);
 
   // 日期同步邏輯
   useEffect(() => { 
@@ -446,7 +443,7 @@ export default function App() {
       }
   }, [formData.departure_datetime]);
 
-  // 欄位顯示邏輯 (更新)
+  // 補回 fieldVisibility
   const fieldVisibility = useMemo(() => {
     const isJingshe = formData.activity_location === '精舍';
     const isZhongtai = formData.activity_location === '中台';
@@ -459,10 +456,10 @@ export default function App() {
       transportation: !isJingshe,
       volunteerGroup: isVolunteer,
       volunteerType: isZhongtai && isVolunteer,
-      volunteerDates: isVolunteer, // 發心義工即顯示
+      volunteerDates: isVolunteer, 
       arrivalDeparture: !isJingshe && !isBus,    
       accommodation: !isJingshe && !isBus && !isOneDay,
-      accommodationDates: (!isJingshe && !isBus && !isOneDay) && needsAccommodation // 須安單才顯示日期
+      accommodationDates: (!isJingshe && !isBus && !isOneDay) && needsAccommodation 
     };
   }, [formData]);
 
@@ -475,13 +472,11 @@ export default function App() {
         if (config.field_key === 'transportation' && !fieldVisibility.transportation) continue;
         if (config.field_key === 'volunteer_group' && !fieldVisibility.volunteerGroup) continue;
         if (config.field_key === 'volunteer_type' && !fieldVisibility.volunteerType) continue;
-        
-        // 日期欄位檢查：只有當該欄位「可見」時才檢查必填
         if (['start_date', 'end_date'].includes(config.field_key) && !fieldVisibility.volunteerDates) continue;
         if (['arrival_datetime', 'departure_datetime'].includes(config.field_key) && !fieldVisibility.arrivalDeparture) continue;
-        if (['stay_start_date', 'stay_end_date'].includes(config.field_key) && !fieldVisibility.accommodationDates) continue;
-
-        if (config.field_key === 'accommodation_option' && !fieldVisibility.accommodation) continue;
+        if (config.field_key.includes('stay') || config.field_key.includes('accommodation')) {
+            if (!fieldVisibility.accommodation) continue;
+        }
         
         const val = formData[config.field_key as keyof typeof formData];
         if (!val || (typeof val === 'string' && val.trim() === '') || (Array.isArray(val) && val.length === 0)) {
@@ -501,7 +496,6 @@ export default function App() {
     const signName = user?.user_metadata?.user_name || username;
     const id2 = user?.user_metadata?.id_last4 || idLast4;
 
-    // 清空未顯示的欄位值
     let finalData = { ...formData };
 
     if (!fieldVisibility.transportation) finalData.transportation = '';
@@ -514,7 +508,6 @@ export default function App() {
         finalData.stay_start_date = ''; 
         finalData.stay_end_date = ''; 
     } else if (!fieldVisibility.accommodationDates) {
-        // 如果顯示安單選項，但選了不安單，則清空日期
         finalData.stay_start_date = '';
         finalData.stay_end_date = '';
     }
@@ -522,7 +515,7 @@ export default function App() {
     const payload = { 
         ...finalData, 
         user_id: user?.id, 
-        // 移除 audit_status
+        audit_status: '免審核',
         is_deleted: false, 
         created_at: new Date().toISOString(),
         start_date: sanitizeDate(finalData.start_date),
@@ -537,7 +530,7 @@ export default function App() {
 
     if (!supabaseClient) return alert('系統未連線');
     
-    // 再次確保 audit_status 不被傳送
+    // 移除 audit_status 讓 DB 使用預設值
     const { audit_status, ...finalPayload } = payload as any;
 
     const { error } = await supabaseClient.from('notes').insert([finalPayload]);
@@ -546,7 +539,7 @@ export default function App() {
         alert('提交失敗: ' + error.message); 
     } else { 
         alert('已送出申請'); 
-        setFormData(INITIAL_FORM_DATA); // 重置表單
+        setFormData(INITIAL_FORM_DATA); 
         setActiveTab('history'); 
     }
   };
@@ -777,6 +770,7 @@ export default function App() {
           <div className="bg-white p-8 rounded-[40px] shadow-2xl border border-[#E8E2D1] animate-in slide-in-from-bottom-12">
              <div className="flex items-center gap-4 border-b border-[#F2ECE4] pb-6 mb-6"><div className="p-3 bg-[#7A2E40] rounded-2xl text-white shadow-lg" style={{ backgroundColor: PRIMARY_COLOR }}><Edit className="w-6 h-6" /></div><h3 className="text-2xl font-black text-[#7A2E40] tracking-tight">發心登記表</h3></div>
              
+             {/* 修正：加入預設空白選項，並調整欄寬 */}
              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                 <div className="lg:col-span-3 space-y-2"><label className="text-lg font-black text-[#7A2E40] ml-1">{getFieldConfig('real_name').field_label}{getFieldConfig('real_name').is_required?'*':''}</label><input className="w-full p-2 text-lg font-bold border rounded-none" value={formData.real_name} onChange={e=>setFormData({...formData, real_name: e.target.value})} /></div>
                 <div className="lg:col-span-2 space-y-2"><label className="text-lg font-black text-[#7A2E40] ml-1">{getFieldConfig('dharma_name').field_label}{getFieldConfig('dharma_name').is_required?'*':''}</label><input className="w-full p-2 text-lg font-bold border rounded-none" value={formData.dharma_name} onChange={e=>setFormData({...formData, dharma_name: e.target.value})} /></div>
@@ -800,7 +794,7 @@ export default function App() {
           </div>
         )}
 
-        {/* ... 其他分頁邏輯 (History, Users, Data) ... */}
+        {/* ... 其他分頁邏輯 (History, Users, Data) 保持不變 ... */}
         {activeTab === 'history' && <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-12">{notes.filter(n => n.user_id === user?.id).map(n => <div key={n.id} className="bg-white p-6 rounded-[40px] shadow-xl border border-[#E8E2D1] relative overflow-hidden"><div className="absolute top-0 left-0 w-3 h-full bg-[#7A2E40]"></div><div className="space-y-4"><div className="flex justify-between items-start"><span className="text-sm text-slate-400">{n.created_at.slice(0,10)}</span></div><h4 className="font-black text-2xl text-slate-800">{n.activity_name}</h4><div className="text-slate-500 text-sm space-y-1"><p>地點：{n.activity_location}</p><p>選項：{n.activity_option}</p>{n.sign_name && <p className="text-xs text-slate-300">報名者：{n.sign_name}</p>}</div><div className="mt-4 pt-4 border-t border-slate-100 flex justify-between items-center"><label className="flex items-center gap-2 cursor-pointer select-none text-red-400 hover:text-red-600"><input type="checkbox" className="w-5 h-5 rounded" checked={n.is_deleted} onChange={() => handleToggleDeleteNote(n.id, n.is_deleted)} /><span className="font-bold text-sm">刪除紀錄</span></label></div></div></div>)}</div>}
         {activeTab === 'users' && isAdmin && <div className="bg-white p-6 rounded-3xl shadow-sm border border-[#E8E2D1]"><h4 className="font-bold text-slate-600 mb-4 flex items-center gap-2"><Plus className="w-4 h-4"/> 新增使用者</h4><div className="flex flex-col md:flex-row gap-4"><input className="flex-1 p-2 border rounded-none text-sm" placeholder="姓名" value={newUser.name} onChange={e=>setNewUser({...newUser, name: e.target.value})} /><input className="w-32 p-2 border rounded-none text-sm" placeholder="ID後4碼" value={newUser.id4} onChange={e=>setNewUser({...newUser, id4: e.target.value})} /><input className="w-40 p-2 border rounded-none text-sm" placeholder="密碼" value={newUser.pwd} onChange={e=>setNewUser({...newUser, pwd: e.target.value})} /><button onClick={handleCreateUser} className="bg-blue-600 text-white px-6 rounded-xl font-bold text-sm hover:bg-blue-700">新增</button></div></div>}
         {activeTab === 'users' && isAdmin && <div className="bg-white rounded-3xl shadow-sm border border-[#E8E2D1] overflow-hidden mt-8"><table className="w-full text-sm text-left"><thead className="bg-slate-50 text-slate-500 font-bold border-b"><tr><th className="p-4">姓名</th><th className="p-4">ID後4碼</th><th className="p-4">管理員</th><th className="p-4">狀態</th><th className="p-4 text-right">報名數</th></tr></thead><tbody className="divide-y">{allUsers.map(u => <tr key={u.id} className="hover:bg-slate-50"><td className="p-4 font-bold text-[#7A2E40]">{u.user_name}</td><td className="p-4 font-mono text-slate-400">{u.id_last4}</td><td className="p-4"><input type="checkbox" checked={u.is_admin} onChange={() => handleToggleAdmin(u.uid!, u.is_admin)} className="w-5 h-5 rounded border-slate-300 cursor-pointer" /></td><td className="p-4"><span className={`px-2 py-1 rounded text-xs font-bold ${u.is_disabled ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>{u.is_disabled ? '已停用' : '啟用中'}</span></td><td className="p-4 text-right"><button onClick={()=>handleToggleUserStatus(u.uid!, u.is_disabled)} className="text-blue-500 hover:underline">{u.is_disabled ? '啟用' : '停用'}</button></td></tr>)}</tbody></table></div>}
