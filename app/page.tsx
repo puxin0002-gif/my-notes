@@ -10,21 +10,22 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v46.0 (動態欄位管理與必填驗證版)
+ * 系統版本：v55.0 (欄位邏輯與日期時間格式修正版)
  * 修正說明：
- * 1. [Feature] 新增 field_definitions 資料表與管理介面，可動態設定必填與備註。
- * 2. [Form] 登記表單根據 field_definitions 動態顯示必填星號 (*) 並執行驗證。
- * 3. [Form] 新增「其他備註」欄位 (other_remarks)。
- * 4. [UI] 優化紀錄頁籤的卡片顯示。
- * 5. [DB] 請執行新的 SQL 指令以建立 field_definitions 表格。
+ * 1. [Fix] 移除送出時的 audit_status 寫入。
+ * 2. [Logic] 交通選項：行程為「自訂行程」時排除大車，加入「其他」。
+ * 3. [Logic] 義工組別：身分為「發心義工」即顯示。
+ * 4. [Form] 發心起訖：改為 datetime-local (含時間)。
+ * 5. [Logic] 安單選項：預設不安單，特定條件隱藏；安單起訖依此欄位顯示。
+ * 6. [UI] LOGO 圓形，欄高 p-2。
  */
 
 // --- 主色系設定 ---
 const PRIMARY_COLOR = "#4f093c"; 
 
-// --- 內嵌 Logo SVG ---
+// --- 內嵌 Logo ---
 const CustomLogo = ({ className }: { className?: string }) => (
-  <img src="/logo.png" alt="Logo" className={className} />
+  <img src="/logo.png" alt="Logo" className={`${className} rounded-full`} />
 );
 
 // --- 型別定義 ---
@@ -48,6 +49,7 @@ interface Note {
   activity_option: string;
   selected_contents: string[];
   other_remarks?: string;
+  memo?: string;
   identity: string;
   volunteer_type?: string;
   transportation: string;
@@ -60,8 +62,9 @@ interface Note {
   stay_start_date?: string | null;
   stay_end_date?: string | null;
   is_deleted: boolean;
-  audit_status: '待審核' | '已通過' | '不通過';
-  admin_memo?: string;
+  audit_status: string; // 僅讀取用
+  sign_name?: string;
+  id_2?: string;
   created_at: string;
 }
 
@@ -91,7 +94,7 @@ interface ResetRequest {
   created_at: string;
 }
 
-// 新增：欄位定義介面
+// 欄位定義
 interface FieldDefinition {
   id?: string;
   field_key: string;
@@ -101,7 +104,6 @@ interface FieldDefinition {
   description: string;
 }
 
-// 預設欄位定義 (用於初始化或 fallback)
 const DEFAULT_FIELD_DEFINITIONS: FieldDefinition[] = [
   { field_key: 'real_name', field_label: '姓名', field_type: '文字', is_required: true, description: '真實姓名' },
   { field_key: 'dharma_name', field_label: '法名', field_type: '文字', is_required: false, description: '' },
@@ -111,6 +113,7 @@ const DEFAULT_FIELD_DEFINITIONS: FieldDefinition[] = [
   { field_key: 'activity_name', field_label: '活動名稱', field_type: '文字', is_required: true, description: '' },
   { field_key: 'activity_option', field_label: '活動行程', field_type: '文字', is_required: true, description: '' },
   { field_key: 'selected_contents', field_label: '勾選內容', field_type: '文字陣列', is_required: false, description: '' },
+  { field_key: 'other_remarks', field_label: '自訂備註', field_type: '文字', is_required: false, description: '僅自訂行程出現' },
   { field_key: 'identity', field_label: '身分', field_type: '文字', is_required: true, description: '法會或義工' },
   { field_key: 'volunteer_type', field_label: '義工選項', field_type: '文字', is_required: false, description: '' },
   { field_key: 'transportation', field_label: '交通', field_type: '文字', is_required: false, description: '' },
@@ -122,7 +125,37 @@ const DEFAULT_FIELD_DEFINITIONS: FieldDefinition[] = [
   { field_key: 'accommodation_option', field_label: '安單選項', field_type: '文字', is_required: false, description: '' },
   { field_key: 'stay_start_date', field_label: '安單開始', field_type: '日期', is_required: false, description: '' },
   { field_key: 'stay_end_date', field_label: '安單結束', field_type: '日期', is_required: false, description: '' },
-  { field_key: 'other_remarks', field_label: '其他備註', field_type: '文字', is_required: false, description: '' },
+  { field_key: 'memo', field_label: '其他備註', field_type: '文字', is_required: false, description: '固定顯示' },
+];
+
+const DB_SCHEMA = [
+  { name: 'id', label: '流水號', type: '唯一碼 (UUID)', required: '系統自動 (PK)' },
+  { name: 'user_id', label: '用戶ID', type: '唯一碼 (UUID)', required: '系統自動 (FK)' },
+  { name: 'real_name', label: '姓名', type: '文字', required: '必填' },
+  { name: 'dharma_name', label: '法名', type: '文字', required: '選填' },
+  { name: 'registrant_type', label: '屬性', type: '文字', required: '必填 (預設)' },
+  { name: 'registration_option', label: '報名選項', type: '文字', required: '必填 (預設)' },
+  { name: 'activity_location', label: '活動地點', type: '文字', required: '必填' },
+  { name: 'activity_name', label: '活動名稱', type: '文字', required: '必填' },
+  { name: 'activity_option', label: '活動行程', type: '文字', required: '必填' },
+  { name: 'selected_contents', label: '勾選內容', type: '文字陣列', required: '選填' },
+  { name: 'other_remarks', label: '自訂備註', type: '文字', required: '選填' },
+  { name: 'identity', label: '身分', type: '文字', required: '必填' },
+  { name: 'volunteer_type', label: '義工選項', type: '文字', required: '選填' },
+  { name: 'transportation', label: '交通', type: '文字', required: '選填' },
+  { name: 'arrival_datetime', label: '抵寺時間', type: '文字(日期)', required: '選填' },
+  { name: 'departure_datetime', label: '離寺時間', type: '文字(日期)', required: '選填' },
+  { name: 'volunteer_group', label: '義工組別', type: '文字', required: '選填' },
+  { name: 'start_date', label: '發心開始', type: '文字(日期)', required: '選填' },
+  { name: 'end_date', label: '發心結束', type: '文字(日期)', required: '選填' },
+  { name: 'accommodation_option', label: '安單選項', type: '文字', required: '選填' },
+  { name: 'stay_start_date', label: '安單開始', type: '文字(日期)', required: '選填' },
+  { name: 'stay_end_date', label: '安單結束', type: '文字(日期)', required: '選填' },
+  { name: 'memo', label: '其他備註', type: '文字', required: '選填' },
+  { name: 'sign_name', label: '登入者', type: '文字', required: '系統自動' },
+  { name: 'id_2', label: '登入者ID', type: '文字', required: '系統自動' },
+  { name: 'is_deleted', label: '是否刪除', type: '布林值', required: '系統預設' },
+  { name: 'created_at', label: '建立時間', type: '時間戳', required: '系統自動' },
 ];
 
 declare global {
@@ -137,6 +170,9 @@ const FAKE_DOMAIN = "@my-notes.com";
 const encodeName = (name: string): string => {
   try { let hex = ''; for (let i = 0; i < name.length; i++) hex += ('0000' + name.charCodeAt(i).toString(16)).slice(-4); return hex; } catch { return name; }
 };
+const decodeName = (email: string): string => {
+  try { const hex = email.split('@')[0]; let str = ''; for (let i = 0; i < hex.length; i += 4) str += String.fromCharCode(parseInt(hex.substr(i, 4), 16)); return str; } catch { return email?.split('@')[0] || ''; }
+};
 const getDisplayNameOnly = (email: string | undefined | null): string => {
   if (!email) return 'User';
   try {
@@ -145,6 +181,15 @@ const getDisplayNameOnly = (email: string | undefined | null): string => {
     for (let i = 0; i < hex.length; i += 4) str += String.fromCharCode(parseInt(hex.substr(i, 4), 16)); 
     return str.length > 4 ? str.slice(0, -4) : str;
   } catch { return email.split('@')[0]; }
+};
+const getIdLast4FromEmail = (email: string | undefined | null): string => {
+  if (!email) return '0000';
+  try {
+    const hex = email.split('@')[0]; 
+    let str = ''; 
+    for (let i = 0; i < hex.length; i += 4) str += String.fromCharCode(parseInt(hex.substr(i, 4), 16)); 
+    return str.length > 4 ? str.slice(-4) : '0000';
+  } catch { return '0000'; }
 };
 const formatDateTime = (isoString: string | undefined | null): string => {
   if (!isoString) return '-';
@@ -166,6 +211,19 @@ const renderBulletinContent = (content: string) => {
   });
 };
 
+// 預設表單狀態 (修正：accommodation_option 預設為 '不安單')
+const INITIAL_FORM_DATA = {
+  real_name: '', dharma_name: '', registrant_type: '目前上禪修班學員', registration_option: '新增',
+  activity_location: '', activity_name: '', activity_option: '',
+  selected_contents: [] as string[], 
+  other_remarks: '', memo: '',
+  identity: '參加法會', 
+  volunteer_type: '一般義工-由精舍安排組別', transportation: '',
+  arrival_datetime: '', departure_datetime: '', volunteer_group: '', 
+  start_date: '', end_date: '', accommodation_option: '不安單', 
+  stay_start_date: '', stay_end_date: ''
+};
+
 export default function App() {
   const [supabaseClient, setSupabaseClient] = useState<any>(null);
   const [user, setUser] = useState<any>(null);
@@ -180,7 +238,6 @@ export default function App() {
   const [allUsers, setAllUsers] = useState<UserPermission[]>([]);
   const [resetRequests, setResetRequests] = useState<ResetRequest[]>([]);
   
-  // 新增：欄位設定狀態
   const [fieldConfigs, setFieldConfigs] = useState<FieldDefinition[]>(DEFAULT_FIELD_DEFINITIONS);
 
   const [username, setUsername] = useState<string>('');
@@ -188,18 +245,9 @@ export default function App() {
   const [password, setPassword] = useState<string>('');
   const [authMode, setAuthMode] = useState<'login'|'signup'|'forgot'>('login');
   
-  const [minStartDate, setMinStartDate] = useState<string>('');
+  const [todayDate, setTodayDate] = useState('');
   
-  // Form State
-  const [formData, setFormData] = useState({
-    real_name: '', dharma_name: '', registrant_type: '目前上禪修班學員', registration_option: '新增',
-    activity_location: '', activity_name: '', activity_option: '',
-    selected_contents: [] as string[], other_remarks: '', identity: '參加法會', 
-    volunteer_type: '一般義工-由精舍安排組別', transportation: '',
-    arrival_datetime: '', departure_datetime: '', volunteer_group: '', 
-    start_date: '', end_date: '', accommodation_option: '不安單', 
-    stay_start_date: '', stay_end_date: ''
-  });
+  const [formData, setFormData] = useState(INITIAL_FORM_DATA);
 
   // 管理介面狀態
   const [newBulletin, setNewBulletin] = useState<string>('');
@@ -218,6 +266,9 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    // Client-side only date initialization
+    setTodayDate(new Date().toISOString().split('T')[0]);
+
     const loadSupabase = () => {
       const script = document.createElement('script');
       script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
@@ -240,19 +291,16 @@ export default function App() {
     loadSupabase();
   }, []);
 
-  // 取得欄位設定
   const fetchFieldConfigs = useCallback(async () => {
     if (!supabaseClient) return;
-    const { data, error } = await supabaseClient.from('field_definitions').select('*').order('field_key');
+    const { data } = await supabaseClient.from('field_definitions').select('*').order('field_key');
     if (data && data.length > 0) {
-      // 合併預設值與資料庫值 (確保有新欄位時不會壞掉)
       const merged = DEFAULT_FIELD_DEFINITIONS.map(def => {
         const found = data.find((d: any) => d.field_key === def.field_key);
         return found ? { ...def, ...found } : def;
       });
       setFieldConfigs(merged);
     } else {
-      // 若資料庫為空，則初始化
       await Promise.all(DEFAULT_FIELD_DEFINITIONS.map(def => supabaseClient.from('field_definitions').upsert(def, { onConflict: 'field_key' })));
     }
   }, [supabaseClient]);
@@ -275,17 +323,13 @@ export default function App() {
       if (uData) setAllUsers(uData);
       const { data: rData } = await supabaseClient.from('reset_requests').select('*').order('created_at', { ascending: false });
       if (rData) setResetRequests(rData);
-      
-      // 載入欄位設定
       await fetchFieldConfigs();
-
     } catch (err) { }
   }, [supabaseClient, isMock, fetchFieldConfigs]);
 
   useEffect(() => {
     if (user && supabaseClient) {
       fetchData();
-      
       supabaseClient.from('user_permissions').select('is_admin').eq('uid', user.id).maybeSingle()
       .then(({ data }: any) => { if (data) setIsAdmin(data.is_admin === true); });
       
@@ -303,7 +347,6 @@ export default function App() {
                }
            });
       }
-
       const channel = supabaseClient.channel('db-all-sync')
         .on('postgres_changes', { event: '*', schema: 'public', table: '*' }, fetchData)
         .subscribe();
@@ -340,9 +383,7 @@ export default function App() {
                 if (data.session) {
                     setUser(data.user);
                     setFormData(prev => ({ ...prev, real_name: finalUsername }));
-                } else {
-                    alert('請檢查信箱並點擊驗證連結。');
-                }
+                } else { alert('請檢查信箱並點擊驗證連結。'); }
             }
         } else if (authMode === 'forgot') {
             const { error } = await supabaseClient.from('reset_requests').insert([{
@@ -366,50 +407,83 @@ export default function App() {
   const availableOptions = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === formData.activity_location && h.activity === formData.activity_name && h.option).map(h => h.option as string))].sort(), [hierarchyData, formData.activity_location, formData.activity_name]);
   const availableContents = useMemo(() => hierarchyData.filter(h => h.location === formData.activity_location && h.activity === formData.activity_name && h.option === formData.activity_option && h.content).map(h => h.content as string).sort(), [hierarchyData, formData.activity_location, formData.activity_name, formData.activity_option]);
 
+  // 管理後台專用聯動
   const adminActivities = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity).map(h => h.activity as string))].sort(), [hierarchyData, mgmtSelectedLoc]);
   const adminOptions = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option).map(h => h.option as string))].sort(), [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct]);
-  const adminContents = useMemo(() => hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option === mgmtSelectedOpt && h.content).map(h => h), [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
+  const adminContents = useMemo(() => hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option === mgmtSelectedOpt && h.content).map(h => h.content as string).sort(), [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
 
+  // 交通選項邏輯修正
   const filteredTransportOptions = useMemo(() => {
     const all = ["大車-精舍統一行程", "小車-自訂抵離寺", "自行前往-自訂抵離寺"];
-    return formData.activity_option === '其他行程' ? all.filter(o => !o.includes("大車")) : all;
+    if (formData.activity_option && formData.activity_option.includes('自訂行程')) {
+        // 如果是自訂行程，排除大車，加入其他
+        const customOptions = all.filter(o => !o.includes("大車"));
+        customOptions.push("其他-自訂抵離寺");
+        return customOptions;
+    }
+    return all;
   }, [formData.activity_option]);
 
   useEffect(() => {
-    const hasLargeBus = filteredTransportOptions.some(o => o.includes("大車"));
-    setFormData(prev => ({ ...prev, transportation: hasLargeBus ? "大車-精舍統一行程" : "小車-自訂抵離寺" }));
-  }, [filteredTransportOptions]);
+     // 如果當前交通方式不在過濾後的選項中，重置 (例如切換到自訂行程後，原本選了大車)
+     if (formData.transportation && !filteredTransportOptions.includes(formData.transportation) && formData.transportation !== '') {
+         setFormData(prev => ({ ...prev, transportation: '' }));
+     }
+  }, [filteredTransportOptions, formData.transportation]);
 
-  useEffect(() => { if (formData.arrival_datetime) setFormData(p => ({ ...p, start_date: p.start_date || p.arrival_datetime, stay_start_date: p.stay_start_date || p.arrival_datetime.split('T')[0] })); }, [formData.arrival_datetime]);
-  useEffect(() => { if (formData.departure_datetime) setFormData(p => ({ ...p, end_date: p.end_date || p.departure_datetime, stay_end_date: p.stay_end_date || p.departure_datetime.split('T')[0] })); }, [formData.departure_datetime]);
+  // 日期同步邏輯
+  useEffect(() => { 
+      if (formData.arrival_datetime) {
+          const datePart = formData.arrival_datetime.split('T')[0];
+          setFormData(p => ({ ...p, start_date: datePart, stay_start_date: datePart }));
+      }
+  }, [formData.arrival_datetime]);
+  
+  useEffect(() => { 
+      if (formData.departure_datetime) {
+          const datePart = formData.departure_datetime.split('T')[0];
+          setFormData(p => ({ ...p, end_date: datePart, stay_end_date: datePart }));
+      }
+  }, [formData.departure_datetime]);
 
-  const showAccommodationSection = useMemo(() => {
-    if (formData.activity_location === '精舍' || formData.transportation === '大車-精舍統一行程' || (!formData.activity_option || formData.activity_option.includes('當天來回'))) return false;
-    if (formData.identity === '參加法會') return true;
-    return formData.volunteer_type === '一般義工-由精舍安排組別';
+  // 欄位顯示邏輯 (更新)
+  const fieldVisibility = useMemo(() => {
+    const isJingshe = formData.activity_location === '精舍';
+    const isZhongtai = formData.activity_location === '中台';
+    const isVolunteer = formData.identity === '發心義工';
+    const isBus = formData.transportation === '大車-精舍統一行程';
+    const isOneDay = formData.activity_option.includes('當天來回');
+    const needsAccommodation = formData.accommodation_option === '須安單';
+
+    return {
+      transportation: !isJingshe,
+      volunteerGroup: isVolunteer,
+      volunteerType: isZhongtai && isVolunteer,
+      volunteerDates: isVolunteer, // 發心義工即顯示
+      arrivalDeparture: !isJingshe && !isBus,    
+      accommodation: !isJingshe && !isBus && !isOneDay,
+      accommodationDates: (!isJingshe && !isBus && !isOneDay) && needsAccommodation // 須安單才顯示日期
+    };
   }, [formData]);
 
-  // --- 輔助：取得欄位設定 ---
-  const getFieldConfig = (key: string) => {
-    return fieldConfigs.find(f => f.field_key === key) || DEFAULT_FIELD_DEFINITIONS.find(f => f.field_key === key) || { is_required: false, field_label: key };
-  };
+  const getFieldConfig = (key: string) => fieldConfigs.find(f => f.field_key === key) || { is_required: false, field_label: key };
 
-  // --- 驗證函式 ---
+  // 驗證邏輯
   const validateForm = () => {
     for (const config of fieldConfigs) {
       if (config.is_required) {
+        if (config.field_key === 'transportation' && !fieldVisibility.transportation) continue;
+        if (config.field_key === 'volunteer_group' && !fieldVisibility.volunteerGroup) continue;
+        if (config.field_key === 'volunteer_type' && !fieldVisibility.volunteerType) continue;
+        
+        // 日期欄位檢查：只有當該欄位「可見」時才檢查必填
+        if (['start_date', 'end_date'].includes(config.field_key) && !fieldVisibility.volunteerDates) continue;
+        if (['arrival_datetime', 'departure_datetime'].includes(config.field_key) && !fieldVisibility.arrivalDeparture) continue;
+        if (['stay_start_date', 'stay_end_date'].includes(config.field_key) && !fieldVisibility.accommodationDates) continue;
+
+        if (config.field_key === 'accommodation_option' && !fieldVisibility.accommodation) continue;
+        
         const val = formData[config.field_key as keyof typeof formData];
-        // 簡單判斷：如果是字串且為空，或 null，且該欄位在目前情境下應該顯示
-        // 注意：這裡簡化判斷，若欄位在畫面上有顯示且為空則擋下
-        // 實際上需要根據 showAccommodationSection 等邏輯來判斷是否該驗證
-        // 為求穩健，這裡只驗證「必填且有值的」
-        
-        // 排除情境判斷：例如若沒選住宿，就不驗證住宿相關
-        if (config.field_key.includes('stay') || config.field_key.includes('accommodation')) {
-            if (!showAccommodationSection) continue;
-        }
-        if (config.field_key === 'volunteer_group' && formData.identity !== '發心義工') continue;
-        
         if (!val || (typeof val === 'string' && val.trim() === '') || (Array.isArray(val) && val.length === 0)) {
            alert(`請檢查必填項目：${config.field_label}`);
            return false;
@@ -419,42 +493,62 @@ export default function App() {
     return true;
   };
 
-  // 日期淨化函式
   const sanitizeDate = (dateStr: string | null | undefined) => (dateStr && dateStr.trim() !== '') ? dateStr : null;
 
   const handleSubmitNote = async () => {
-    if (!validateForm()) return; // 執行新的驗證邏輯
+    if (!validateForm()) return;
+
+    const signName = user?.user_metadata?.user_name || username;
+    const id2 = user?.user_metadata?.id_last4 || idLast4;
+
+    // 清空未顯示的欄位值
+    let finalData = { ...formData };
+
+    if (!fieldVisibility.transportation) finalData.transportation = '';
+    if (!fieldVisibility.volunteerGroup) finalData.volunteer_group = '';
+    if (!fieldVisibility.volunteerType) finalData.volunteer_type = '';
+    if (!fieldVisibility.volunteerDates) { finalData.start_date = ''; finalData.end_date = ''; }
+    if (!fieldVisibility.arrivalDeparture) { finalData.arrival_datetime = ''; finalData.departure_datetime = ''; }
+    if (!fieldVisibility.accommodation) { 
+        finalData.accommodation_option = ''; 
+        finalData.stay_start_date = ''; 
+        finalData.stay_end_date = ''; 
+    } else if (!fieldVisibility.accommodationDates) {
+        // 如果顯示安單選項，但選了不安單，則清空日期
+        finalData.stay_start_date = '';
+        finalData.stay_end_date = '';
+    }
 
     const payload = { 
-        ...formData, 
+        ...finalData, 
         user_id: user?.id, 
-        audit_status: '待審核' as const, 
+        // 移除 audit_status
         is_deleted: false, 
         created_at: new Date().toISOString(),
-        start_date: sanitizeDate(formData.start_date),
-        end_date: sanitizeDate(formData.end_date),
-        stay_start_date: sanitizeDate(formData.stay_start_date),
-        stay_end_date: sanitizeDate(formData.stay_end_date),
-        arrival_datetime: sanitizeDate(formData.arrival_datetime),
-        departure_datetime: sanitizeDate(formData.departure_datetime)
+        start_date: sanitizeDate(finalData.start_date),
+        end_date: sanitizeDate(finalData.end_date),
+        stay_start_date: sanitizeDate(finalData.stay_start_date),
+        stay_end_date: sanitizeDate(finalData.stay_end_date),
+        arrival_datetime: sanitizeDate(finalData.arrival_datetime),
+        departure_datetime: sanitizeDate(finalData.departure_datetime),
+        sign_name: signName, 
+        id_2: id2            
     };
 
     if (!supabaseClient) return alert('系統未連線');
     
-    const { error } = await supabaseClient.from('notes').insert([payload]);
+    // 再次確保 audit_status 不被傳送
+    const { audit_status, ...finalPayload } = payload as any;
+
+    const { error } = await supabaseClient.from('notes').insert([finalPayload]);
     if (error) { 
         console.error("Submit error:", error);
         alert('提交失敗: ' + error.message); 
     } else { 
         alert('已送出申請'); 
+        setFormData(INITIAL_FORM_DATA); // 重置表單
         setActiveTab('history'); 
     }
-  };
-
-  const handleUpdateAuditStatus = async (id: string, status: string) => {
-    if (!supabaseClient) return;
-    await supabaseClient.from('notes').update({ audit_status: status }).eq('id', id);
-    fetchData();
   };
 
   const handleToggleDeleteNote = async (id: string, status: boolean) => {
@@ -549,8 +643,8 @@ export default function App() {
   };
   
   const handleExport = () => {
-    const headers = "姓名,地點,活動,行程,勾選內容,身分,交通,狀態,時間";
-    const rows = notes.map(n => `"${n.real_name}","${n.activity_location}","${n.activity_name}","${n.activity_option}","${n.selected_contents?.join(';') || ''}","${n.identity}","${n.transportation}","${n.audit_status}","${n.created_at}"`);
+    const headers = "姓名,地點,活動,行程,勾選內容,身分,交通,時間";
+    const rows = notes.map(n => `"${n.real_name}","${n.activity_location}","${n.activity_name}","${n.activity_option}","${n.selected_contents?.join(';') || ''}","${n.identity}","${n.transportation}","${n.created_at}"`);
     const csvContent = "\uFEFF" + headers + "\n" + rows.join("\n");
     const link = document.createElement("a");
     link.href = URL.createObjectURL(new Blob([csvContent], { type: 'text/csv;charset=utf-8;' }));
@@ -587,12 +681,9 @@ export default function App() {
     alert('需串接後端 Supabase Admin API 來建立 Auth 用戶');
   };
 
-  // 修改欄位設定 (Admin)
   const handleUpdateFieldConfig = async (key: string, field: string, value: any) => {
     if (!supabaseClient) return;
-    // 樂觀更新
     setFieldConfigs(prev => prev.map(f => f.field_key === key ? { ...f, [field]: value } : f));
-    // 寫入 DB (Upsert)
     const current = fieldConfigs.find(f => f.field_key === key);
     if (current) {
         await supabaseClient.from('field_definitions').upsert({
@@ -614,16 +705,16 @@ export default function App() {
         <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-sm border border-[#E8E2D1] flex flex-col gap-6">
           <div className="text-center">
              <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center mx-auto mb-4 shadow-inner overflow-hidden border-4 border-[#F2ECE4]">
-                <img src="/logo.png" alt="Logo" className="w-full h-full object-contain p-2" />
+                <CustomLogo className="w-16 h-16" />
              </div>
              <h2 className="text-xl font-bold text-[#7A2E40] mb-2">學員登記系統</h2>
              <p className="text-sm text-slate-400 font-bold">{authMode === 'login' ? '會員登入' : authMode === 'signup' ? '註冊新帳號' : '密碼重設申請'}</p>
           </div>
           
           <div className="space-y-4">
-             <div><label className="text-xs font-bold text-slate-400 ml-1">姓名</label><input className="w-full p-3 rounded-xl border border-slate-200 focus:border-[#7A2E40] outline-none bg-slate-50 transition-all text-sm" value={username} onChange={e=>setUsername(e.target.value)} /></div>
-             <div><label className="text-xs font-bold text-slate-400 ml-1">ID後四碼</label><input className="w-full p-3 rounded-xl border border-slate-200 focus:border-[#7A2E40] outline-none bg-slate-50 transition-all text-sm" placeholder="如：1234" maxLength={4} value={idLast4} onChange={e=>setIdLast4(e.target.value)} /></div>
-             {authMode !== 'forgot' && (<div><label className="text-xs font-bold text-slate-400 ml-1">密碼</label><input className="w-full p-3 rounded-xl border border-slate-200 focus:border-[#7A2E40] outline-none bg-slate-50 transition-all text-sm" type="password" value={password} onChange={e=>setPassword(e.target.value)} /></div>)}
+             <div><label className="text-xs font-bold text-slate-400 ml-1">姓名</label><input className="w-full p-2 text-lg font-bold border rounded-none" value={username} onChange={e=>setUsername(e.target.value)} /></div>
+             <div><label className="text-xs font-bold text-slate-400 ml-1">ID後四碼</label><input className="w-full p-2 text-lg font-bold border rounded-none" placeholder="如：1234" maxLength={4} value={idLast4} onChange={e=>setIdLast4(e.target.value)} /></div>
+             {authMode !== 'forgot' && (<div><label className="text-xs font-bold text-slate-400 ml-1">密碼</label><input className="w-full p-2 text-lg font-bold border rounded-none" type="password" value={password} onChange={e=>setPassword(e.target.value)} /></div>)}
           </div>
 
           <button onClick={handleAuthAction} className="w-full bg-[#D97706] hover:bg-[#B45309] text-white py-3 rounded-xl font-bold shadow-md transition-all active:scale-95 flex justify-center items-center gap-2" style={{ backgroundColor: PRIMARY_COLOR }}>
@@ -642,7 +733,7 @@ export default function App() {
     <div className="min-h-screen bg-[#F8F7F2] text-slate-800 font-sans text-xl">
       <div className={`bg-[${PRIMARY_COLOR}] text-white px-8 py-3 flex justify-between items-center shadow-lg sticky top-0 z-[100]`} style={{ backgroundColor: PRIMARY_COLOR }}>
          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center overflow-hidden border-2 border-white/30 shadow-inner"><img src="/logo.png" alt="Logo" className="w-full h-full object-contain p-1" /></div>
+            <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center overflow-hidden border-2 border-white/30 shadow-inner"><CustomLogo className="w-10 h-10 object-contain p-1" /></div>
             <span className="font-black tracking-widest text-2xl uppercase">嗨～ {getDisplayNameOnly(user?.email)}</span>
             {isAdmin && <span className="bg-amber-400 text-amber-900 text-xs px-2 py-1 rounded font-bold">管理者</span>}
          </div>
@@ -662,11 +753,11 @@ export default function App() {
                <div className="bg-white p-6 rounded-3xl shadow-sm border border-[#E8E2D1] mb-8">
                   <h4 className="font-bold text-[#7A2E40] mb-4 flex items-center gap-2"><Megaphone className="w-5 h-5"/> 發布新公告</h4>
                   <div className="flex gap-2 items-start">
-                     <textarea className="flex-1 p-3 border rounded-xl text-lg font-bold bg-slate-50 outline-none focus:border-[#7A2E40]" rows={2} placeholder="輸入公告內容..." value={newBulletin} onChange={e=>setNewBulletin(e.target.value)} />
+                     <textarea className="flex-1 p-2 border rounded-none text-lg font-bold bg-slate-50 outline-none focus:border-[#7A2E40]" rows={2} placeholder="輸入公告內容..." value={newBulletin} onChange={e=>setNewBulletin(e.target.value)} />
                      <div className="flex flex-col gap-2">
                         <input type="file" ref={fileInputRef} accept="image/jpeg,image/png" className="hidden" onChange={handleFileChange} />
-                        <button onClick={handleSelectImage} className="bg-slate-200 text-slate-700 px-4 py-3 rounded-xl font-bold text-sm hover:bg-slate-300 flex items-center justify-center gap-1" title="選擇本機圖片"><ImageIcon className="w-4 h-4"/> 圖片</button>
-                        <button onClick={handleAddBulletin} className="bg-[#7A2E40] text-white px-4 py-3 rounded-xl font-bold text-sm hover:bg-[#5a1e2f] flex items-center justify-center gap-1" style={{ backgroundColor: PRIMARY_COLOR }}><Check className="w-4 h-4"/> 發布</button>
+                        <button onClick={handleSelectImage} className="bg-slate-200 text-slate-700 px-4 py-2 rounded-xl font-bold text-sm hover:bg-slate-300 flex items-center justify-center gap-1" title="選擇本機圖片"><ImageIcon className="w-4 h-4"/> 圖片</button>
+                        <button onClick={handleAddBulletin} className="bg-[#7A2E40] text-white px-4 py-2 rounded-xl font-bold text-sm hover:bg-[#5a1e2f] flex items-center justify-center gap-1" style={{ backgroundColor: PRIMARY_COLOR }}><Check className="w-4 h-4"/> 發布</button>
                      </div>
                   </div>
                   <p className="text-xs text-slate-400 mt-2 ml-1">* 提示：點擊「圖片」按鈕可插入圖片網址。</p>
@@ -686,214 +777,57 @@ export default function App() {
           <div className="bg-white p-8 rounded-[40px] shadow-2xl border border-[#E8E2D1] animate-in slide-in-from-bottom-12">
              <div className="flex items-center gap-4 border-b border-[#F2ECE4] pb-6 mb-6"><div className="p-3 bg-[#7A2E40] rounded-2xl text-white shadow-lg" style={{ backgroundColor: PRIMARY_COLOR }}><Edit className="w-6 h-6" /></div><h3 className="text-2xl font-black text-[#7A2E40] tracking-tight">發心登記表</h3></div>
              
-             {/* 欄位 1: 姓名 */}
              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                <div className="lg:col-span-3 space-y-2">
-                    <label className="text-lg font-black text-[#7A2E40] ml-1">
-                        {getFieldConfig('real_name').field_label}{getFieldConfig('real_name').is_required ? '*' : ''}
-                    </label>
-                    <input className="w-full p-3 text-xl font-bold border-2 rounded-xl" value={formData.real_name} onChange={e=>setFormData({...formData, real_name: e.target.value})} />
-                </div>
-                <div className="lg:col-span-2 space-y-2">
-                    <label className="text-lg font-black text-[#7A2E40] ml-1">
-                        {getFieldConfig('dharma_name').field_label}{getFieldConfig('dharma_name').is_required ? '*' : ''}
-                    </label>
-                    <input className="w-full p-3 text-xl font-bold border-2 rounded-xl" value={formData.dharma_name} onChange={e=>setFormData({...formData, dharma_name: e.target.value})} />
-                </div>
-                <div className="lg:col-span-2 space-y-2">
-                    <label className="text-lg font-black text-[#7A2E40] ml-1">
-                        {getFieldConfig('registration_option').field_label}{getFieldConfig('registration_option').is_required ? '*' : ''}
-                    </label>
-                    <select className="w-full p-3 text-xl font-bold border-2 rounded-xl" value={formData.registration_option} onChange={e=>setFormData({...formData, registration_option: e.target.value})}>
-                        <option value="">請選擇</option><option value="新增">新增</option><option value="異動">異動</option>
-                    </select>
-                </div>
-                <div className="lg:col-span-5 space-y-2">
-                    <label className="text-lg font-black text-[#7A2E40] ml-1">
-                        {getFieldConfig('registrant_type').field_label}{getFieldConfig('registrant_type').is_required ? '*' : ''}
-                    </label>
-                    <select className="w-full p-3 text-xl font-bold border-2 rounded-xl" value={formData.registrant_type} onChange={e=>setFormData({...formData, registrant_type: e.target.value})}>
-                        <option value="">請選擇</option><option value="目前上禪修班學員">目前上禪修班學員</option><option value="曾經上禪修班學員">曾經上禪修班學員</option><option value="學員家人">學員家人</option>
-                    </select>
-                </div>
+                <div className="lg:col-span-3 space-y-2"><label className="text-lg font-black text-[#7A2E40] ml-1">{getFieldConfig('real_name').field_label}{getFieldConfig('real_name').is_required?'*':''}</label><input className="w-full p-2 text-lg font-bold border rounded-none" value={formData.real_name} onChange={e=>setFormData({...formData, real_name: e.target.value})} /></div>
+                <div className="lg:col-span-2 space-y-2"><label className="text-lg font-black text-[#7A2E40] ml-1">{getFieldConfig('dharma_name').field_label}{getFieldConfig('dharma_name').is_required?'*':''}</label><input className="w-full p-2 text-lg font-bold border rounded-none" value={formData.dharma_name} onChange={e=>setFormData({...formData, dharma_name: e.target.value})} /></div>
+                <div className="lg:col-span-2 space-y-2"><label className="text-lg font-black text-[#7A2E40] ml-1">{getFieldConfig('registration_option').field_label}{getFieldConfig('registration_option').is_required?'*':''}</label><select className="w-full p-2 text-lg font-bold border rounded-none" value={formData.registration_option} onChange={e=>setFormData({...formData, registration_option: e.target.value})}><option value="">請選擇</option><option value="新增">新增</option><option value="異動">異動</option></select></div>
+                <div className="lg:col-span-5 space-y-2"><label className="text-lg font-black text-[#7A2E40] ml-1">{getFieldConfig('registrant_type').field_label}{getFieldConfig('registrant_type').is_required?'*':''}</label><select className="w-full p-2 text-lg font-bold border rounded-none" value={formData.registrant_type} onChange={e=>setFormData({...formData, registrant_type: e.target.value})}><option value="">請選擇</option><option value="目前上禪修班學員">目前上禪修班學員</option><option value="曾經上禪修班學員">曾經上禪修班學員</option><option value="學員家人">學員家人</option></select></div>
              </div>
 
              {formData.registration_option === '異動' && <div className="mt-4 p-3 bg-amber-50 border-2 border-amber-200 rounded-xl flex items-center gap-2 text-amber-700 font-bold"><AlertCircle className="w-5 h-5"/> 請至「紀錄」頁面刪除舊資料後再重新填寫。</div>}
              {formData.registrant_type === '學員家人' && <div className="mt-4 p-3 bg-red-50 border-2 border-red-200 rounded-xl flex items-center gap-2 text-red-700 font-bold"><Info className="w-5 h-5"/> 請至知客室填寫家眷表。</div>}
-             
-             {/* 欄位 2: 四層架構 */}
              <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-6 border-t-4 border-dotted border-[#F2ECE4] pt-6 mt-6">
-                <div className="space-y-2"><label className="text-lg font-black text-slate-500">{getFieldConfig('activity_location').field_label}{getFieldConfig('activity_location').is_required ? '*' : ''}</label><select className="w-full p-4 text-xl font-black border-4 rounded-2xl" value={formData.activity_location} onChange={e=>setFormData({...formData, activity_location: e.target.value, activity_name: '', activity_option: '', selected_contents: []})}><option value="">請選擇地點</option>{locations.map(l => <option key={l} value={l}>{l}</option>)}</select></div>
-                <div className="space-y-2"><label className="text-lg font-black text-slate-500">{getFieldConfig('activity_name').field_label}{getFieldConfig('activity_name').is_required ? '*' : ''}</label><select className="w-full p-4 text-xl font-black border-4 rounded-2xl" disabled={!formData.activity_location} value={formData.activity_name} onChange={e=>setFormData({...formData, activity_name: e.target.value, activity_option: '', selected_contents: []})}><option value="">請選擇活動</option>{availableActivities.map(a => <option key={a} value={a}>{a}</option>)}</select></div>
-                <div className="space-y-2"><label className="text-lg font-black text-slate-500">{getFieldConfig('activity_option').field_label}{getFieldConfig('activity_option').is_required ? '*' : ''}</label><select className="w-full p-4 text-xl font-black border-4 rounded-2xl" disabled={!formData.activity_name} value={formData.activity_option} onChange={e=>setFormData({...formData, activity_option: e.target.value, selected_contents: []})}><option value="">請選擇行程</option>{availableOptions.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+                <div className="space-y-2"><label className="text-lg font-black text-slate-500">1. 地點*</label><select className="w-full p-2 text-lg font-black border rounded-none" value={formData.activity_location} onChange={e=>setFormData({...formData, activity_location: e.target.value, activity_name: '', activity_option: '', selected_contents: []})}><option value="">請選擇地點</option>{locations.map(l => <option key={l} value={l}>{l}</option>)}</select></div>
+                <div className="space-y-2"><label className="text-lg font-black text-slate-500">2. 活動*</label><select className="w-full p-2 text-lg font-black border rounded-none" disabled={!formData.activity_location} value={formData.activity_name} onChange={e=>setFormData({...formData, activity_name: e.target.value, activity_option: '', selected_contents: []})}><option value="">請選擇活動</option>{availableActivities.map(a => <option key={a} value={a}>{a}</option>)}</select></div>
+                <div className="space-y-2"><label className="text-lg font-black text-slate-500">3. 行程*</label><select className="w-full p-2 text-lg font-black border rounded-none" disabled={!formData.activity_name} value={formData.activity_option} onChange={e=>setFormData({...formData, activity_option: e.target.value, selected_contents: []})}><option value="">請選擇行程</option>{availableOptions.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
              </div>
-             
-             {availableContents.length > 0 && <div className="md:col-span-3 p-6 bg-[#F2ECE4]/30 rounded-[30px] border-4 border-dashed border-[#E8E2D1] mt-6"><label className="text-xl font-black text-[#7A2E40] mb-4 block">4. 行程內容複選</label><div className="flex flex-wrap gap-4">{availableContents.map(c => <button key={c} type="button" onClick={() => setFormData(p => ({ ...p, selected_contents: p.selected_contents.includes(c) ? p.selected_contents.filter(i => i !== c) : [...p.selected_contents, c] }))} className={`px-6 py-3 rounded-xl font-black text-lg border-2 transition-all ${formData.selected_contents.includes(c) ? 'bg-[#7A2E40] text-white border-[#7A2E40]' : 'bg-white text-[#7A2E40] border-[#E8E2D1]'}`}>{c}</button>)}</div></div>}
-             
-             {/* 欄位 3: 備註與身分 */}
-             {formData.activity_option === '其他行程' && <div className="mt-6 space-y-2"><label className="text-lg font-black text-orange-600">行程備註*</label><textarea rows={2} className="w-full p-4 text-lg border-4 border-orange-200 rounded-2xl" value={formData.other_remarks} onChange={e=>setFormData({...formData, other_remarks: e.target.value})} /></div>}
-             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 border-t-4 border-dotted border-[#F2ECE4] pt-6 mt-6">
-                <div className="space-y-2"><label className="text-lg font-black text-slate-500 ml-1">{getFieldConfig('identity').field_label}{getFieldConfig('identity').is_required ? '*' : ''}</label><select className="w-full p-4 rounded-2xl bg-[#FAF9F6] text-xl font-bold" value={formData.identity} onChange={e=>setFormData({...formData, identity: e.target.value})}><option value="">請選擇</option><option value="參加法會">參加法會</option><option value="發心義工">發心義工</option></select></div>
-                {formData.activity_location !== '精舍' && <div className="space-y-2"><label className="text-lg font-black text-slate-500 ml-1">{getFieldConfig('transportation').field_label}{getFieldConfig('transportation').is_required ? '*' : ''}</label><select className="w-full p-4 rounded-2xl bg-[#FAF9F6] text-xl font-bold" value={formData.transportation} onChange={e=>setFormData({...formData, transportation: e.target.value})}><option value="">請選擇</option>{filteredTransportOptions.map(o => <option key={o} value={o}>{o}</option>)}</select></div>}
-             </div>
-             
-             {/* 欄位 4: 詳細資料 */}
-             <div className="md:col-span-3 border-t border-[#F2ECE4] pt-6 space-y-6">
-                {formData.activity_location === '精舍' ? (
-                   formData.identity === '發心義工' && <div className="p-6 bg-[#F2ECE4]/30 rounded-3xl border border-[#E8E2D1] space-y-4">
-                       <label className="text-lg font-black text-[#7A2E40]">{getFieldConfig('volunteer_group').field_label}{getFieldConfig('volunteer_group').is_required ? '*' : ''}</label>
-                       <input className="w-full p-4 rounded-2xl border-2 text-xl" value={formData.volunteer_group} onChange={e=>setFormData({...formData, volunteer_group: e.target.value})} />
-                   </div>
-                ) : (
-                  <>
-                    {formData.transportation !== '大車-精舍統一行程' && <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="space-y-2"><label className="text-lg font-bold text-blue-700">{getFieldConfig('arrival_datetime').field_label}{getFieldConfig('arrival_datetime').is_required ? '*' : ''}</label><input type="datetime-local" className="w-full p-4 rounded-2xl border-2 text-xl" value={formData.arrival_datetime || ''} onChange={e=>setFormData({...formData, arrival_datetime: e.target.value})} /></div>
-                        <div className="space-y-2"><label className="text-lg font-bold text-blue-700">{getFieldConfig('departure_datetime').field_label}{getFieldConfig('departure_datetime').is_required ? '*' : ''}</label><input type="datetime-local" className="w-full p-4 rounded-2xl border-2 text-xl" value={formData.departure_datetime || ''} onChange={e=>setFormData({...formData, departure_datetime: e.target.value})} /></div>
-                    </div>}
-                    {formData.identity === '發心義工' && <div className="p-6 bg-[#F2ECE4]/30 rounded-3xl border border-[#E8E2D1] space-y-4">
-                        <label className="text-lg font-black text-[#7A2E40]">{getFieldConfig('volunteer_type').field_label}{getFieldConfig('volunteer_type').is_required ? '*' : ''}</label>
-                        <select className="w-full p-4 rounded-2xl text-xl" value={formData.volunteer_type} onChange={e=>setFormData({...formData, volunteer_type: e.target.value})}><option value="">請選擇</option><option value="一般義工-由精舍安排組別">一般義工-由精舍安排組別</option><option value="長期義工-已於平台報名">長期義工-已於平台報名</option><option value="佛巡-已於平台報名">佛巡-已於平台報名</option></select>
-                    </div>}
-                    {showAccommodationSection && formData.accommodation_option === '安單' && <div className="p-6 bg-slate-50 rounded-3xl border border-slate-200">
-                        <label className="text-lg font-black">安單起訖{getFieldConfig('stay_start_date').is_required ? '*' : ''}</label>
-                        <input type="date" className="w-full p-4 text-xl" value={formData.stay_start_date || ''} onChange={e=>setFormData({...formData, stay_start_date: e.target.value})} />
-                        <input type="date" className="w-full p-4 text-xl mt-4" value={formData.stay_end_date || ''} onChange={e=>setFormData({...formData, stay_end_date: e.target.value})} />
-                    </div>}
-                  </>
-                )}
-             </div>
-
-             {/* 其他備註 */}
-             <div className="mt-8 border-t border-[#F2ECE4] pt-6 space-y-2">
-                 <label className="text-lg font-black text-slate-500">{getFieldConfig('other_remarks').field_label}{getFieldConfig('other_remarks').is_required ? '*' : ''}</label>
-                 <textarea rows={3} className="w-full p-4 text-lg border-4 border-slate-200 rounded-2xl" placeholder="若有其他需求請填寫於此..." value={formData.other_remarks} onChange={e=>setFormData({...formData, other_remarks: e.target.value})} />
-             </div>
-
+             {availableContents.length > 0 && <div className="md:col-span-3 p-6 bg-[#F2ECE4]/30 rounded-[30px] border-4 border-dashed border-[#E8E2D1] mt-6"><label className="text-xl font-black text-[#7A2E40] mb-4 block">4. 行程內容複選</label><div className="flex flex-wrap gap-4">{availableContents.map(c => <button key={c} type="button" onClick={() => setFormData(p => ({ ...p, selected_contents: p.selected_contents.includes(c) ? p.selected_contents.filter(i => i !== c) : [...p.selected_contents, c] }))} className={`px-6 py-2 rounded-xl font-black text-lg border-2 transition-all ${formData.selected_contents.includes(c) ? 'bg-[#7A2E40] text-white border-[#7A2E40]' : 'bg-white text-[#7A2E40] border-[#E8E2D1]'}`}>{c}</button>)}</div></div>}
+             {formData.activity_option.includes('自訂') && <div className="mt-6 space-y-2"><label className="text-lg font-black text-orange-600">{getFieldConfig('other_remarks').field_label}{getFieldConfig('other_remarks').is_required?'*':''}</label><textarea rows={2} className="w-full p-2 text-lg border rounded-none" value={formData.other_remarks} onChange={e=>setFormData({...formData, other_remarks: e.target.value})} /></div>}
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 border-t-4 border-dotted border-[#F2ECE4] pt-6 mt-6"><div className="space-y-2"><label className="text-lg font-black text-slate-500 ml-1">{getFieldConfig('identity').field_label}{getFieldConfig('identity').is_required?'*':''}</label><select className="w-full p-2 rounded-none bg-[#FAF9F6] text-lg font-bold" value={formData.identity} onChange={e=>setFormData({...formData, identity: e.target.value})}><option value="">請選擇</option><option value="參加法會">參加法會</option><option value="發心義工">發心義工</option></select></div>{fieldVisibility.transportation && <div className="space-y-2"><label className="text-lg font-black text-slate-500 ml-1">{getFieldConfig('transportation').field_label}{getFieldConfig('transportation').is_required?'*':''}</label><select className="w-full p-2 rounded-none bg-[#FAF9F6] text-lg font-bold" value={formData.transportation} onChange={e=>setFormData({...formData, transportation: e.target.value})}><option value="">請選擇</option>{filteredTransportOptions.map(o => <option key={o} value={o}>{o}</option>)}</select></div>}</div>
+             <div className="md:col-span-3 border-t border-[#F2ECE4] pt-6 space-y-6">{formData.activity_location === '精舍' ? (formData.identity === '發心義工' && <div className="p-6 bg-[#F2ECE4]/30 rounded-3xl border border-[#E8E2D1] space-y-4"><label className="text-lg font-black text-[#7A2E40]">{getFieldConfig('volunteer_group').field_label}{getFieldConfig('volunteer_group').is_required?'*':''}</label><input className="w-full p-2 rounded-none border text-lg" value={formData.volunteer_group} onChange={e=>setFormData({...formData, volunteer_group: e.target.value})} /></div>) : (<>{fieldVisibility.arrivalDeparture && <div className="grid grid-cols-1 md:grid-cols-2 gap-6"><div className="space-y-2"><label className="text-lg font-bold text-blue-700">{getFieldConfig('arrival_datetime').field_label}{getFieldConfig('arrival_datetime').is_required?'*':''}</label><input type="datetime-local" min={todayDate} className="w-full p-2 rounded-none border text-lg" value={formData.arrival_datetime || ''} onChange={e=>setFormData({...formData, arrival_datetime: e.target.value})} /></div><div className="space-y-2"><label className="text-lg font-bold text-blue-700">{getFieldConfig('departure_datetime').field_label}{getFieldConfig('departure_datetime').is_required?'*':''}</label><input type="datetime-local" min={formData.arrival_datetime || todayDate} className="w-full p-2 rounded-none border text-lg" value={formData.departure_datetime || ''} onChange={e=>setFormData({...formData, departure_datetime: e.target.value})} /></div></div>}{fieldVisibility.volunteerType && <div className="p-6 bg-[#F2ECE4]/30 rounded-3xl border border-[#E8E2D1] space-y-4"><label className="text-lg font-black text-[#7A2E40]">{getFieldConfig('volunteer_type').field_label}{getFieldConfig('volunteer_type').is_required?'*':''}</label><select className="w-full p-2 rounded-none text-lg" value={formData.volunteer_type} onChange={e=>setFormData({...formData, volunteer_type: e.target.value})}><option value="">請選擇</option><option value="一般義工-由精舍安排組別">一般義工-由精舍安排組別</option><option value="長期義工-已於平台報名">長期義工-已於平台報名</option><option value="佛巡-已於平台報名">佛巡-已於平台報名</option></select></div>}{fieldVisibility.volunteerDates && <div className="p-6 bg-[#F2ECE4]/30 rounded-3xl border border-[#E8E2D1] space-y-4"><label className="text-lg font-black text-[#7A2E40]">發心起訖</label><input type="datetime-local" min={todayDate} className="w-full p-2 rounded-none border text-lg" value={formData.start_date || ''} onChange={e=>setFormData({...formData, start_date: e.target.value})} /><input type="datetime-local" min={formData.start_date || todayDate} className="w-full p-2 rounded-none border text-lg mt-2" value={formData.end_date || ''} onChange={e=>setFormData({...formData, end_date: e.target.value})} /></div>}{fieldVisibility.accommodation && <div className="p-6 bg-slate-50 rounded-3xl border border-slate-200"><label className="text-lg font-black">安單選項</label><select className="w-full p-2 rounded-none text-lg mb-4" value={formData.accommodation_option} onChange={e=>setFormData({...formData, accommodation_option: e.target.value})}><option value="不安單">不安單</option><option value="須安單">須安單</option></select>{fieldVisibility.accommodationDates && <><label className="text-lg font-black">安單起訖</label><input type="datetime-local" min={todayDate} className="w-full p-2 text-lg rounded-none" value={formData.stay_start_date || ''} onChange={e=>setFormData({...formData, stay_start_date: e.target.value})} /><input type="datetime-local" min={formData.stay_start_date || todayDate} className="w-full p-2 text-lg rounded-none mt-4" value={formData.stay_end_date || ''} onChange={e=>setFormData({...formData, stay_end_date: e.target.value})} /></>}</div>}</>)}</div>
+             <div className="mt-8 border-t border-[#F2ECE4] pt-6 space-y-2"><label className="text-lg font-black text-slate-500">{getFieldConfig('memo').field_label}{getFieldConfig('memo').is_required?'*':''}</label><textarea rows={3} className="w-full p-2 text-lg border rounded-none" placeholder="若有其他需求請填寫於此..." value={formData.memo} onChange={e=>setFormData({...formData, memo: e.target.value})} /></div>
              <button onClick={handleSubmitNote} disabled={loading} className="w-full mt-10 bg-[#7A2E40] hover:bg-[#5D2331] text-white py-4 rounded-2xl font-black text-3xl shadow-lg transition-all" style={{ backgroundColor: PRIMARY_COLOR }}>確認送出</button>
           </div>
         )}
 
-        {/* ... 其他分頁邏輯 (History, Audit, Users, Data) ... */}
-        {activeTab === 'history' && <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-12">{notes.filter(n => n.user_id === user?.id).map(n => <div key={n.id} className="bg-white p-6 rounded-[40px] shadow-xl border border-[#E8E2D1]"><div className="space-y-4"><div className="flex justify-between items-start"><span className={`px-3 py-1 rounded-full text-sm font-bold ${n.audit_status === '已通過' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>{n.audit_status}</span><span className="text-sm text-slate-400">{n.created_at.slice(0,10)}</span></div><h4 className="font-black text-2xl text-slate-800">{n.activity_name}</h4><div className="text-slate-500 text-sm"><p>地點：{n.activity_location}</p><p>選項：{n.activity_option}</p></div><div className="mt-4 pt-4 border-t border-slate-100 flex justify-between items-center"><label className="flex items-center gap-2 cursor-pointer select-none text-red-400 hover:text-red-600"><input type="checkbox" className="w-5 h-5 rounded" checked={n.is_deleted} onChange={() => handleToggleDeleteNote(n.id, n.is_deleted)} /><span className="font-bold text-sm">刪除紀錄</span></label></div></div></div>)}</div>}
-
-        {activeTab === 'users' && isAdmin && (
-          <div className="space-y-8 animate-in fade-in">
-             <div className="bg-white p-6 rounded-3xl shadow-sm border border-[#E8E2D1]">
-                <h4 className="font-bold text-slate-600 mb-4 flex items-center gap-2"><Plus className="w-4 h-4"/> 新增使用者 (自動產生UID)</h4>
-                <div className="flex flex-col md:flex-row gap-4">
-                   <input className="flex-1 p-3 border rounded-xl text-sm" placeholder="姓名" value={newUser.name} onChange={e=>setNewUser({...newUser, name: e.target.value})} />
-                   <input className="w-32 p-3 border rounded-xl text-sm" placeholder="ID後4碼" value={newUser.id4} onChange={e=>setNewUser({...newUser, id4: e.target.value})} />
-                   <input className="w-40 p-3 border rounded-xl text-sm" placeholder="密碼" value={newUser.pwd} onChange={e=>setNewUser({...newUser, pwd: e.target.value})} />
-                   <button onClick={handleCreateUser} className="bg-blue-600 text-white px-6 rounded-xl font-bold text-sm hover:bg-blue-700">新增</button>
-                </div>
-             </div>
-             <div className="bg-white rounded-3xl shadow-sm border border-[#E8E2D1] overflow-hidden">
-                <table className="w-full text-sm text-left">
-                   <thead className="bg-slate-50 text-slate-500 font-bold border-b"><tr><th className="p-4">姓名</th><th className="p-4">ID後4碼</th><th className="p-4">管理員</th><th className="p-4">狀態</th><th className="p-4 text-right">報名數</th></tr></thead>
-                   <tbody className="divide-y">
-                      {allUsers.map(u => (
-                         <tr key={u.id} className="hover:bg-slate-50">
-                            <td className="p-4 font-bold text-[#7A2E40]">{u.user_name}</td><td className="p-4 font-mono text-slate-400">{u.id_last4}</td>
-                            <td className="p-4"><input type="checkbox" checked={u.is_admin} onChange={() => handleToggleAdmin(u.uid!, u.is_admin)} className="w-5 h-5 rounded border-slate-300 cursor-pointer" /></td>
-                            <td className="p-4"><span className={`px-2 py-1 rounded text-xs font-bold ${u.is_disabled ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>{u.is_disabled ? '已停用' : '啟用中'}</span></td>
-                            <td className="p-4 text-right"><button onClick={()=>handleToggleUserStatus(u.uid!, u.is_disabled)} className="text-blue-500 hover:underline">{u.is_disabled ? '啟用' : '停用'}</button></td>
-                         </tr>
-                      ))}
-                   </tbody>
-                </table>
-             </div>
-          </div>
-        )}
-
-        {activeTab === 'audit' && isAdmin && (
-          <div className="space-y-12 animate-in fade-in">
-             <div className="bg-[#7A2E40] p-10 rounded-[50px] flex justify-between items-center shadow-xl">
-                <h2 className="text-4xl font-black text-white">審核中心</h2>
-                <button onClick={handleExport} className="bg-white/20 text-white px-10 py-4 rounded-[30px] text-2xl font-bold border border-white/30 hover:bg-white hover:text-[#612639] transition-all">匯出名冊</button>
-             </div>
-             <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
-                {notes.filter(n => !n.is_deleted).map(n => (
-                   <div key={n.id} className="bg-white p-12 rounded-[60px] shadow-lg border border-[#E8E2D1] relative overflow-hidden">
-                      <div className={`absolute top-0 right-0 px-12 py-5 rounded-bl-[60px] font-black text-white text-xl ${n.audit_status === '待審核' ? 'bg-orange-500' : n.audit_status === '已通過' ? 'bg-emerald-600' : 'bg-red-600'}`}>{n.audit_status}</div>
-                      <div className="text-[#7A2E40] font-black text-6xl mb-4">{n.real_name}</div>
-                      <div className="flex gap-4 mt-8">
-                         <button onClick={()=>handleUpdateAuditStatus(n.id, '已通過')} className="flex-1 py-6 bg-emerald-50 text-emerald-700 font-black text-3xl rounded-[30px] border-4 border-emerald-600 hover:bg-emerald-600 hover:text-white transition-all">通過</button>
-                         <button onClick={()=>handleUpdateAuditStatus(n.id, '不通過')} className="flex-1 py-6 bg-red-50 text-red-700 font-black text-3xl rounded-[30px] border-4 border-red-600 hover:bg-red-600 hover:text-white transition-all">駁回</button>
-                      </div>
-                   </div>
-                ))}
-                {resetRequests.filter(r => r.status === 'pending').map(r => (
-                   <div key={r.id} className="bg-white p-12 rounded-[60px] shadow-lg border-4 border-blue-200 relative overflow-hidden">
-                      <div className="absolute top-0 right-0 px-12 py-5 rounded-bl-[60px] font-black text-white text-xl bg-blue-500">重設密碼</div>
-                      <div className="text-blue-900 font-black text-5xl mb-4">{r.user_name}</div>
-                      <div className="text-slate-400 text-2xl font-mono">ID: {r.id_last4}</div>
-                      <div className="flex gap-4 mt-8">
-                         <button onClick={()=>handleResetAction(r.id, 'approve')} className="flex-1 py-6 bg-blue-50 text-blue-700 font-black text-3xl rounded-[30px] border-4 border-blue-600 hover:bg-blue-600 hover:text-white transition-all">批准</button>
-                         <button onClick={()=>handleResetAction(r.id, 'reject')} className="flex-1 py-6 bg-slate-50 text-slate-700 font-black text-3xl rounded-[30px] border-4 border-slate-600 hover:bg-slate-600 hover:text-white transition-all">拒絕</button>
-                      </div>
-                   </div>
-                ))}
-             </div>
-          </div>
-        )}
-
-        {activeTab === 'admin_data' && isAdmin && (
-           <div className="bg-white p-10 rounded-[60px] shadow-sm border border-[#E8E2D1] animate-in fade-in">
-              <div className="flex justify-between items-center mb-10 gap-6 border-b border-[#F2ECE4] pb-8"><h3 className="text-2xl font-black text-[#7A2E40]">資料總覽</h3><div className="flex gap-4"><select className="p-3 bg-[#FAF9F6] border rounded-2xl text-xs font-bold" value={filterLoc} onChange={e=>setFilterLoc(e.target.value)}><option value="">所有地點</option>{locations.map(l => <option key={l} value={l}>{l}</option>)}</select><button onClick={handleExport} className="bg-emerald-600 text-white px-6 py-3 rounded-2xl flex items-center gap-2 text-sm font-black hover:bg-emerald-700">匯出</button></div></div>
-              <div className="overflow-x-auto rounded-3xl border border-[#F2ECE4]"><table className="w-full text-left text-sm"><thead><tr className="bg-[#7A2E40] text-white"><th>姓名</th><th>地點</th><th>活動</th><th>行程</th><th>狀態</th></tr></thead><tbody>{filteredAdminNotes.map(n => <tr key={n.id} className="hover:bg-slate-50"><td className="p-4">{n.real_name}</td><td className="p-4">{n.activity_location}</td><td className="p-4">{n.activity_name}</td><td className="p-4">{n.activity_option}</td><td className="p-4">{n.audit_status}</td></tr>)}</tbody></table></div>
-           </div>
-        )}
-
+        {/* ... 其他分頁邏輯 (History, Users, Data) ... */}
+        {activeTab === 'history' && <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-12">{notes.filter(n => n.user_id === user?.id).map(n => <div key={n.id} className="bg-white p-6 rounded-[40px] shadow-xl border border-[#E8E2D1] relative overflow-hidden"><div className="absolute top-0 left-0 w-3 h-full bg-[#7A2E40]"></div><div className="space-y-4"><div className="flex justify-between items-start"><span className="text-sm text-slate-400">{n.created_at.slice(0,10)}</span></div><h4 className="font-black text-2xl text-slate-800">{n.activity_name}</h4><div className="text-slate-500 text-sm space-y-1"><p>地點：{n.activity_location}</p><p>選項：{n.activity_option}</p>{n.sign_name && <p className="text-xs text-slate-300">報名者：{n.sign_name}</p>}</div><div className="mt-4 pt-4 border-t border-slate-100 flex justify-between items-center"><label className="flex items-center gap-2 cursor-pointer select-none text-red-400 hover:text-red-600"><input type="checkbox" className="w-5 h-5 rounded" checked={n.is_deleted} onChange={() => handleToggleDeleteNote(n.id, n.is_deleted)} /><span className="font-bold text-sm">刪除紀錄</span></label></div></div></div>)}</div>}
+        {activeTab === 'users' && isAdmin && <div className="bg-white p-6 rounded-3xl shadow-sm border border-[#E8E2D1]"><h4 className="font-bold text-slate-600 mb-4 flex items-center gap-2"><Plus className="w-4 h-4"/> 新增使用者</h4><div className="flex flex-col md:flex-row gap-4"><input className="flex-1 p-2 border rounded-none text-sm" placeholder="姓名" value={newUser.name} onChange={e=>setNewUser({...newUser, name: e.target.value})} /><input className="w-32 p-2 border rounded-none text-sm" placeholder="ID後4碼" value={newUser.id4} onChange={e=>setNewUser({...newUser, id4: e.target.value})} /><input className="w-40 p-2 border rounded-none text-sm" placeholder="密碼" value={newUser.pwd} onChange={e=>setNewUser({...newUser, pwd: e.target.value})} /><button onClick={handleCreateUser} className="bg-blue-600 text-white px-6 rounded-xl font-bold text-sm hover:bg-blue-700">新增</button></div></div>}
+        {activeTab === 'users' && isAdmin && <div className="bg-white rounded-3xl shadow-sm border border-[#E8E2D1] overflow-hidden mt-8"><table className="w-full text-sm text-left"><thead className="bg-slate-50 text-slate-500 font-bold border-b"><tr><th className="p-4">姓名</th><th className="p-4">ID後4碼</th><th className="p-4">管理員</th><th className="p-4">狀態</th><th className="p-4 text-right">報名數</th></tr></thead><tbody className="divide-y">{allUsers.map(u => <tr key={u.id} className="hover:bg-slate-50"><td className="p-4 font-bold text-[#7A2E40]">{u.user_name}</td><td className="p-4 font-mono text-slate-400">{u.id_last4}</td><td className="p-4"><input type="checkbox" checked={u.is_admin} onChange={() => handleToggleAdmin(u.uid!, u.is_admin)} className="w-5 h-5 rounded border-slate-300 cursor-pointer" /></td><td className="p-4"><span className={`px-2 py-1 rounded text-xs font-bold ${u.is_disabled ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>{u.is_disabled ? '已停用' : '啟用中'}</span></td><td className="p-4 text-right"><button onClick={()=>handleToggleUserStatus(u.uid!, u.is_disabled)} className="text-blue-500 hover:underline">{u.is_disabled ? '啟用' : '停用'}</button></td></tr>)}</tbody></table></div>}
+        
+        {/* 審核頁籤：僅顯示密碼重設 (已移除報名表審核) */}
+        {activeTab === 'audit' && isAdmin && <div className="space-y-12 animate-in fade-in"><div className="bg-[#7A2E40] p-10 rounded-[50px] flex justify-between items-center shadow-xl"><h2 className="text-4xl font-black text-white">審核中心 (密碼重設)</h2></div><div className="grid grid-cols-1 md:grid-cols-2 gap-12">{resetRequests.filter(r => r.status === 'pending').map(r => <div key={r.id} className="bg-white p-12 rounded-[60px] shadow-lg border-4 border-blue-200 relative overflow-hidden"><div className="absolute top-0 right-0 px-12 py-5 rounded-bl-[60px] font-black text-white text-xl bg-blue-500">重設密碼</div><div className="text-blue-900 font-black text-5xl mb-4">{r.user_name}</div><div className="text-slate-400 text-2xl font-mono">ID: {r.id_last4}</div><div className="flex gap-4 mt-8"><button onClick={()=>handleResetAction(r.id, 'approve')} className="flex-1 py-6 bg-blue-50 text-blue-700 font-black text-3xl rounded-[30px] border-4 border-blue-600 hover:bg-blue-600 hover:text-white transition-all">批准</button><button onClick={()=>handleResetAction(r.id, 'reject')} className="flex-1 py-6 bg-slate-50 text-slate-700 font-black text-3xl rounded-[30px] border-4 border-slate-600 hover:bg-slate-600 hover:text-white transition-all">拒絕</button></div></div>)}</div></div>}
+        
+        {activeTab === 'admin_data' && isAdmin && <div className="bg-white p-10 rounded-[60px] shadow-sm border border-[#E8E2D1] animate-in fade-in"><div className="flex justify-between items-center mb-10 gap-6 border-b border-[#F2ECE4] pb-8"><h3 className="text-2xl font-black text-[#7A2E40]">資料總覽</h3><div className="flex gap-4"><select className="p-2 bg-[#FAF9F6] border rounded-none text-xs font-bold" value={filterLoc} onChange={e=>setFilterLoc(e.target.value)}><option value="">所有地點</option>{locations.map(l => <option key={l} value={l}>{l}</option>)}</select><button onClick={handleExport} className="bg-emerald-600 text-white px-6 py-2 rounded-2xl flex items-center gap-2 text-sm font-black hover:bg-emerald-700">匯出</button></div></div><div className="overflow-x-auto rounded-3xl border border-[#F2ECE4]"><table className="w-full text-left text-sm"><thead><tr className="bg-[#7A2E40] text-white"><th>姓名</th><th>地點</th><th>活動</th><th>行程</th><th>備註</th></tr></thead><tbody>{filteredAdminNotes.map(n => <tr key={n.id} className="hover:bg-slate-50"><td className="p-4">{n.real_name}</td><td className="p-4">{n.activity_location}</td><td className="p-4">{n.activity_name}</td><td className="p-4">{n.activity_option}</td><td className="p-4">{n.memo || '-'}</td></tr>)}</tbody></table></div></div>}
         {activeTab === 'admin_settings' && isAdmin && (
            <div className="bg-white p-16 rounded-[80px] shadow-sm border border-[#E8E2D1]">
+              <h3 className="text-2xl font-black text-[#7A2E40] mb-2">1、報名行程設定</h3>
+              <p className="text-xl text-slate-400 font-bold mb-12">(地點、活動、行程、內容)</p>
               <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-                 <div className="space-y-6 min-w-0"><h4 className="font-black text-3xl border-l-[15px] border-[#7A2E40] pl-6">地點</h4><div className="flex gap-2 shrink-0"><input className="flex-1 p-3 border-4 rounded-2xl text-xl font-bold min-w-0" value={newLocation} onChange={e=>setNewLocation(e.target.value)} /><button onClick={addLocation} className="bg-[#7A2E40] text-white p-3 rounded-2xl shrink-0"><Plus/></button></div><div className="max-h-96 overflow-y-auto space-y-2">{locations.map(l => <div key={l} onClick={()=>setMgmtSelectedLoc(l)} className={`p-4 rounded-2xl text-xl font-bold cursor-pointer flex justify-between items-center ${mgmtSelectedLoc === l ? 'bg-[#7A2E40] text-white' : 'bg-slate-100'}`}><span>{l}</span><button onClick={(e)=>{e.stopPropagation(); handleDeleteLocation(l)}} className={mgmtSelectedLoc === l ? "text-white/80 hover:text-white" : "text-slate-400 hover:text-red-500"}><Trash2 className="w-5 h-5"/></button></div>)}</div></div>
-                 <div className="space-y-6 min-w-0"><h4 className="font-black text-3xl border-l-[15px] border-[#7A2E40] pl-6">活動</h4><div className="flex gap-2 shrink-0"><input className="flex-1 p-3 border-4 rounded-2xl text-xl font-bold min-w-0" disabled={!mgmtSelectedLoc} value={newActivity} onChange={e=>setNewActivity(e.target.value)} /><button onClick={addActivity} className="bg-[#7A2E40] text-white p-3 rounded-2xl shrink-0" disabled={!mgmtSelectedLoc}><Plus/></button></div><div className="max-h-96 overflow-y-auto space-y-2">{adminActivities.map(a => <div key={a} onClick={()=>setMgmtSelectedAct(a)} className={`p-4 rounded-2xl text-xl font-bold cursor-pointer flex justify-between items-center ${mgmtSelectedAct === a ? 'bg-[#7A2E40] text-white' : 'bg-slate-100'}`}><span>{a}</span><button onClick={(e)=>{e.stopPropagation(); handleDeleteActivity(a)}} className={mgmtSelectedAct === a ? "text-white/80 hover:text-white" : "text-slate-400 hover:text-red-500"}><Trash2 className="w-5 h-5"/></button></div>)}</div></div>
-                 <div className="space-y-6 min-w-0"><h4 className="font-black text-3xl border-l-[15px] border-[#7A2E40] pl-6">行程</h4><div className="flex gap-2 shrink-0"><input className="flex-1 p-3 border-4 rounded-2xl text-xl font-bold min-w-0" disabled={!mgmtSelectedAct} value={newOption} onChange={e=>setNewOption(e.target.value)} /><button onClick={addOption} className="bg-[#7A2E40] text-white p-3 rounded-2xl shrink-0" disabled={!mgmtSelectedAct}><Plus/></button></div><div className="max-h-96 overflow-y-auto space-y-2">{adminOptions.map(o => <div key={o} onClick={()=>setMgmtSelectedOpt(o)} className={`p-4 rounded-2xl text-xl font-bold cursor-pointer flex justify-between items-center ${mgmtSelectedOpt === o ? 'bg-[#7A2E40] text-white' : 'bg-slate-100'}`}><span>{o}</span><button onClick={(e)=>{e.stopPropagation(); handleDeleteOption(o)}} className={mgmtSelectedOpt === o ? "text-white/80 hover:text-white" : "text-slate-400 hover:text-red-500"}><Trash2 className="w-5 h-5"/></button></div>)}</div></div>
-                 <div className="space-y-6 min-w-0"><h4 className="font-black text-3xl border-l-[15px] border-[#7A2E40] pl-6">內容</h4><div className="flex gap-2 shrink-0"><input className="flex-1 p-3 border-4 rounded-2xl text-xl font-bold min-w-0" disabled={!mgmtSelectedOpt} value={newContent} onChange={e=>setNewContent(e.target.value)} /><button onClick={addContent} className="bg-[#7A2E40] text-white p-3 rounded-2xl shrink-0" disabled={!mgmtSelectedOpt}><Plus/></button></div><div className="max-h-96 overflow-y-auto space-y-2">{adminContents.map(h => <div key={h.id} className="p-4 rounded-2xl text-xl font-bold flex justify-between shadow-sm border border-[#F2ECE4]"><span>{h.content}</span><button onClick={()=>handleDeleteContent(h.id)} className="text-slate-400 hover:text-red-500"><Trash2 className="w-5 h-5"/></button></div>)}</div></div>
+                 <div className="space-y-6 min-w-0"><h4 className="font-black text-3xl border-l-[15px] border-[#7A2E40] pl-6">地點</h4><div className="flex gap-2 shrink-0"><input className="flex-1 p-2 border rounded-none text-lg font-bold min-w-0" value={newLocation} onChange={e=>setNewLocation(e.target.value)} /><button onClick={addLocation} className="bg-[#7A2E40] text-white p-2 rounded-none shrink-0"><Plus/></button></div><div className="max-h-96 overflow-y-auto space-y-2">{locations.map(l => <div key={l} onClick={()=>setMgmtSelectedLoc(l)} className={`p-4 rounded-2xl text-xl font-bold cursor-pointer flex justify-between items-center ${mgmtSelectedLoc === l ? 'bg-[#7A2E40] text-white' : 'bg-slate-100'}`}><span>{l}</span><button onClick={(e)=>{e.stopPropagation(); handleDeleteLocation(l)}} className={mgmtSelectedLoc === l ? "text-white/80 hover:text-white" : "text-slate-400 hover:text-red-500"}><Trash2 className="w-5 h-5"/></button></div>)}</div></div>
+                 <div className="space-y-6 min-w-0"><h4 className="font-black text-3xl border-l-[15px] border-[#7A2E40] pl-6">活動</h4><div className="flex gap-2 shrink-0"><input className="flex-1 p-2 border rounded-none text-lg font-bold min-w-0" disabled={!mgmtSelectedLoc} value={newActivity} onChange={e=>setNewActivity(e.target.value)} /><button onClick={addActivity} className="bg-[#7A2E40] text-white p-2 rounded-none shrink-0" disabled={!mgmtSelectedLoc}><Plus/></button></div><div className="max-h-96 overflow-y-auto space-y-2">{adminActivities.map(a => <div key={a} onClick={()=>setMgmtSelectedAct(a)} className={`p-4 rounded-2xl text-xl font-bold cursor-pointer flex justify-between items-center ${mgmtSelectedAct === a ? 'bg-[#7A2E40] text-white' : 'bg-slate-100'}`}><span>{a}</span><button onClick={(e)=>{e.stopPropagation(); handleDeleteActivity(a)}} className={mgmtSelectedAct === a ? "text-white/80 hover:text-white" : "text-slate-400 hover:text-red-500"}><Trash2 className="w-5 h-5"/></button></div>)}</div></div>
+                 <div className="space-y-6 min-w-0"><h4 className="font-black text-3xl border-l-[15px] border-[#7A2E40] pl-6">行程</h4><div className="flex gap-2 shrink-0"><input className="flex-1 p-2 border rounded-none text-lg font-bold min-w-0" disabled={!mgmtSelectedAct} value={newOption} onChange={e=>setNewOption(e.target.value)} /><button onClick={addOption} className="bg-[#7A2E40] text-white p-2 rounded-none shrink-0" disabled={!mgmtSelectedAct}><Plus/></button></div><div className="max-h-96 overflow-y-auto space-y-2">{adminOptions.map(o => <div key={o} onClick={()=>setMgmtSelectedOpt(o)} className={`p-4 rounded-2xl text-xl font-bold cursor-pointer flex justify-between items-center ${mgmtSelectedOpt === o ? 'bg-[#7A2E40] text-white' : 'bg-slate-100'}`}><span>{o}</span><button onClick={(e)=>{e.stopPropagation(); handleDeleteOption(o)}} className={mgmtSelectedOpt === o ? "text-white/80 hover:text-white" : "text-slate-400 hover:text-red-500"}><Trash2 className="w-5 h-5"/></button></div>)}</div></div>
+                 <div className="space-y-6 min-w-0"><h4 className="font-black text-3xl border-l-[15px] border-[#7A2E40] pl-6">內容</h4><div className="flex gap-2 shrink-0"><input className="flex-1 p-2 border rounded-none text-lg font-bold min-w-0" disabled={!mgmtSelectedOpt} value={newContent} onChange={e=>setNewContent(e.target.value)} /><button onClick={addContent} className="bg-[#7A2E40] text-white p-2 rounded-none shrink-0" disabled={!mgmtSelectedOpt}><Plus/></button></div><div className="max-h-96 overflow-y-auto space-y-2">{adminContents.map(h => <div key={h.id} className="p-4 rounded-2xl text-xl font-bold flex justify-between shadow-sm border border-[#F2ECE4]"><span>{h.content}</span><button onClick={()=>handleDeleteContent(h.id)} className="text-slate-400 hover:text-red-500"><Trash2 className="w-5 h-5"/></button></div>)}</div></div>
               </div>
-              {/* Database Schema Table (欄位管理) */}
-              <div className="mt-16">
-                 <h4 className="font-black text-3xl text-slate-700 border-l-[15px] border-[#7A2E40] pl-6 mb-8">欄位管理 (Field Settings)</h4>
+              <div className="mt-20">
+                 <h4 className="text-2xl font-black text-[#7A2E40] mb-8">2、欄位管理</h4>
                  <div className="overflow-x-auto rounded-[40px] border border-[#E8E2D1] shadow-sm">
                     <table className="w-full text-left text-sm bg-white">
                        <thead className="bg-[#7A2E40] text-white font-bold text-lg" style={{ backgroundColor: PRIMARY_COLOR }}>
-                          <tr>
-                             <th className="p-6">欄位名稱 (Key)</th>
-                             <th className="p-6">顯示標籤 (Label)</th>
-                             <th className="p-6">類型 (Type)</th>
-                             <th className="p-6">必填設定</th>
-                             <th className="p-6">備註說明</th>
-                          </tr>
+                          <tr><th className="p-6">欄位名稱 (Key)</th><th className="p-6">顯示標籤 (Label)</th><th className="p-6">類型 (Type)</th><th className="p-6">必填設定</th><th className="p-6">備註說明</th></tr>
                        </thead>
                        <tbody className="divide-y divide-[#F2ECE4] text-slate-600 font-bold text-base">
-                          {fieldConfigs.map((col) => (
-                             <tr key={col.field_key} className="hover:bg-[#FAF9F6] transition-colors">
-                                <td className="p-6 font-mono text-[#7A2E40]">{col.field_key}</td>
-                                <td className="p-6">{col.field_label}</td>
-                                <td className="p-6 font-mono text-slate-400">{col.field_type}</td>
-                                <td className="p-6">
-                                   <label className="flex items-center cursor-pointer">
-                                      <input 
-                                        type="checkbox" 
-                                        checked={col.is_required} 
-                                        onChange={(e) => handleUpdateFieldConfig(col.field_key, 'is_required', e.target.checked)} 
-                                        className="w-5 h-5 rounded border-slate-300 text-[#7A2E40] focus:ring-[#7A2E40]" 
-                                      />
-                                      <span className="ml-2 text-sm">{col.is_required ? '必填' : '選填'}</span>
-                                   </label>
-                                </td>
-                                <td className="p-6">
-                                   <input 
-                                     type="text" 
-                                     value={col.description || ''} 
-                                     onChange={(e) => handleUpdateFieldConfig(col.field_key, 'description', e.target.value)}
-                                     className="w-full p-2 border rounded-lg text-sm"
-                                     placeholder="備註..."
-                                   />
-                                </td>
-                             </tr>
-                          ))}
+                          {fieldConfigs.map((col) => <tr key={col.field_key} className="hover:bg-[#FAF9F6] transition-colors"><td className="p-6 font-mono text-[#7A2E40]">{col.field_key}</td><td className="p-6">{col.field_label}</td><td className="p-6 font-mono text-slate-400">{col.field_type}</td><td className="p-6"><label className="flex items-center cursor-pointer"><input type="checkbox" checked={col.is_required} onChange={(e) => handleUpdateFieldConfig(col.field_key, 'is_required', e.target.checked)} className="w-5 h-5 rounded border-slate-300 text-[#7A2E40] focus:ring-[#7A2E40]" /><span className="ml-2 text-sm">{col.is_required ? '必填' : '選填'}</span></label></td><td className="p-6"><input type="text" value={col.description || ''} onChange={(e) => handleUpdateFieldConfig(col.field_key, 'description', e.target.value)} className="w-full p-2 border rounded-lg text-sm" placeholder="備註..." /></td></tr>)}
                        </tbody>
                     </table>
                  </div>
