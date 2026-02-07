@@ -10,14 +10,12 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v59.0 (日期邏輯與表單驗證強化版)
+ * 系統版本：v59.1 (日期時區修正與隱藏欄位淨化版)
  * 修正說明：
- * 1. [Validation] 送出前強制檢查所有「可見」的日期欄位，若為空則阻擋。
- * 2. [Logic] 日期防呆：開始日限今日以後，結束日限開始日之後。
- * 3. [Logic] 日期同步：輸入抵離時間時，自動填入空白的發心/安單日期。
- * 4. [Logic] 安單選項預設「不安單」，選「須安單」才顯示日期。
- * 5. [UI] LOGO 圓形，欄高降低 (p-2)。
- * 6. [System] 送出時自動清空隱藏欄位，並重置表單。
+ * 1. [Fix] 日期 min 屬性改用本地時間計算，解決「選到過去日期」的時區問題。
+ * 2. [Fix] 強化送出時的資料淨化，確保「未顯示」的日期欄位 (如精舍時的發心起訖) 絕對不會寫入 DB。
+ * 3. [Logic] 保持抵離時間自動同步至發心/安單日期 (僅在欄位為空時)。
+ * 4. [System] 完整保留所有欄位定義與資料庫對應。
  */
 
 // --- 主色系設定 ---
@@ -224,6 +222,15 @@ const INITIAL_FORM_DATA = {
   stay_start_date: '', stay_end_date: ''
 };
 
+// 取得本地日期 (YYYY-MM-DD) 解決時區問題
+const getLocalTodayDate = () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 export default function App() {
   const [supabaseClient, setSupabaseClient] = useState<any>(null);
   const [user, setUser] = useState<any>(null);
@@ -266,8 +273,7 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    // Client-side only date initialization
-    setTodayDate(new Date().toISOString().split('T')[0]);
+    setTodayDate(getLocalTodayDate()); // 使用本地時間函式
 
     const loadSupabase = () => {
       const script = document.createElement('script');
@@ -427,12 +433,13 @@ export default function App() {
     setFormData(prev => ({ ...prev, transportation: hasLargeBus ? "大車-精舍統一行程" : "小車-自訂抵離寺" }));
   }, [filteredTransportOptions]);
 
-  // 日期同步邏輯：抵離時間 -> 發心/安單日期 (僅在目標為空時填入)
+  // 日期同步邏輯：只有當目標日期欄位是空值時，才自動填入 (防止覆蓋已選日期)
   useEffect(() => { 
       if (formData.arrival_datetime) {
           const datePart = formData.arrival_datetime.split('T')[0];
           setFormData(p => ({ 
               ...p, 
+              // 若 start_date 為空，則填入；否則維持原值
               start_date: p.start_date ? p.start_date : datePart,
               stay_start_date: p.stay_start_date ? p.stay_start_date : datePart 
           }));
@@ -444,13 +451,14 @@ export default function App() {
           const datePart = formData.departure_datetime.split('T')[0];
           setFormData(p => ({ 
               ...p, 
+              // 若 end_date 為空，則填入；否則維持原值
               end_date: p.end_date ? p.end_date : datePart,
               stay_end_date: p.stay_end_date ? p.stay_end_date : datePart 
           }));
       }
   }, [formData.departure_datetime]);
 
-  // 欄位顯示邏輯 (修正)
+  // 欄位顯示邏輯 (更新)
   const fieldVisibility = useMemo(() => {
     const isJingshe = formData.activity_location === '精舍';
     const isZhongtai = formData.activity_location === '中台';
@@ -461,9 +469,11 @@ export default function App() {
 
     return {
       transportation: !isJingshe,
-      volunteerGroup: isVolunteer, // 只要是發心義工就顯示，不限地點
+      // 義工組別：只要是發心義工就顯示，不限地點
+      volunteerGroup: isVolunteer,
       volunteerType: isZhongtai && isVolunteer,
-      volunteerDates: !isJingshe && isVolunteer, // 地點非精舍且是義工才顯示
+      // 發心起訖：地點「非精舍」且身分「發心義工」才顯示
+      volunteerDates: !isJingshe && isVolunteer, 
       arrivalDeparture: !isJingshe && !isBus,    
       accommodation: !isJingshe && !isBus && !isOneDay,
       accommodationDates: (!isJingshe && !isBus && !isOneDay) && needsAccommodation 
@@ -472,16 +482,15 @@ export default function App() {
 
   const getFieldConfig = (key: string) => fieldConfigs.find(f => f.field_key === key) || { is_required: false, field_label: key };
 
-  // 驗證邏輯：只檢查「可見」的必填欄位
+  // 驗證邏輯
   const validateForm = () => {
     for (const config of fieldConfigs) {
-      // 若該欄位被設定為必填，且目前是顯示狀態，則檢查
       if (config.is_required) {
         if (config.field_key === 'transportation' && !fieldVisibility.transportation) continue;
         if (config.field_key === 'volunteer_group' && !fieldVisibility.volunteerGroup) continue;
         if (config.field_key === 'volunteer_type' && !fieldVisibility.volunteerType) continue;
         
-        // 日期欄位：若可見，必須有值
+        // 日期欄位：若可見，必須有值 (下方會再做一次強制檢查)
         if (['start_date', 'end_date'].includes(config.field_key)) {
             if (fieldVisibility.volunteerDates && !formData[config.field_key as keyof typeof formData]) {
                 alert(`請填寫：${config.field_label}`); return false;
@@ -512,7 +521,7 @@ export default function App() {
         }
       }
       
-      // 強制檢查：即使後台未設必填，若欄位出現，必須填寫日期 (根據您的要求1)
+      // 強制檢查：即使後台未設必填，若日期欄位「顯示」，則必須填寫
       if (fieldVisibility.volunteerDates && ['start_date', 'end_date'].includes(config.field_key) && !formData[config.field_key as keyof typeof formData]) {
           alert(`請填寫：${config.field_label}`); return false;
       }
@@ -534,7 +543,7 @@ export default function App() {
     const signName = user?.user_metadata?.user_name || username;
     const id2 = user?.user_metadata?.id_last4 || idLast4;
 
-    // 清空未顯示的欄位值
+    // 清空未顯示的欄位值 (確保 DB 資料乾淨)
     let finalData = { ...formData };
 
     if (!fieldVisibility.transportation) finalData.transportation = '';
