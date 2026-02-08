@@ -10,11 +10,13 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v66.1 (移除「已圓滿」狀態版)
+ * 系統版本：v67.0 (紀錄即時更新與行程結束控制版)
  * 修正說明：
- * 1. [Logic] 移除紀錄頁中針對「已圓滿」(過期行程) 的自動判定與反灰邏輯。
- * 2. [Logic] 排序邏輯調整：僅「已刪除」的資料會排在最後，過期資料正常按時間排序。
- * 3. [System] 保持所有 v66.0 的欄位順序與日期設定功能。
+ * 1. [Fix] handleSubmitNote 成功後呼叫 fetchData()，確保紀錄頁即時更新。
+ * 2. [Logic] 新增 checkIsExpired 函式，比對行程設定的結束日與今日。
+ * 3. [Form] 若行程已過期，登記表單鎖定送出並提示。
+ * 4. [UI] 紀錄卡片狀態邏輯更新：「已圓滿」(過期) 與「刪除」狀態。
+ * 5. [UI] 卡片樣式調整：色塊保持顏色，僅內容區域反灰鎖定。
  */
 
 // --- 主色系設定 ---
@@ -32,7 +34,6 @@ interface ActivityHierarchy {
   activity: string | null;
   option: string | null;
   content: string | null;
-  // 新增日期設定欄位
   activity_end_date?: string | null;
   option_end_date?: string | null;
 }
@@ -224,7 +225,7 @@ const INITIAL_FORM_DATA = {
   stay_start_date: '', stay_end_date: ''
 };
 
-// 取得本地日期與時間函式 (避免 Server Side Error)
+// 取得本地日期與時間函式
 const getLocalTodayDate = () => {
   const now = new Date();
   const year = now.getFullYear();
@@ -267,8 +268,6 @@ export default function App() {
   // 日期狀態
   const [todayDate, setTodayDate] = useState('');
   const [currentDateTime, setCurrentDateTime] = useState('');
-  
-  // 篩選狀態
   const [historyFilterLoc, setHistoryFilterLoc] = useState<string>('');
   const [filterLoc, setFilterLoc] = useState<string>('');
   
@@ -460,9 +459,7 @@ export default function App() {
 
           setFormData(p => ({ 
               ...p, 
-              // 發心起訖：使用完整 datetime
               start_date: p.start_date ? p.start_date : fullDateTime,
-              // 安單起訖：使用 date only
               stay_start_date: p.stay_start_date ? p.stay_start_date : dateOnly 
           }));
       }
@@ -475,9 +472,7 @@ export default function App() {
 
           setFormData(p => ({ 
               ...p, 
-              // 發心起訖：使用完整 datetime
               end_date: p.end_date ? p.end_date : fullDateTime,
-              // 安單起訖：使用 date only
               stay_end_date: p.stay_end_date ? p.stay_end_date : dateOnly 
           }));
       }
@@ -505,8 +500,22 @@ export default function App() {
 
   const getFieldConfig = (key: string) => fieldConfigs.find(f => f.field_key === key) || { is_required: false, field_label: key };
 
+  // 取得目前活動或行程的結束日期
+  const getHierarchyEndDate = (loc: string, act: string, opt: string) => {
+      const found = hierarchyData.find(h => h.location === loc && h.activity === act && h.option === opt);
+      // 行程結束日優先，若無則看活動結束日
+      return found?.option_end_date || found?.activity_end_date || null;
+  };
+
   // 驗證邏輯
   const validateForm = () => {
+    // 檢查行程是否過期
+    const endDate = getHierarchyEndDate(formData.activity_location, formData.activity_name, formData.activity_option);
+    if (endDate && todayDate > endDate) {
+        alert("此行程已截止報名");
+        return false;
+    }
+
     for (const config of fieldConfigs) {
       if (config.is_required) {
         if (config.field_key === 'transportation' && !fieldVisibility.transportation) continue;
@@ -609,6 +618,8 @@ export default function App() {
     } else { 
         alert('已送出申請'); 
         setFormData(INITIAL_FORM_DATA); 
+        // 修正：送出成功後重新拉取資料，確保紀錄頁籤有最新資料
+        await fetchData();
         setActiveTab('history'); 
     }
   };
@@ -746,6 +757,7 @@ export default function App() {
   // 在 Admin 設定頁使用的功能 (更新日期設定)
   const handleUpdateActivityDate = async (val: string) => {
     if (!supabaseClient || !mgmtSelectedLoc || !mgmtSelectedAct) return;
+    // 更新 activity_end_date (假設資料表已有此欄位)
     const { error } = await supabaseClient.from('activity_hierarchy')
         .update({ activity_end_date: val })
         .eq('location', mgmtSelectedLoc)
@@ -756,6 +768,7 @@ export default function App() {
 
   const handleUpdateOptionDate = async (val: string) => {
     if (!supabaseClient || !mgmtSelectedLoc || !mgmtSelectedAct || !mgmtSelectedOpt) return;
+    // 更新 option_end_date
     const { error } = await supabaseClient.from('activity_hierarchy')
         .update({ option_end_date: val })
         .eq('location', mgmtSelectedLoc)
@@ -777,26 +790,51 @@ export default function App() {
     }
   };
 
-  // 排序邏輯 (修改：已刪除排最後)
+  // 排序邏輯
   const sortedHistoryNotes = useMemo(() => {
       let filtered = notes.filter(n => n.user_id === user?.id);
       if (historyFilterLoc) filtered = filtered.filter(n => n.activity_location === historyFilterLoc);
       
+      const now = currentDateTime ? new Date(currentDateTime) : null;
+      
       return filtered.sort((a, b) => {
+          // 檢查是否過期
+          const aHierarchy = hierarchyData.find(h => h.location === a.activity_location && h.activity === a.activity_name && h.option === a.activity_option);
+          const bHierarchy = hierarchyData.find(h => h.location === b.activity_location && h.activity === b.activity_name && h.option === b.activity_option);
+          const aEndDate = aHierarchy?.option_end_date || aHierarchy?.activity_end_date;
+          const bEndDate = bHierarchy?.option_end_date || bHierarchy?.activity_end_date;
+          
+          const aIsExpired = (aEndDate && todayDate > aEndDate) || (a.departure_datetime && now && new Date(a.departure_datetime) < now);
+          const bIsExpired = (bEndDate && todayDate > bEndDate) || (b.departure_datetime && now && new Date(b.departure_datetime) < now);
+
           const aIsDeleted = a.is_deleted;
           const bIsDeleted = b.is_deleted;
           
+          // 1. 已刪除排最後
           if (aIsDeleted !== bIsDeleted) return aIsDeleted ? 1 : -1;
+          // 2. 已圓滿 (過期) 排倒數第二
+          if (aIsExpired !== bIsExpired) return aIsExpired ? 1 : -1;
           
+          // 3. 正常時間排序
           const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
           const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
           return dateB - dateA;
       });
-  }, [notes, user, historyFilterLoc]);
+  }, [notes, user, historyFilterLoc, currentDateTime, todayDate, hierarchyData]);
 
-  // 輔助函式
+  // 輔助函式：判斷卡片狀態
   const getCardStatus = (note: Note) => {
-      if (note.is_deleted) return { text: '刪除', color: 'bg-gray-400', isInactive: true };
+      if (note.is_deleted) return { text: '刪除', color: 'bg-red-500', isInactive: true }; // 刪除用紅色
+      
+      // 檢查是否過期
+      const hierarchy = hierarchyData.find(h => h.location === note.activity_location && h.activity === note.activity_name && h.option === note.activity_option);
+      const endDate = hierarchy?.option_end_date || hierarchy?.activity_end_date;
+      const now = currentDateTime ? new Date(currentDateTime) : null;
+      
+      if ((endDate && todayDate > endDate) || (note.departure_datetime && now && new Date(note.departure_datetime) < now)) {
+          return { text: '已圓滿', color: 'bg-gray-400', isInactive: true };
+      }
+      
       return { 
         text: note.registration_option, 
         color: note.registration_option === '新增' ? 'bg-emerald-600' : 'bg-amber-600',
@@ -817,6 +855,11 @@ export default function App() {
     return found?.option_end_date || '';
   }, [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
 
+  // 檢查目前選的行程是否已截止
+  const isCurrentSelectionExpired = useMemo(() => {
+      const endDate = getHierarchyEndDate(formData.activity_location, formData.activity_name, formData.activity_option);
+      return endDate && todayDate > endDate;
+  }, [formData, todayDate, hierarchyData]);
 
   const filteredAdminNotes = useMemo(() => {
     return notes.filter(n => (!filterLoc || n.activity_location === filterLoc));
@@ -897,11 +940,16 @@ export default function App() {
           </div>
         )}
 
-        {/* 2. 登記表單 */}
         {activeTab === 'form' && (
           <div className="bg-white p-8 rounded-[40px] shadow-2xl border border-[#E8E2D1] animate-in slide-in-from-bottom-12">
              <div className="flex items-center gap-4 border-b border-[#F2ECE4] pb-6 mb-6"><div className="p-3 bg-[#7A2E40] rounded-2xl text-white shadow-lg" style={{ backgroundColor: PRIMARY_COLOR }}><Edit className="w-6 h-6" /></div><h3 className="text-2xl font-black text-[#7A2E40] tracking-tight">發心登記表</h3></div>
              
+             {isCurrentSelectionExpired && (
+                 <div className="mb-6 p-4 bg-red-100 border-l-4 border-red-500 text-red-700 font-bold rounded-r">
+                     ⚠️ 此行程已截止報名 (結束日：{getHierarchyEndDate(formData.activity_location, formData.activity_name, formData.activity_option)})
+                 </div>
+             )}
+
              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                 <div className="lg:col-span-3 space-y-2"><label className="text-lg font-black text-[#7A2E40] ml-1">{getFieldConfig('real_name').field_label}{getFieldConfig('real_name').is_required?'*':''}</label><input className="w-full p-2 text-lg font-bold border rounded-none" value={formData.real_name} onChange={e=>setFormData({...formData, real_name: e.target.value})} /></div>
                 <div className="lg:col-span-2 space-y-2"><label className="text-lg font-black text-[#7A2E40] ml-1">{getFieldConfig('dharma_name').field_label}{getFieldConfig('dharma_name').is_required?'*':''}</label><input className="w-full p-2 text-lg font-bold border rounded-none" value={formData.dharma_name} onChange={e=>setFormData({...formData, dharma_name: e.target.value})} /></div>
@@ -923,14 +971,14 @@ export default function App() {
                
                {fieldVisibility.arrivalDeparture && <div className="grid grid-cols-1 md:grid-cols-2 gap-6"><div className="space-y-2"><label className="text-lg font-bold text-blue-700">{getFieldConfig('arrival_datetime').field_label}{getFieldConfig('arrival_datetime').is_required?'*':''}</label><input type="datetime-local" min={currentDateTime} className="w-full p-2 rounded-none border text-lg" value={formData.arrival_datetime || ''} onChange={e=>setFormData({...formData, arrival_datetime: e.target.value})} /></div><div className="space-y-2"><label className="text-lg font-bold text-blue-700">{getFieldConfig('departure_datetime').field_label}{getFieldConfig('departure_datetime').is_required?'*':''}</label><input type="datetime-local" min={formData.arrival_datetime || currentDateTime} className="w-full p-2 rounded-none border text-lg" value={formData.departure_datetime || ''} onChange={e=>setFormData({...formData, departure_datetime: e.target.value})} /></div></div>}
                
-               {/* 義工組別位於抵離寺下方 */}
+               {/* 修正：義工組別移至抵離時間下方 */}
                {fieldVisibility.volunteerGroup && <div className="p-6 bg-[#F2ECE4]/30 rounded-3xl border border-[#E8E2D1] space-y-4"><label className="text-lg font-black text-[#7A2E40]">{getFieldConfig('volunteer_group').field_label}{getFieldConfig('volunteer_group').is_required?'*':''}</label><input className="w-full p-2 rounded-none border text-lg" value={formData.volunteer_group} onChange={e=>setFormData({...formData, volunteer_group: e.target.value})} /></div>}
                
                {fieldVisibility.volunteerType && <div className="p-6 bg-[#F2ECE4]/30 rounded-3xl border border-[#E8E2D1] space-y-4"><label className="text-lg font-black text-[#7A2E40]">{getFieldConfig('volunteer_type').field_label}{getFieldConfig('volunteer_type').is_required?'*':''}</label><select className="w-full p-2 rounded-none text-lg" value={formData.volunteer_type} onChange={e=>setFormData({...formData, volunteer_type: e.target.value})}><option value="">請選擇</option><option value="一般義工-由精舍安排組別">一般義工-由精舍安排組別</option><option value="長期義工-已於平台報名">長期義工-已於平台報名</option><option value="佛巡-已於平台報名">佛巡-已於平台報名</option></select></div>}
                {fieldVisibility.volunteerDates && <div className="p-6 bg-[#F2ECE4]/30 rounded-3xl border border-[#E8E2D1] space-y-4"><label className="text-lg font-black text-[#7A2E40]">發心起訖</label><input type="datetime-local" min={currentDateTime} className="w-full p-2 rounded-none border text-lg" value={formData.start_date || ''} onChange={e=>setFormData({...formData, start_date: e.target.value})} /><input type="datetime-local" min={formData.start_date || currentDateTime} className="w-full p-2 rounded-none border text-lg mt-2" value={formData.end_date || ''} onChange={e=>setFormData({...formData, end_date: e.target.value})} /></div>}
                {fieldVisibility.accommodation && <div className="p-6 bg-slate-50 rounded-3xl border border-slate-200"><label className="text-lg font-black">安單選項</label><select className="w-full p-2 rounded-none text-lg mb-4" value={formData.accommodation_option} onChange={e=>setFormData({...formData, accommodation_option: e.target.value})}><option value="不安單">不安單</option><option value="須安單">須安單</option></select>{fieldVisibility.accommodationDates && <><label className="text-lg font-black">安單起訖</label><input type="date" min={todayDate} className="w-full p-2 text-lg rounded-none" value={formData.stay_start_date || ''} onChange={e=>setFormData({...formData, stay_start_date: e.target.value})} /><input type="date" min={formData.stay_start_date || todayDate} className="w-full p-2 text-lg rounded-none mt-4" value={formData.stay_end_date || ''} onChange={e=>setFormData({...formData, stay_end_date: e.target.value})} /></>}</div>}</div>
              <div className="mt-8 border-t border-[#F2ECE4] pt-6 space-y-2"><label className="text-lg font-black text-slate-500">{getFieldConfig('memo').field_label}{getFieldConfig('memo').is_required?'*':''}</label><textarea rows={3} className="w-full p-2 text-lg border rounded-none" placeholder="若有其他需求請填寫於此..." value={formData.memo} onChange={e=>setFormData({...formData, memo: e.target.value})} /></div>
-             <button onClick={handleSubmitNote} disabled={loading} className="w-full mt-10 bg-[#7A2E40] hover:bg-[#5D2331] text-white py-4 rounded-2xl font-black text-3xl shadow-lg transition-all" style={{ backgroundColor: PRIMARY_COLOR }}>確認送出</button>
+             <button onClick={handleSubmitNote} disabled={loading || isCurrentSelectionExpired} className={`w-full mt-10 text-white py-4 rounded-2xl font-black text-3xl shadow-lg transition-all ${isCurrentSelectionExpired ? 'bg-gray-400 cursor-not-allowed' : 'bg-[#7A2E40] hover:bg-[#5D2331]'}`} style={!isCurrentSelectionExpired ? { backgroundColor: PRIMARY_COLOR } : {}}>{isCurrentSelectionExpired ? '已截止報名' : '確認送出'}</button>
           </div>
         )}
 
@@ -950,24 +998,32 @@ export default function App() {
                  const status = getCardStatus(n);
                  const isInactive = status.isInactive;
                  return (
-                   <div key={n.id} className={`p-6 rounded-[40px] border relative overflow-hidden transition-all hover:shadow-2xl ${isInactive ? 'bg-gray-100 grayscale border-gray-200 opacity-80' : 'bg-white shadow-xl border-[#E8E2D1]'}`}>
+                   <div key={n.id} className={`p-6 rounded-[40px] border relative overflow-hidden transition-all hover:shadow-2xl ${isInactive ? 'bg-gray-100 border-gray-200' : 'bg-white shadow-xl border-[#E8E2D1]'}`}>
                       <div className={`absolute top-0 left-0 px-6 py-2 rounded-br-3xl font-black text-white text-lg tracking-widest ${status.color}`}>{status.text}</div>
-                      <div className="mt-8 space-y-4">
+                      <div className={`mt-8 space-y-4 ${isInactive ? 'opacity-50 pointer-events-none' : ''}`}>
+                         {/* 內容區塊重組 */}
                          <h3 className="text-3xl font-black text-slate-800 border-b-4 border-[#F2ECE4] pb-2">{n.activity_location} <span className="text-slate-300">|</span> {n.activity_name}</h3>
                          <div className="bg-[#FAF9F6] p-3 rounded-xl border border-[#E8E2D1]"><span className="text-xs text-slate-400 font-bold block mb-1">行程方案</span><div className="text-xl font-bold text-[#7A2E40]">{n.activity_option}</div></div>
                          <div className="space-y-2 text-base text-slate-600">
+                            {/* 姓名/法名/屬性 */}
                             <p><span className="font-bold text-slate-400">學員：</span> {n.real_name} {n.dharma_name ? `(${n.dharma_name})` : ''} <span className="text-xs bg-slate-100 px-2 py-0.5 rounded text-slate-500">{n.registrant_type}</span></p>
+                            {/* 自訂備註 */}
                             {n.other_remarks && <p><span className="font-bold text-orange-500">自訂備註：</span> {n.other_remarks}</p>}
+                            {/* 內容複選 */}
                             {n.selected_contents && Array.isArray(n.selected_contents) && n.selected_contents.length > 0 && <p><span className="font-bold text-slate-400">複選內容：</span> {n.selected_contents.join('、')}</p>}
+                            {/* 交通 */}
                             {n.transportation && <p><span className="font-bold text-slate-400">交通：</span> {n.transportation}</p>}
+                            {/* 抵離時間 */}
                             {(n.arrival_datetime || n.departure_datetime) && (<div className="text-sm bg-blue-50 p-2 rounded-lg text-blue-800"><div>抵：{formatDateTime(n.arrival_datetime)}</div><div>離：{formatDateTime(n.departure_datetime)}</div></div>)}
+                            {/* 身分/義工 */}
                             <p><span className="font-bold text-slate-400">身分：</span> {n.identity} {n.volunteer_type ? ` - ${n.volunteer_type}` : ''}</p>
-                            
-                            {/* 卡片內容順序調整：義工組別在身分後 */}
+                            {/* 義工組別 */}
                             {n.volunteer_group && <p><span className="font-bold text-slate-400">組別：</span> {n.volunteer_group}</p>}
-                            
+                            {/* 發心起訖 */}
                             {(n.start_date || n.end_date) && (<p><span className="font-bold text-slate-400">發心：</span> {n.start_date?.replace('T', ' ') || '?'} ~ {n.end_date?.replace('T', ' ') || '?'}</p>)}
+                            {/* 安單 */}
                             {n.accommodation_option === '須安單' && (<p><span className="font-bold text-slate-400">安單：</span> {n.stay_start_date} ~ {n.stay_end_date}</p>)}
+                            {/* 備註 */}
                             {n.memo && <div className="mt-2 pt-2 border-t border-dashed border-slate-200 text-sm text-slate-500 italic">{n.memo}</div>}
                          </div>
                          <div className="mt-6 pt-4 border-t border-slate-100 flex justify-between items-end">
