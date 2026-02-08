@@ -5,15 +5,15 @@ import {
   Bell, FileText, History, Settings, Shield, LogOut, Plus, Trash2, Check, 
   Edit, User, MapPin, Tag, ListFilter, Save, Database, Clock, Car, Info, 
   Home, UserCheck, AlertCircle, Briefcase, Layers, 
-  CheckCircle2, CheckSquare, FileSpreadsheet, Megaphone, ClipboardCheck, UserCog, Share2, Lock, Eye, EyeOff, Users, ArrowRight, RefreshCw, AlertTriangle, Image as ImageIcon, Table as TableIcon, Calendar, Filter, UploadCloud
+  CheckCircle2, CheckSquare, FileSpreadsheet, Megaphone, ClipboardCheck, UserCog, Share2, Lock, Eye, EyeOff, Users, ArrowRight, RefreshCw, AlertTriangle, Image as ImageIcon, Table as TableIcon, Calendar, Filter
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v68.1 (重複宣告修復版)
+ * 系統版本：v69.1 (編譯錯誤修復版)
  * 修正說明：
- * 1. [Fix] 移除重複宣告的 isCurrentSelectionExpired 變數，解決編譯錯誤。
- * 2. [System] 整合 v68.0 所有功能 (發佈按鈕、紀錄篩選、活動截止邏輯)。
+ * 1. [Fix] 移除重複宣告的 isCurrentSelectionExpired 與其他 Memo 變數，解決 Build Error。
+ * 2. [System] 確保所有邏輯 (日期截止、紀錄狀態、欄位順序) 正常運作。
  */
 
 // --- 主色系設定 ---
@@ -455,7 +455,6 @@ export default function App() {
       if (formData.arrival_datetime) {
           const fullDateTime = formData.arrival_datetime;
           const dateOnly = formData.arrival_datetime.split('T')[0];
-
           setFormData(p => ({ 
               ...p, 
               // 若 start_date 為空，則填入完整 datetime；否則維持原值
@@ -470,7 +469,6 @@ export default function App() {
       if (formData.departure_datetime) {
           const fullDateTime = formData.departure_datetime;
           const dateOnly = formData.departure_datetime.split('T')[0];
-
           setFormData(p => ({ 
               ...p, 
               // 若 end_date 為空，則填入完整 datetime；否則維持原值
@@ -481,7 +479,7 @@ export default function App() {
       }
   }, [formData.departure_datetime]);
 
-  // 欄位顯示邏輯 (更新)
+  // 欄位顯示邏輯
   const fieldVisibility = useMemo(() => {
     const isJingshe = formData.activity_location === '精舍';
     const isZhongtai = formData.activity_location === '中台';
@@ -513,7 +511,6 @@ export default function App() {
   };
 
   // 檢查是否截止 (修正邏輯: 皆為空才不截止)
-  // [Fix]: 移除了重複宣告，保留這一個正確的定義
   const isCurrentSelectionExpired = useMemo(() => {
       const endDate = getHierarchyEndDate(formData.activity_location, formData.activity_name, formData.activity_option);
       if (!endDate) return false; // 無設定則不截止
@@ -772,7 +769,6 @@ export default function App() {
         .eq('location', mgmtSelectedLoc)
         .eq('activity', mgmtSelectedAct);
     if(error) console.error(error);
-    fetchData();
   };
 
   const handleUpdateOptionDate = async (val: string) => {
@@ -783,13 +779,11 @@ export default function App() {
         .eq('activity', mgmtSelectedAct)
         .eq('option', mgmtSelectedOpt);
     if(error) console.error(error);
-    fetchData();
   };
 
-  // 模擬發佈功能
   const handlePublishSettings = () => {
       alert("設定已發佈！前台表單選項已更新。");
-      fetchData(); // 重新拉取確保同步
+      fetchData();
   };
 
   const handleUpdateFieldConfig = async (key: string, field: string, value: any) => {
@@ -804,12 +798,10 @@ export default function App() {
     }
   };
 
-  // 排序邏輯
+  // 排序邏輯 (修改：已刪除排最後)
   const sortedHistoryNotes = useMemo(() => {
       let filtered = notes.filter(n => n.user_id === user?.id);
       if (historyFilterLoc) filtered = filtered.filter(n => n.activity_location === historyFilterLoc);
-      
-      const now = currentDateTime ? new Date(currentDateTime) : null;
       
       return filtered.sort((a, b) => {
           // 判斷是否「已圓滿」：有結束日期且已過期
@@ -835,7 +827,7 @@ export default function App() {
           const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
           return dateB - dateA;
       });
-  }, [notes, user, historyFilterLoc, currentDateTime, todayDate, hierarchyData]);
+  }, [notes, user, historyFilterLoc, todayDate, hierarchyData]);
 
   // 輔助函式：判斷卡片狀態
   const getCardStatus = (note: Note) => {
@@ -1009,7 +1001,7 @@ export default function App() {
                  const isInactive = status.isInactive;
                  return (
                    <div key={n.id} className={`p-6 rounded-[40px] border relative overflow-hidden transition-all hover:shadow-2xl ${isInactive ? 'bg-gray-100 border-gray-200' : 'bg-white shadow-xl border-[#E8E2D1]'}`}>
-                      {/* 狀態色塊 (不反灰) */}
+                      {/* 狀態色塊 (保持原色，不反灰) */}
                       <div className={`absolute top-0 left-0 px-6 py-2 rounded-br-3xl font-black text-white text-lg tracking-widest ${status.color}`}>{status.text}</div>
                       
                       {/* 詳細內容區 (若失效則反灰) */}
@@ -1024,6 +1016,7 @@ export default function App() {
                             {(n.arrival_datetime || n.departure_datetime) && (<div className="text-sm bg-blue-50 p-2 rounded-lg text-blue-800"><div>抵：{formatDateTime(n.arrival_datetime)}</div><div>離：{formatDateTime(n.departure_datetime)}</div></div>)}
                             <p><span className="font-bold text-slate-400">身分：</span> {n.identity} {n.volunteer_type ? ` - ${n.volunteer_type}` : ''}</p>
                             
+                            {/* 卡片內容順序調整 */}
                             {n.volunteer_group && <p><span className="font-bold text-slate-400">組別：</span> {n.volunteer_group}</p>}
                             
                             {(n.start_date || n.end_date) && (<p><span className="font-bold text-slate-400">發心：</span> {n.start_date?.replace('T', ' ') || '?'} ~ {n.end_date?.replace('T', ' ') || '?'}</p>)}
@@ -1032,6 +1025,7 @@ export default function App() {
                          </div>
                          <div className="mt-6 pt-4 border-t border-slate-100 flex justify-between items-end">
                             <div className="text-xs text-slate-300">填表：{n.created_at ? n.created_at.slice(0, 10) : ''} {n.created_at ? n.created_at.slice(11, 16) : ''}<br/>{n.sign_name && `By: ${n.sign_name}`}</div>
+                            {/* 只有在非失效狀態下才顯示刪除按鈕 */}
                             {!isInactive && (<label className="flex items-center gap-2 cursor-pointer select-none text-red-400 hover:text-red-600 transition-colors bg-white px-3 py-1 rounded-full shadow-sm border border-slate-100"><input type="checkbox" className="w-5 h-5 rounded accent-red-500" checked={n.is_deleted} onChange={() => handleToggleDeleteNote(n.id, n.is_deleted)} /><span className="font-bold text-sm">刪除此單</span></label>)}
                          </div>
                       </div>
