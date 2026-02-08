@@ -5,15 +5,17 @@ import {
   Bell, FileText, History, Settings, Shield, LogOut, Plus, Trash2, Check, 
   Edit, User, MapPin, Tag, ListFilter, Save, Database, Clock, Car, Info, 
   Home, UserCheck, AlertCircle, Briefcase, Layers, 
-  CheckCircle2, CheckSquare, FileSpreadsheet, Megaphone, ClipboardCheck, UserCog, Share2, Lock, Eye, EyeOff, Users, ArrowRight, RefreshCw, AlertTriangle, Image as ImageIcon, Table as TableIcon, Calendar, Filter
+  CheckCircle2, CheckSquare, FileSpreadsheet, Megaphone, ClipboardCheck, UserCog, Share2, Lock, Eye, EyeOff, Users, ArrowRight, RefreshCw, AlertTriangle, Image as ImageIcon, Table as TableIcon, Calendar, Filter, UploadCloud
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v69.1 (編譯錯誤修復版)
+ * 系統版本：v68.0 (日期截止邏輯與介面微調版)
  * 修正說明：
- * 1. [Fix] 移除重複宣告的 isCurrentSelectionExpired 與其他 Memo 變數，解決 Build Error。
- * 2. [System] 確保所有邏輯 (日期截止、紀錄狀態、欄位順序) 正常運作。
+ * 1. [Logic] 截止報名：若結束日 < 今日，則鎖定報名。若結束日為空，則永久開放。
+ * 2. [Logic] 紀錄狀態：若結束日 < 今日，顯示「已圓滿」。若為空則不顯示。
+ * 3. [UI] 紀錄卡片：狀態色塊保持原色 (不反灰)，僅下方內容區域反灰鎖定。
+ * 4. [System] 整合所有功能：發佈按鈕、地點篩選、欄位順序。
  */
 
 // --- 主色系設定 ---
@@ -455,6 +457,7 @@ export default function App() {
       if (formData.arrival_datetime) {
           const fullDateTime = formData.arrival_datetime;
           const dateOnly = formData.arrival_datetime.split('T')[0];
+
           setFormData(p => ({ 
               ...p, 
               // 若 start_date 為空，則填入完整 datetime；否則維持原值
@@ -469,6 +472,7 @@ export default function App() {
       if (formData.departure_datetime) {
           const fullDateTime = formData.departure_datetime;
           const dateOnly = formData.departure_datetime.split('T')[0];
+
           setFormData(p => ({ 
               ...p, 
               // 若 end_date 為空，則填入完整 datetime；否則維持原值
@@ -490,7 +494,7 @@ export default function App() {
 
     return {
       transportation: !isJingshe,
-      // 義工組別：只要是發心義工就顯示，不限地點
+      // 義工組別：只要是發心義工就顯示
       volunteerGroup: isVolunteer,
       volunteerType: isZhongtai && isVolunteer,
       // 發心起訖：地點「非精舍」且身分「發心義工」才顯示
@@ -560,7 +564,7 @@ export default function App() {
         }
       }
       
-      // 強制檢查可見的日期欄位 (即使後台未設必填)
+      // 強制檢查可見的日期欄位
       if (fieldVisibility.volunteerDates && ['start_date', 'end_date'].includes(config.field_key) && !formData[config.field_key as keyof typeof formData]) {
           alert(`請填寫：${config.field_label}`); return false;
       }
@@ -616,7 +620,7 @@ export default function App() {
 
     if (!supabaseClient) return alert('系統未連線');
     
-    // 移除 audit_status，改由資料庫預設值處理
+    // 移除 audit_status
     const { audit_status, ...finalPayload } = payload as any;
 
     const { error } = await supabaseClient.from('notes').insert([finalPayload]);
@@ -798,7 +802,7 @@ export default function App() {
     }
   };
 
-  // 排序邏輯 (修改：已刪除排最後)
+  // 排序邏輯
   const sortedHistoryNotes = useMemo(() => {
       let filtered = notes.filter(n => n.user_id === user?.id);
       if (historyFilterLoc) filtered = filtered.filter(n => n.activity_location === historyFilterLoc);
