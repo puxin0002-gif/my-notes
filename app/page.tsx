@@ -10,12 +10,11 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v66.0 (欄位順序調整與日期設定功能版)
+ * 系統版本：v66.1 (移除「已圓滿」狀態版)
  * 修正說明：
- * 1. [UI] 登記表單：將「義工組別」移至「抵離寺」下方。
- * 2. [Feature] 設定頁籤：新增「活動結束日」與「行程結束日」設定及連動邏輯。
- * 3. [Feature] 紀錄頁籤：實作地點篩選、自訂排序、卡片內容重組、狀態色塊邏輯。
- * 4. [System] 保持所有日期同步與防呆驗證邏輯。
+ * 1. [Logic] 移除紀錄頁中針對「已圓滿」(過期行程) 的自動判定與反灰邏輯。
+ * 2. [Logic] 排序邏輯調整：僅「已刪除」的資料會排在最後，過期資料正常按時間排序。
+ * 3. [System] 保持所有 v66.0 的欄位順序與日期設定功能。
  */
 
 // --- 主色系設定 ---
@@ -458,6 +457,7 @@ export default function App() {
       if (formData.arrival_datetime) {
           const fullDateTime = formData.arrival_datetime;
           const dateOnly = formData.arrival_datetime.split('T')[0];
+
           setFormData(p => ({ 
               ...p, 
               // 發心起訖：使用完整 datetime
@@ -472,6 +472,7 @@ export default function App() {
       if (formData.departure_datetime) {
           const fullDateTime = formData.departure_datetime;
           const dateOnly = formData.departure_datetime.split('T')[0];
+
           setFormData(p => ({ 
               ...p, 
               // 發心起訖：使用完整 datetime
@@ -482,7 +483,7 @@ export default function App() {
       }
   }, [formData.departure_datetime]);
 
-  // 欄位顯示邏輯 (更新)
+  // 欄位顯示邏輯
   const fieldVisibility = useMemo(() => {
     const isJingshe = formData.activity_location === '精舍';
     const isZhongtai = formData.activity_location === '中台';
@@ -542,7 +543,7 @@ export default function App() {
         }
       }
       
-      // 強制檢查可見的日期欄位 (即使後台未設必填)
+      // 強制檢查可見的日期欄位
       if (fieldVisibility.volunteerDates && ['start_date', 'end_date'].includes(config.field_key) && !formData[config.field_key as keyof typeof formData]) {
           alert(`請填寫：${config.field_label}`); return false;
       }
@@ -565,6 +566,7 @@ export default function App() {
     const id2 = user?.user_metadata?.id_last4 || idLast4;
 
     let finalData = { ...formData };
+
     if (!fieldVisibility.transportation) finalData.transportation = '';
     if (!fieldVisibility.volunteerGroup) finalData.volunteer_group = '';
     if (!fieldVisibility.volunteerType) finalData.volunteer_type = '';
@@ -597,7 +599,7 @@ export default function App() {
 
     if (!supabaseClient) return alert('系統未連線');
     
-    // 移除 audit_status，改由資料庫預設值處理
+    // 移除 audit_status
     const { audit_status, ...finalPayload } = payload as any;
 
     const { error } = await supabaseClient.from('notes').insert([finalPayload]);
@@ -775,30 +777,26 @@ export default function App() {
     }
   };
 
-  // 排序邏輯
+  // 排序邏輯 (修改：已刪除排最後)
   const sortedHistoryNotes = useMemo(() => {
       let filtered = notes.filter(n => n.user_id === user?.id);
       if (historyFilterLoc) filtered = filtered.filter(n => n.activity_location === historyFilterLoc);
       
-      const now = currentDateTime ? new Date(currentDateTime) : null;
-      
       return filtered.sort((a, b) => {
-          const aIsExpired = a.is_deleted || (now && a.departure_datetime && new Date(a.departure_datetime) < now);
-          const bIsExpired = b.is_deleted || (now && b.departure_datetime && new Date(b.departure_datetime) < now);
-          if (aIsExpired !== bIsExpired) return aIsExpired ? 1 : -1;
+          const aIsDeleted = a.is_deleted;
+          const bIsDeleted = b.is_deleted;
           
-          // Fix: check for created_at existence before sort
+          if (aIsDeleted !== bIsDeleted) return aIsDeleted ? 1 : -1;
+          
           const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
           const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
           return dateB - dateA;
       });
-  }, [notes, user, historyFilterLoc, currentDateTime]);
+  }, [notes, user, historyFilterLoc]);
 
   // 輔助函式
   const getCardStatus = (note: Note) => {
       if (note.is_deleted) return { text: '刪除', color: 'bg-gray-400', isInactive: true };
-      const now = currentDateTime ? new Date(currentDateTime) : null;
-      if (now && note.departure_datetime && new Date(note.departure_datetime) < now) return { text: '已圓滿', color: 'bg-gray-400', isInactive: true };
       return { 
         text: note.registration_option, 
         color: note.registration_option === '新增' ? 'bg-emerald-600' : 'bg-amber-600',
@@ -925,9 +923,9 @@ export default function App() {
                
                {fieldVisibility.arrivalDeparture && <div className="grid grid-cols-1 md:grid-cols-2 gap-6"><div className="space-y-2"><label className="text-lg font-bold text-blue-700">{getFieldConfig('arrival_datetime').field_label}{getFieldConfig('arrival_datetime').is_required?'*':''}</label><input type="datetime-local" min={currentDateTime} className="w-full p-2 rounded-none border text-lg" value={formData.arrival_datetime || ''} onChange={e=>setFormData({...formData, arrival_datetime: e.target.value})} /></div><div className="space-y-2"><label className="text-lg font-bold text-blue-700">{getFieldConfig('departure_datetime').field_label}{getFieldConfig('departure_datetime').is_required?'*':''}</label><input type="datetime-local" min={formData.arrival_datetime || currentDateTime} className="w-full p-2 rounded-none border text-lg" value={formData.departure_datetime || ''} onChange={e=>setFormData({...formData, departure_datetime: e.target.value})} /></div></div>}
                
-               {/* 修正：義工組別移至抵離時間下方 */}
+               {/* 義工組別位於抵離寺下方 */}
                {fieldVisibility.volunteerGroup && <div className="p-6 bg-[#F2ECE4]/30 rounded-3xl border border-[#E8E2D1] space-y-4"><label className="text-lg font-black text-[#7A2E40]">{getFieldConfig('volunteer_group').field_label}{getFieldConfig('volunteer_group').is_required?'*':''}</label><input className="w-full p-2 rounded-none border text-lg" value={formData.volunteer_group} onChange={e=>setFormData({...formData, volunteer_group: e.target.value})} /></div>}
-
+               
                {fieldVisibility.volunteerType && <div className="p-6 bg-[#F2ECE4]/30 rounded-3xl border border-[#E8E2D1] space-y-4"><label className="text-lg font-black text-[#7A2E40]">{getFieldConfig('volunteer_type').field_label}{getFieldConfig('volunteer_type').is_required?'*':''}</label><select className="w-full p-2 rounded-none text-lg" value={formData.volunteer_type} onChange={e=>setFormData({...formData, volunteer_type: e.target.value})}><option value="">請選擇</option><option value="一般義工-由精舍安排組別">一般義工-由精舍安排組別</option><option value="長期義工-已於平台報名">長期義工-已於平台報名</option><option value="佛巡-已於平台報名">佛巡-已於平台報名</option></select></div>}
                {fieldVisibility.volunteerDates && <div className="p-6 bg-[#F2ECE4]/30 rounded-3xl border border-[#E8E2D1] space-y-4"><label className="text-lg font-black text-[#7A2E40]">發心起訖</label><input type="datetime-local" min={currentDateTime} className="w-full p-2 rounded-none border text-lg" value={formData.start_date || ''} onChange={e=>setFormData({...formData, start_date: e.target.value})} /><input type="datetime-local" min={formData.start_date || currentDateTime} className="w-full p-2 rounded-none border text-lg mt-2" value={formData.end_date || ''} onChange={e=>setFormData({...formData, end_date: e.target.value})} /></div>}
                {fieldVisibility.accommodation && <div className="p-6 bg-slate-50 rounded-3xl border border-slate-200"><label className="text-lg font-black">安單選項</label><select className="w-full p-2 rounded-none text-lg mb-4" value={formData.accommodation_option} onChange={e=>setFormData({...formData, accommodation_option: e.target.value})}><option value="不安單">不安單</option><option value="須安單">須安單</option></select>{fieldVisibility.accommodationDates && <><label className="text-lg font-black">安單起訖</label><input type="date" min={todayDate} className="w-full p-2 text-lg rounded-none" value={formData.stay_start_date || ''} onChange={e=>setFormData({...formData, stay_start_date: e.target.value})} /><input type="date" min={formData.stay_start_date || todayDate} className="w-full p-2 text-lg rounded-none mt-4" value={formData.stay_end_date || ''} onChange={e=>setFormData({...formData, stay_end_date: e.target.value})} /></>}</div>}</div>
@@ -989,10 +987,10 @@ export default function App() {
         {activeTab === 'users' && isAdmin && <div className="bg-white p-6 rounded-3xl shadow-sm border border-[#E8E2D1]"><h4 className="font-bold text-slate-600 mb-4 flex items-center gap-2"><Plus className="w-4 h-4"/> 新增使用者</h4><div className="flex flex-col md:flex-row gap-4"><input className="flex-1 p-2 border rounded-none text-sm" placeholder="姓名" value={newUser.name} onChange={e=>setNewUser({...newUser, name: e.target.value})} /><input className="w-32 p-2 border rounded-none text-sm" placeholder="ID後4碼" value={newUser.id4} onChange={e=>setNewUser({...newUser, id4: e.target.value})} /><input className="w-40 p-2 border rounded-none text-sm" placeholder="密碼" value={newUser.pwd} onChange={e=>setNewUser({...newUser, pwd: e.target.value})} /><button onClick={handleCreateUser} className="bg-blue-600 text-white px-6 rounded-xl font-bold text-sm hover:bg-blue-700">新增</button></div></div>}
         {activeTab === 'users' && isAdmin && <div className="bg-white rounded-3xl shadow-sm border border-[#E8E2D1] overflow-hidden mt-8"><table className="w-full text-sm text-left"><thead className="bg-slate-50 text-slate-500 font-bold border-b"><tr><th className="p-4">姓名</th><th className="p-4">ID後4碼</th><th className="p-4">管理員</th><th className="p-4">狀態</th><th className="p-4 text-right">報名數</th></tr></thead><tbody className="divide-y">{allUsers.map(u => <tr key={u.id} className="hover:bg-slate-50"><td className="p-4 font-bold text-[#7A2E40]">{u.user_name}</td><td className="p-4 font-mono text-slate-400">{u.id_last4}</td><td className="p-4"><input type="checkbox" checked={u.is_admin} onChange={() => handleToggleAdmin(u.uid!, u.is_admin)} className="w-5 h-5 rounded border-slate-300 cursor-pointer" /></td><td className="p-4"><span className={`px-2 py-1 rounded text-xs font-bold ${u.is_disabled ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>{u.is_disabled ? '已停用' : '啟用中'}</span></td><td className="p-4 text-right"><button onClick={()=>handleToggleUserStatus(u.uid!, u.is_disabled)} className="text-blue-500 hover:underline">{u.is_disabled ? '啟用' : '停用'}</button></td></tr>)}</tbody></table></div>}
         
+        {/* 審核頁籤：僅顯示密碼重設 (已移除報名表審核) */}
         {activeTab === 'audit' && isAdmin && <div className="space-y-12 animate-in fade-in"><div className="bg-[#7A2E40] p-10 rounded-[50px] flex justify-between items-center shadow-xl"><h2 className="text-4xl font-black text-white">審核中心 (密碼重設)</h2></div><div className="grid grid-cols-1 md:grid-cols-2 gap-12">{resetRequests.filter(r => r.status === 'pending').map(r => <div key={r.id} className="bg-white p-12 rounded-[60px] shadow-lg border-4 border-blue-200 relative overflow-hidden"><div className="absolute top-0 right-0 px-12 py-5 rounded-bl-[60px] font-black text-white text-xl bg-blue-500">重設密碼</div><div className="text-blue-900 font-black text-5xl mb-4">{r.user_name}</div><div className="text-slate-400 text-2xl font-mono">ID: {r.id_last4}</div><div className="flex gap-4 mt-8"><button onClick={()=>handleResetAction(r.id, 'approve')} className="flex-1 py-6 bg-blue-50 text-blue-700 font-black text-3xl rounded-[30px] border-4 border-blue-600 hover:bg-blue-600 hover:text-white transition-all">批准</button><button onClick={()=>handleResetAction(r.id, 'reject')} className="flex-1 py-6 bg-slate-50 text-slate-700 font-black text-3xl rounded-[30px] border-4 border-slate-600 hover:bg-slate-600 hover:text-white transition-all">拒絕</button></div></div>)}</div></div>}
         
         {activeTab === 'admin_data' && isAdmin && <div className="bg-white p-10 rounded-[60px] shadow-sm border border-[#E8E2D1] animate-in fade-in"><div className="flex justify-between items-center mb-10 gap-6 border-b border-[#F2ECE4] pb-8"><h3 className="text-2xl font-black text-[#7A2E40]">資料總覽</h3><div className="flex gap-4"><select className="p-2 bg-[#FAF9F6] border rounded-none text-xs font-bold" value={filterLoc} onChange={e=>setFilterLoc(e.target.value)}><option value="">所有地點</option>{locations.map(l => <option key={l} value={l}>{l}</option>)}</select><button onClick={handleExport} className="bg-emerald-600 text-white px-6 py-2 rounded-2xl flex items-center gap-2 text-sm font-black hover:bg-emerald-700">匯出</button></div></div><div className="overflow-x-auto rounded-3xl border border-[#F2ECE4]"><table className="w-full text-left text-sm"><thead><tr className="bg-[#7A2E40] text-white"><th>姓名</th><th>地點</th><th>活動</th><th>行程</th><th>備註</th></tr></thead><tbody>{filteredAdminNotes.map(n => <tr key={n.id} className="hover:bg-slate-50"><td className="p-4">{n.real_name}</td><td className="p-4">{n.activity_location}</td><td className="p-4">{n.activity_name}</td><td className="p-4">{n.activity_option}</td><td className="p-4">{n.memo || '-'}</td></tr>)}</tbody></table></div></div>}
-        
         {activeTab === 'admin_settings' && isAdmin && (
            <div className="bg-white p-16 rounded-[80px] shadow-sm border border-[#E8E2D1]">
               <h3 className="text-2xl font-black text-[#7A2E40] mb-2">1、報名行程設定</h3>
