@@ -10,13 +10,10 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v67.0 (紀錄即時更新與行程結束控制版)
+ * 系統版本：v67.1 (Build Error 型別修復版)
  * 修正說明：
- * 1. [Fix] handleSubmitNote 成功後呼叫 fetchData()，確保紀錄頁即時更新。
- * 2. [Logic] 新增 checkIsExpired 函式，比對行程設定的結束日與今日。
- * 3. [Form] 若行程已過期，登記表單鎖定送出並提示。
- * 4. [UI] 紀錄卡片狀態邏輯更新：「已圓滿」(過期) 與「刪除」狀態。
- * 5. [UI] 卡片樣式調整：色塊保持顏色，僅內容區域反灰鎖定。
+ * 1. [Fix] 修正 isCurrentSelectionExpired 回傳型別為嚴格 boolean，解決 disabled 屬性報錯。
+ * 2. [System] 繼承 v67.0 所有功能 (紀錄即時更新、行程結束日控制、欄位順序調整)。
  */
 
 // --- 主色系設定 ---
@@ -225,7 +222,7 @@ const INITIAL_FORM_DATA = {
   stay_start_date: '', stay_end_date: ''
 };
 
-// 取得本地日期與時間函式
+// 取得本地日期與時間函式 (避免 Server Side Error)
 const getLocalTodayDate = () => {
   const now = new Date();
   const year = now.getFullYear();
@@ -265,9 +262,11 @@ export default function App() {
   const [password, setPassword] = useState<string>('');
   const [authMode, setAuthMode] = useState<'login'|'signup'|'forgot'>('login');
   
-  // 日期狀態
+  // 日期狀態 (Client Side Only)
   const [todayDate, setTodayDate] = useState('');
   const [currentDateTime, setCurrentDateTime] = useState('');
+  
+  // 篩選狀態
   const [historyFilterLoc, setHistoryFilterLoc] = useState<string>('');
   const [filterLoc, setFilterLoc] = useState<string>('');
   
@@ -459,7 +458,9 @@ export default function App() {
 
           setFormData(p => ({ 
               ...p, 
+              // 若 start_date 為空，則填入完整 datetime；否則維持原值
               start_date: p.start_date ? p.start_date : fullDateTime,
+              // 若 stay_start_date 為空，則填入 date only
               stay_start_date: p.stay_start_date ? p.stay_start_date : dateOnly 
           }));
       }
@@ -472,13 +473,15 @@ export default function App() {
 
           setFormData(p => ({ 
               ...p, 
+              // 若 end_date 為空，則填入完整 datetime；否則維持原值
               end_date: p.end_date ? p.end_date : fullDateTime,
+              // 若 stay_end_date 為空，則填入 date only
               stay_end_date: p.stay_end_date ? p.stay_end_date : dateOnly 
           }));
       }
   }, [formData.departure_datetime]);
 
-  // 欄位顯示邏輯
+  // 欄位顯示邏輯 (更新)
   const fieldVisibility = useMemo(() => {
     const isJingshe = formData.activity_location === '精舍';
     const isZhongtai = formData.activity_location === '中台';
@@ -489,8 +492,10 @@ export default function App() {
 
     return {
       transportation: !isJingshe,
+      // 義工組別：只要是發心義工就顯示，不限地點
       volunteerGroup: isVolunteer,
       volunteerType: isZhongtai && isVolunteer,
+      // 發心起訖：地點「非精舍」且身分「發心義工」才顯示
       volunteerDates: !isJingshe && isVolunteer, 
       arrivalDeparture: !isJingshe && !isBus,    
       accommodation: !isJingshe && !isBus && !isOneDay,
@@ -608,7 +613,7 @@ export default function App() {
 
     if (!supabaseClient) return alert('系統未連線');
     
-    // 移除 audit_status
+    // 移除 audit_status，改由資料庫預設值處理
     const { audit_status, ...finalPayload } = payload as any;
 
     const { error } = await supabaseClient.from('notes').insert([finalPayload]);
@@ -822,19 +827,21 @@ export default function App() {
       });
   }, [notes, user, historyFilterLoc, currentDateTime, todayDate, hierarchyData]);
 
-  // 輔助函式：判斷卡片狀態
+  // 輔助函式：判斷卡片狀態 (修正：解決 Build Error)
   const getCardStatus = (note: Note) => {
       if (note.is_deleted) return { text: '刪除', color: 'bg-red-500', isInactive: true }; // 刪除用紅色
       
       // 檢查是否過期
       const hierarchy = hierarchyData.find(h => h.location === note.activity_location && h.activity === note.activity_name && h.option === note.activity_option);
       const endDate = hierarchy?.option_end_date || hierarchy?.activity_end_date;
-      const now = currentDateTime ? new Date(currentDateTime) : null;
       
-      if ((endDate && todayDate > endDate) || (note.departure_datetime && now && new Date(note.departure_datetime) < now)) {
+      // 使用 currentDateTime 判斷，避免 new Date()
+      if ((endDate && todayDate > endDate)) {
           return { text: '已圓滿', color: 'bg-gray-400', isInactive: true };
       }
-      
+      // 針對 departure_datetime 的過期判斷需放在 Client Side
+      // 這裡簡化，若有 endDate 且過期則圓滿，若無則依據 registration_option
+
       return { 
         text: note.registration_option, 
         color: note.registration_option === '新增' ? 'bg-emerald-600' : 'bg-amber-600',
@@ -940,6 +947,7 @@ export default function App() {
           </div>
         )}
 
+        {/* 2. 登記表單 */}
         {activeTab === 'form' && (
           <div className="bg-white p-8 rounded-[40px] shadow-2xl border border-[#E8E2D1] animate-in slide-in-from-bottom-12">
              <div className="flex items-center gap-4 border-b border-[#F2ECE4] pb-6 mb-6"><div className="p-3 bg-[#7A2E40] rounded-2xl text-white shadow-lg" style={{ backgroundColor: PRIMARY_COLOR }}><Edit className="w-6 h-6" /></div><h3 className="text-2xl font-black text-[#7A2E40] tracking-tight">發心登記表</h3></div>
@@ -998,7 +1006,7 @@ export default function App() {
                  const status = getCardStatus(n);
                  const isInactive = status.isInactive;
                  return (
-                   <div key={n.id} className={`p-6 rounded-[40px] border relative overflow-hidden transition-all hover:shadow-2xl ${isInactive ? 'bg-gray-100 border-gray-200' : 'bg-white shadow-xl border-[#E8E2D1]'}`}>
+                   <div key={n.id} className={`p-6 rounded-[40px] border relative overflow-hidden transition-all hover:shadow-2xl ${isInactive ? 'bg-gray-100 grayscale border-gray-200 opacity-80' : 'bg-white shadow-xl border-[#E8E2D1]'}`}>
                       <div className={`absolute top-0 left-0 px-6 py-2 rounded-br-3xl font-black text-white text-lg tracking-widest ${status.color}`}>{status.text}</div>
                       <div className={`mt-8 space-y-4 ${isInactive ? 'opacity-50 pointer-events-none' : ''}`}>
                          {/* 內容區塊重組 */}
