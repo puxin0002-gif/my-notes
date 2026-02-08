@@ -5,15 +5,15 @@ import {
   Bell, FileText, History, Settings, Shield, LogOut, Plus, Trash2, Check, 
   Edit, User, MapPin, Tag, ListFilter, Save, Database, Clock, Car, Info, 
   Home, UserCheck, AlertCircle, Briefcase, Layers, 
-  CheckCircle2, CheckSquare, FileSpreadsheet, Megaphone, ClipboardCheck, UserCog, Share2, Lock, Eye, EyeOff, Users, ArrowRight, RefreshCw, AlertTriangle, Image as ImageIcon, Table as TableIcon, Calendar, Filter
+  CheckCircle2, CheckSquare, FileSpreadsheet, Megaphone, ClipboardCheck, UserCog, Share2, Lock, Eye, EyeOff, Users, ArrowRight, RefreshCw, AlertTriangle, Image as ImageIcon, Table as TableIcon, Calendar, Filter, UploadCloud
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v67.2 (型別嚴格修正版)
+ * 系統版本：v68.1 (重複宣告修復版)
  * 修正說明：
- * 1. [Fix] 修正 isCurrentSelectionExpired 回傳型別，確保為嚴格 boolean，解決 "Type 'null' is not assignable to type 'boolean'" 錯誤。
- * 2. [System] 繼承 v67.0 所有功能。
+ * 1. [Fix] 移除重複宣告的 isCurrentSelectionExpired 變數，解決編譯錯誤。
+ * 2. [System] 整合 v68.0 所有功能 (發佈按鈕、紀錄篩選、活動截止邏輯)。
  */
 
 // --- 主色系設定 ---
@@ -222,7 +222,7 @@ const INITIAL_FORM_DATA = {
   stay_start_date: '', stay_end_date: ''
 };
 
-// 取得本地日期與時間函式 (避免 Server Side Error)
+// 取得本地日期與時間函式
 const getLocalTodayDate = () => {
   const now = new Date();
   const year = now.getFullYear();
@@ -512,11 +512,17 @@ export default function App() {
       return found?.option_end_date || found?.activity_end_date || null;
   };
 
+  // 檢查是否截止 (修正邏輯: 皆為空才不截止)
+  // [Fix]: 移除了重複宣告，保留這一個正確的定義
+  const isCurrentSelectionExpired = useMemo(() => {
+      const endDate = getHierarchyEndDate(formData.activity_location, formData.activity_name, formData.activity_option);
+      if (!endDate) return false; // 無設定則不截止
+      return todayDate > endDate;
+  }, [formData, todayDate, hierarchyData]);
+
   // 驗證邏輯
   const validateForm = () => {
-    // 檢查行程是否過期
-    const endDate = getHierarchyEndDate(formData.activity_location, formData.activity_name, formData.activity_option);
-    if (endDate && todayDate > endDate) {
+    if (isCurrentSelectionExpired) {
         alert("此行程已截止報名");
         return false;
     }
@@ -557,7 +563,7 @@ export default function App() {
         }
       }
       
-      // 強制檢查可見的日期欄位
+      // 強制檢查可見的日期欄位 (即使後台未設必填)
       if (fieldVisibility.volunteerDates && ['start_date', 'end_date'].includes(config.field_key) && !formData[config.field_key as keyof typeof formData]) {
           alert(`請填寫：${config.field_label}`); return false;
       }
@@ -623,7 +629,6 @@ export default function App() {
     } else { 
         alert('已送出申請'); 
         setFormData(INITIAL_FORM_DATA); 
-        // 修正：送出成功後重新拉取資料，確保紀錄頁籤有最新資料
         await fetchData();
         setActiveTab('history'); 
     }
@@ -781,6 +786,12 @@ export default function App() {
     fetchData();
   };
 
+  // 模擬發佈功能
+  const handlePublishSettings = () => {
+      alert("設定已發佈！前台表單選項已更新。");
+      fetchData(); // 重新拉取確保同步
+  };
+
   const handleUpdateFieldConfig = async (key: string, field: string, value: any) => {
     if (!supabaseClient) return;
     setFieldConfigs(prev => prev.map(f => f.field_key === key ? { ...f, [field]: value } : f));
@@ -801,20 +812,42 @@ export default function App() {
       const now = currentDateTime ? new Date(currentDateTime) : null;
       
       return filtered.sort((a, b) => {
-          const aIsExpired = a.is_deleted || (now && a.departure_datetime && new Date(a.departure_datetime) < now);
-          const bIsExpired = b.is_deleted || (now && b.departure_datetime && new Date(b.departure_datetime) < now);
+          // 判斷是否「已圓滿」：有結束日期且已過期
+          const aHierarchy = hierarchyData.find(h => h.location === a.activity_location && h.activity === a.activity_name && h.option === a.activity_option);
+          const bHierarchy = hierarchyData.find(h => h.location === b.activity_location && h.activity === b.activity_name && h.option === b.activity_option);
+          
+          const aEndDate = aHierarchy?.option_end_date || aHierarchy?.activity_end_date;
+          const bEndDate = bHierarchy?.option_end_date || bHierarchy?.activity_end_date;
+
+          const aIsExpired = aEndDate ? todayDate > aEndDate : false;
+          const bIsExpired = bEndDate ? todayDate > bEndDate : false;
+
+          const aIsDeleted = a.is_deleted;
+          const bIsDeleted = b.is_deleted;
+          
+          // 1. 已刪除排最後
+          if (aIsDeleted !== bIsDeleted) return aIsDeleted ? 1 : -1;
+          // 2. 已圓滿排倒數第二
           if (aIsExpired !== bIsExpired) return aIsExpired ? 1 : -1;
           
-          // Fix: check for created_at existence before sort
+          // 3. 正常時間排序
           const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
           const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
           return dateB - dateA;
       });
   }, [notes, user, historyFilterLoc, currentDateTime, todayDate, hierarchyData]);
 
-  // 輔助函式：判斷卡片狀態 (修正：解決 Build Error)
+  // 輔助函式：判斷卡片狀態
   const getCardStatus = (note: Note) => {
-      if (note.is_deleted) return { text: '刪除', color: 'bg-red-500', isInactive: true }; // 刪除用紅色
+      if (note.is_deleted) return { text: '刪除', color: 'bg-red-500', isInactive: true };
+      
+      const hierarchy = hierarchyData.find(h => h.location === note.activity_location && h.activity === note.activity_name && h.option === note.activity_option);
+      const endDate = hierarchy?.option_end_date || hierarchy?.activity_end_date;
+      
+      // 若有設定結束日且已過，則顯示已圓滿
+      if (endDate && todayDate > endDate) {
+          return { text: '已圓滿', color: 'bg-gray-400', isInactive: true };
+      }
       
       return { 
         text: note.registration_option, 
@@ -835,13 +868,6 @@ export default function App() {
     const found = hierarchyData.find(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option === mgmtSelectedOpt && h.option_end_date);
     return found?.option_end_date || '';
   }, [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
-
-  // 檢查目前選的行程是否已截止 (修正 Build Error: 明確 boolean 型別)
-  const isCurrentSelectionExpired = useMemo(() => {
-      const endDate = getHierarchyEndDate(formData.activity_location, formData.activity_name, formData.activity_option);
-      if (!endDate) return false;
-      return todayDate > endDate;
-  }, [formData, todayDate, hierarchyData]);
 
   const filteredAdminNotes = useMemo(() => {
     return notes.filter(n => (!filterLoc || n.activity_location === filterLoc));
@@ -965,8 +991,59 @@ export default function App() {
           </div>
         )}
 
-        {/* ... 其他分頁邏輯 ... */}
-        {activeTab === 'history' && <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-12">{sortedHistoryNotes.map(n => { const status = getCardStatus(n); return ( <div key={n.id} className={`p-6 rounded-[40px] border relative overflow-hidden transition-all hover:shadow-2xl ${status.isInactive ? 'bg-gray-100 grayscale border-gray-200 opacity-80' : 'bg-white shadow-xl border-[#E8E2D1]'}`}> <div className={`absolute top-0 left-0 px-6 py-2 rounded-br-3xl font-black text-white text-lg tracking-widest ${status.color}`}>{status.text}</div> <div className="mt-8 space-y-4"> <h3 className="text-3xl font-black text-slate-800 border-b-4 border-[#F2ECE4] pb-2">{n.activity_location} <span className="text-slate-300">|</span> {n.activity_name}</h3> <div className="bg-[#FAF9F6] p-3 rounded-xl border border-[#E8E2D1]"><span className="text-xs text-slate-400 font-bold block mb-1">行程方案</span><div className="text-xl font-bold text-[#7A2E40]">{n.activity_option}</div></div> <div className="space-y-2 text-base text-slate-600"> <p><span className="font-bold text-slate-400">學員：</span> {n.real_name} {n.dharma_name ? `(${n.dharma_name})` : ''} <span className="text-xs bg-slate-100 px-2 py-0.5 rounded text-slate-500">{n.registrant_type}</span></p> {n.other_remarks && <p><span className="font-bold text-orange-500">自訂備註：</span> {n.other_remarks}</p>} {n.selected_contents && Array.isArray(n.selected_contents) && n.selected_contents.length > 0 && <p><span className="font-bold text-slate-400">複選內容：</span> {n.selected_contents.join('、')}</p>} {n.transportation && <p><span className="font-bold text-slate-400">交通：</span> {n.transportation}</p>} {(n.arrival_datetime || n.departure_datetime) && (<div className="text-sm bg-blue-50 p-2 rounded-lg text-blue-800"><div>抵：{formatDateTime(n.arrival_datetime)}</div><div>離：{formatDateTime(n.departure_datetime)}</div></div>)} <p><span className="font-bold text-slate-400">身分：</span> {n.identity} {n.volunteer_type ? ` - ${n.volunteer_type}` : ''}</p> {n.volunteer_group && <p><span className="font-bold text-slate-400">組別：</span> {n.volunteer_group}</p>} {(n.start_date || n.end_date) && (<p><span className="font-bold text-slate-400">發心：</span> {n.start_date?.replace('T', ' ') || '?'} ~ {n.end_date?.replace('T', ' ') || '?'}</p>)} {n.accommodation_option === '須安單' && (<p><span className="font-bold text-slate-400">安單：</span> {n.stay_start_date} ~ {n.stay_end_date}</p>)} {n.memo && <div className="mt-2 pt-2 border-t border-dashed border-slate-200 text-sm text-slate-500 italic">{n.memo}</div>} </div> <div className="mt-6 pt-4 border-t border-slate-100 flex justify-between items-end"> <div className="text-xs text-slate-300">填表：{n.created_at ? n.created_at.slice(0, 10) : ''} {n.created_at ? n.created_at.slice(11, 16) : ''}<br/>{n.sign_name && `By: ${n.sign_name}`}</div> {!status.isInactive && (<label className="flex items-center gap-2 cursor-pointer select-none text-red-400 hover:text-red-600 transition-colors bg-white px-3 py-1 rounded-full shadow-sm border border-slate-100"><input type="checkbox" className="w-5 h-5 rounded accent-red-500" checked={n.is_deleted} onChange={() => handleToggleDeleteNote(n.id, n.is_deleted)} /><span className="font-bold text-sm">刪除此單</span></label>)} </div> </div> </div> ); })} {sortedHistoryNotes.length === 0 && <div className="col-span-full text-center text-slate-400 py-20">尚無紀錄</div>} </div>}
+        {/* 紀錄頁籤 */}
+        {activeTab === 'history' && (
+          <div className="space-y-6">
+             <div className="flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm">
+                 <h3 className="font-bold text-[#7A2E40]">歷史紀錄</h3>
+                 {/* 地點篩選器 */}
+                 <select className="p-2 border rounded-lg text-sm bg-slate-50" value={historyFilterLoc} onChange={e=>setHistoryFilterLoc(e.target.value)}>
+                    <option value="">全部地點</option>
+                    {locations.map(l => <option key={l} value={l}>{l}</option>)}
+                 </select>
+             </div>
+             
+             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+               {sortedHistoryNotes.map(n => {
+                 const status = getCardStatus(n);
+                 const isInactive = status.isInactive;
+                 return (
+                   <div key={n.id} className={`p-6 rounded-[40px] border relative overflow-hidden transition-all hover:shadow-2xl ${isInactive ? 'bg-gray-100 border-gray-200' : 'bg-white shadow-xl border-[#E8E2D1]'}`}>
+                      {/* 狀態色塊 (不反灰) */}
+                      <div className={`absolute top-0 left-0 px-6 py-2 rounded-br-3xl font-black text-white text-lg tracking-widest ${status.color}`}>{status.text}</div>
+                      
+                      {/* 詳細內容區 (若失效則反灰) */}
+                      <div className={`mt-8 space-y-4 ${isInactive ? 'opacity-50 pointer-events-none' : ''}`}>
+                         <h3 className="text-3xl font-black text-slate-800 border-b-4 border-[#F2ECE4] pb-2">{n.activity_location} <span className="text-slate-300">|</span> {n.activity_name}</h3>
+                         <div className="bg-[#FAF9F6] p-3 rounded-xl border border-[#E8E2D1]"><span className="text-xs text-slate-400 font-bold block mb-1">行程方案</span><div className="text-xl font-bold text-[#7A2E40]">{n.activity_option}</div></div>
+                         <div className="space-y-2 text-base text-slate-600">
+                            <p><span className="font-bold text-slate-400">學員：</span> {n.real_name} {n.dharma_name ? `(${n.dharma_name})` : ''} <span className="text-xs bg-slate-100 px-2 py-0.5 rounded text-slate-500">{n.registrant_type}</span></p>
+                            {n.other_remarks && <p><span className="font-bold text-orange-500">自訂備註：</span> {n.other_remarks}</p>}
+                            {n.selected_contents && Array.isArray(n.selected_contents) && n.selected_contents.length > 0 && <p><span className="font-bold text-slate-400">複選內容：</span> {n.selected_contents.join('、')}</p>}
+                            {n.transportation && <p><span className="font-bold text-slate-400">交通：</span> {n.transportation}</p>}
+                            {(n.arrival_datetime || n.departure_datetime) && (<div className="text-sm bg-blue-50 p-2 rounded-lg text-blue-800"><div>抵：{formatDateTime(n.arrival_datetime)}</div><div>離：{formatDateTime(n.departure_datetime)}</div></div>)}
+                            <p><span className="font-bold text-slate-400">身分：</span> {n.identity} {n.volunteer_type ? ` - ${n.volunteer_type}` : ''}</p>
+                            
+                            {n.volunteer_group && <p><span className="font-bold text-slate-400">組別：</span> {n.volunteer_group}</p>}
+                            
+                            {(n.start_date || n.end_date) && (<p><span className="font-bold text-slate-400">發心：</span> {n.start_date?.replace('T', ' ') || '?'} ~ {n.end_date?.replace('T', ' ') || '?'}</p>)}
+                            {n.accommodation_option === '須安單' && (<p><span className="font-bold text-slate-400">安單：</span> {n.stay_start_date} ~ {n.stay_end_date}</p>)}
+                            {n.memo && <div className="mt-2 pt-2 border-t border-dashed border-slate-200 text-sm text-slate-500 italic">{n.memo}</div>}
+                         </div>
+                         <div className="mt-6 pt-4 border-t border-slate-100 flex justify-between items-end">
+                            <div className="text-xs text-slate-300">填表：{n.created_at ? n.created_at.slice(0, 10) : ''} {n.created_at ? n.created_at.slice(11, 16) : ''}<br/>{n.sign_name && `By: ${n.sign_name}`}</div>
+                            {!isInactive && (<label className="flex items-center gap-2 cursor-pointer select-none text-red-400 hover:text-red-600 transition-colors bg-white px-3 py-1 rounded-full shadow-sm border border-slate-100"><input type="checkbox" className="w-5 h-5 rounded accent-red-500" checked={n.is_deleted} onChange={() => handleToggleDeleteNote(n.id, n.is_deleted)} /><span className="font-bold text-sm">刪除此單</span></label>)}
+                         </div>
+                      </div>
+                   </div>
+                 );
+               })}
+               {sortedHistoryNotes.length === 0 && <div className="col-span-full text-center text-slate-400 py-20">尚無紀錄</div>}
+             </div>
+          </div>
+        )}
+
+        {/* ... 其他分頁 ... */}
         {activeTab === 'users' && isAdmin && <div className="bg-white p-6 rounded-3xl shadow-sm border border-[#E8E2D1]"><h4 className="font-bold text-slate-600 mb-4 flex items-center gap-2"><Plus className="w-4 h-4"/> 新增使用者</h4><div className="flex flex-col md:flex-row gap-4"><input className="flex-1 p-2 border rounded-none text-sm" placeholder="姓名" value={newUser.name} onChange={e=>setNewUser({...newUser, name: e.target.value})} /><input className="w-32 p-2 border rounded-none text-sm" placeholder="ID後4碼" value={newUser.id4} onChange={e=>setNewUser({...newUser, id4: e.target.value})} /><input className="w-40 p-2 border rounded-none text-sm" placeholder="密碼" value={newUser.pwd} onChange={e=>setNewUser({...newUser, pwd: e.target.value})} /><button onClick={handleCreateUser} className="bg-blue-600 text-white px-6 rounded-xl font-bold text-sm hover:bg-blue-700">新增</button></div></div>}
         {activeTab === 'users' && isAdmin && <div className="bg-white rounded-3xl shadow-sm border border-[#E8E2D1] overflow-hidden mt-8"><table className="w-full text-sm text-left"><thead className="bg-slate-50 text-slate-500 font-bold border-b"><tr><th className="p-4">姓名</th><th className="p-4">ID後4碼</th><th className="p-4">管理員</th><th className="p-4">狀態</th><th className="p-4 text-right">報名數</th></tr></thead><tbody className="divide-y">{allUsers.map(u => <tr key={u.id} className="hover:bg-slate-50"><td className="p-4 font-bold text-[#7A2E40]">{u.user_name}</td><td className="p-4 font-mono text-slate-400">{u.id_last4}</td><td className="p-4"><input type="checkbox" checked={u.is_admin} onChange={() => handleToggleAdmin(u.uid!, u.is_admin)} className="w-5 h-5 rounded border-slate-300 cursor-pointer" /></td><td className="p-4"><span className={`px-2 py-1 rounded text-xs font-bold ${u.is_disabled ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>{u.is_disabled ? '已停用' : '啟用中'}</span></td><td className="p-4 text-right"><button onClick={()=>handleToggleUserStatus(u.uid!, u.is_disabled)} className="text-blue-500 hover:underline">{u.is_disabled ? '啟用' : '停用'}</button></td></tr>)}</tbody></table></div>}
         
@@ -1006,8 +1083,9 @@ export default function App() {
                  
                  <div className="space-y-6 min-w-0"><h4 className="font-black text-3xl border-l-[15px] border-[#7A2E40] pl-6">內容</h4><div className="flex gap-2 shrink-0"><input className="flex-1 p-2 border rounded-none text-lg font-bold min-w-0" disabled={!mgmtSelectedOpt} value={newContent} onChange={e=>setNewContent(e.target.value)} /><button onClick={addContent} className="bg-[#7A2E40] text-white p-2 rounded-none shrink-0" disabled={!mgmtSelectedOpt}><Plus/></button></div><div className="max-h-96 overflow-y-auto space-y-2">{adminContents.map(h => <div key={h.id} className="p-4 rounded-2xl text-xl font-bold flex justify-between shadow-sm border border-[#F2ECE4]"><span>{h.content}</span><button onClick={()=>handleDeleteContent(h.id)} className="text-slate-400 hover:text-red-500"><Trash2 className="w-5 h-5"/></button></div>)}</div></div>
               </div>
+              <div className="mt-8 flex justify-end"><button onClick={handlePublishSettings} className="bg-[#7A2E40] text-white px-8 py-3 rounded-2xl font-bold text-xl shadow-lg hover:bg-[#5D2331] transition-all">發佈設定</button></div>
               <div className="mt-20">
-                 <h4 className="text-2xl font-black text-[#7A2E40] mb-8">2、欄位管理</h4>
+                 <div className="flex justify-between items-end mb-8"><h4 className="text-2xl font-black text-[#7A2E40]">2、欄位管理</h4><button onClick={handlePublishSettings} className="bg-[#7A2E40] text-white px-6 py-2 rounded-xl font-bold text-sm shadow hover:bg-[#5D2331]">發佈設定</button></div>
                  <div className="overflow-x-auto rounded-[40px] border border-[#E8E2D1] shadow-sm">
                     <table className="w-full text-left text-sm bg-white">
                        <thead className="bg-[#7A2E40] text-white font-bold text-lg" style={{ backgroundColor: PRIMARY_COLOR }}>
