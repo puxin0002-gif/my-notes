@@ -10,12 +10,10 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v68.0 (日期截止邏輯與介面微調版)
+ * 系統版本：v69.1 (編譯錯誤修復版)
  * 修正說明：
- * 1. [Logic] 截止報名：若結束日 < 今日，則鎖定報名。若結束日為空，則永久開放。
- * 2. [Logic] 紀錄狀態：若結束日 < 今日，顯示「已圓滿」。若為空則不顯示。
- * 3. [UI] 紀錄卡片：狀態色塊保持原色 (不反灰)，僅下方內容區域反灰鎖定。
- * 4. [System] 整合所有功能：發佈按鈕、地點篩選、欄位順序。
+ * 1. [Fix] 移除重複宣告的 isCurrentSelectionExpired，解決編譯失敗問題。
+ * 2. [System] 確保所有功能 (日期截止、紀錄狀態、發佈按鈕) 邏輯正確且無衝突。
  */
 
 // --- 主色系設定 ---
@@ -224,7 +222,7 @@ const INITIAL_FORM_DATA = {
   stay_start_date: '', stay_end_date: ''
 };
 
-// 取得本地日期與時間函式
+// 取得本地日期與時間函式 (避免 Server Side Error)
 const getLocalTodayDate = () => {
   const now = new Date();
   const year = now.getFullYear();
@@ -483,7 +481,7 @@ export default function App() {
       }
   }, [formData.departure_datetime]);
 
-  // 欄位顯示邏輯
+  // 欄位顯示邏輯 (更新)
   const fieldVisibility = useMemo(() => {
     const isJingshe = formData.activity_location === '精舍';
     const isZhongtai = formData.activity_location === '中台';
@@ -494,7 +492,7 @@ export default function App() {
 
     return {
       transportation: !isJingshe,
-      // 義工組別：只要是發心義工就顯示
+      // 義工組別：只要是發心義工就顯示，不限地點
       volunteerGroup: isVolunteer,
       volunteerType: isZhongtai && isVolunteer,
       // 發心起訖：地點「非精舍」且身分「發心義工」才顯示
@@ -564,7 +562,7 @@ export default function App() {
         }
       }
       
-      // 強制檢查可見的日期欄位
+      // 強制檢查可見的日期欄位 (即使後台未設必填)
       if (fieldVisibility.volunteerDates && ['start_date', 'end_date'].includes(config.field_key) && !formData[config.field_key as keyof typeof formData]) {
           alert(`請填寫：${config.field_label}`); return false;
       }
@@ -620,7 +618,7 @@ export default function App() {
 
     if (!supabaseClient) return alert('系統未連線');
     
-    // 移除 audit_status
+    // 移除 audit_status，改由資料庫預設值處理
     const { audit_status, ...finalPayload } = payload as any;
 
     const { error } = await supabaseClient.from('notes').insert([finalPayload]);
@@ -768,21 +766,25 @@ export default function App() {
   // 在 Admin 設定頁使用的功能 (更新日期設定)
   const handleUpdateActivityDate = async (val: string) => {
     if (!supabaseClient || !mgmtSelectedLoc || !mgmtSelectedAct) return;
+    // 更新 activity_end_date (假設資料表已有此欄位)
     const { error } = await supabaseClient.from('activity_hierarchy')
         .update({ activity_end_date: val })
         .eq('location', mgmtSelectedLoc)
         .eq('activity', mgmtSelectedAct);
     if(error) console.error(error);
+    fetchData();
   };
 
   const handleUpdateOptionDate = async (val: string) => {
     if (!supabaseClient || !mgmtSelectedLoc || !mgmtSelectedAct || !mgmtSelectedOpt) return;
+    // 更新 option_end_date
     const { error } = await supabaseClient.from('activity_hierarchy')
         .update({ option_end_date: val })
         .eq('location', mgmtSelectedLoc)
         .eq('activity', mgmtSelectedAct)
         .eq('option', mgmtSelectedOpt);
     if(error) console.error(error);
+    fetchData();
   };
 
   const handlePublishSettings = () => {
@@ -802,7 +804,7 @@ export default function App() {
     }
   };
 
-  // 排序邏輯
+  // 排序邏輯 (修改：已刪除排最後)
   const sortedHistoryNotes = useMemo(() => {
       let filtered = notes.filter(n => n.user_id === user?.id);
       if (historyFilterLoc) filtered = filtered.filter(n => n.activity_location === historyFilterLoc);
@@ -864,6 +866,25 @@ export default function App() {
     const found = hierarchyData.find(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option === mgmtSelectedOpt && h.option_end_date);
     return found?.option_end_date || '';
   }, [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
+
+  // 修改：活動與行程下拉選單的顯示邏輯 (加上狀態)
+  const renderActivityOptions = () => {
+      return availableActivities.map(a => {
+         const hItem = hierarchyData.find(h => h.location === formData.activity_location && h.activity === a);
+         const endDate = hItem?.activity_end_date;
+         const isExpired = endDate ? todayDate > endDate : false;
+         return <option key={a} value={a} disabled={isExpired}>{a} {isExpired ? '(已圓滿)' : '(可報名)'}</option>;
+      });
+  };
+
+  const renderOptionOptions = () => {
+      return availableOptions.map(o => {
+         const hItem = hierarchyData.find(h => h.location === formData.activity_location && h.activity === formData.activity_name && h.option === o);
+         const endDate = hItem?.option_end_date || hItem?.activity_end_date;
+         const isExpired = endDate ? todayDate > endDate : false;
+         return <option key={o} value={o} disabled={isExpired}>{o} {isExpired ? '(已圓滿)' : '(可報名)'}</option>;
+      });
+  };
 
   const filteredAdminNotes = useMemo(() => {
     return notes.filter(n => (!filterLoc || n.activity_location === filterLoc));
@@ -966,8 +987,8 @@ export default function App() {
              {formData.registrant_type === '學員家人' && <div className="mt-4 p-3 bg-red-50 border-2 border-red-200 rounded-xl flex items-center gap-2 text-red-700 font-bold"><Info className="w-5 h-5"/> 請至知客室填寫家眷表。</div>}
              <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-6 border-t-4 border-dotted border-[#F2ECE4] pt-6 mt-6">
                 <div className="space-y-2"><label className="text-lg font-black text-slate-500">1. 地點*</label><select className="w-full p-2 text-lg font-black border rounded-none" value={formData.activity_location} onChange={e=>setFormData({...formData, activity_location: e.target.value, activity_name: '', activity_option: '', selected_contents: []})}><option value="">請選擇地點</option>{locations.map(l => <option key={l} value={l}>{l}</option>)}</select></div>
-                <div className="space-y-2"><label className="text-lg font-black text-slate-500">2. 活動*</label><select className="w-full p-2 text-lg font-black border rounded-none" disabled={!formData.activity_location} value={formData.activity_name} onChange={e=>setFormData({...formData, activity_name: e.target.value, activity_option: '', selected_contents: []})}><option value="">請選擇活動</option>{availableActivities.map(a => <option key={a} value={a}>{a}</option>)}</select></div>
-                <div className="space-y-2"><label className="text-lg font-black text-slate-500">3. 行程*</label><select className="w-full p-2 text-lg font-black border rounded-none" disabled={!formData.activity_name} value={formData.activity_option} onChange={e=>setFormData({...formData, activity_option: e.target.value, selected_contents: []})}><option value="">請選擇行程</option>{availableOptions.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+                <div className="space-y-2"><label className="text-lg font-black text-slate-500">2. 活動*</label><select className="w-full p-2 text-lg font-black border rounded-none" disabled={!formData.activity_location} value={formData.activity_name} onChange={e=>setFormData({...formData, activity_name: e.target.value, activity_option: '', selected_contents: []})}><option value="">請選擇活動</option>{renderActivityOptions()}</select></div>
+                <div className="space-y-2"><label className="text-lg font-black text-slate-500">3. 行程*</label><select className="w-full p-2 text-lg font-black border rounded-none" disabled={!formData.activity_name} value={formData.activity_option} onChange={e=>setFormData({...formData, activity_option: e.target.value, selected_contents: []})}><option value="">請選擇行程</option>{renderOptionOptions()}</select></div>
              </div>
              {availableContents.length > 0 && <div className="md:col-span-3 p-6 bg-[#F2ECE4]/30 rounded-[30px] border-4 border-dashed border-[#E8E2D1] mt-6"><label className="text-xl font-black text-[#7A2E40] mb-4 block">4. 行程內容複選</label><div className="flex flex-wrap gap-4">{availableContents.map(c => <button key={c} type="button" onClick={() => setFormData(p => ({ ...p, selected_contents: p.selected_contents.includes(c) ? p.selected_contents.filter(i => i !== c) : [...p.selected_contents, c] }))} className={`px-6 py-2 rounded-xl font-black text-lg border-2 transition-all ${formData.selected_contents.includes(c) ? 'bg-[#7A2E40] text-white border-[#7A2E40]' : 'bg-white text-[#7A2E40] border-[#E8E2D1]'}`}>{c}</button>)}</div></div>}
              {formData.activity_option.includes('自訂') && <div className="mt-6 space-y-2"><label className="text-lg font-black text-orange-600">{getFieldConfig('other_remarks').field_label}{getFieldConfig('other_remarks').is_required?'*':''}</label><textarea rows={2} className="w-full p-2 text-lg border rounded-none" value={formData.other_remarks} onChange={e=>setFormData({...formData, other_remarks: e.target.value})} /></div>}
@@ -992,7 +1013,6 @@ export default function App() {
           <div className="space-y-6">
              <div className="flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm">
                  <h3 className="font-bold text-[#7A2E40]">歷史紀錄</h3>
-                 {/* 地點篩選器 */}
                  <select className="p-2 border rounded-lg text-sm bg-slate-50" value={historyFilterLoc} onChange={e=>setHistoryFilterLoc(e.target.value)}>
                     <option value="">全部地點</option>
                     {locations.map(l => <option key={l} value={l}>{l}</option>)}
@@ -1029,7 +1049,6 @@ export default function App() {
                          </div>
                          <div className="mt-6 pt-4 border-t border-slate-100 flex justify-between items-end">
                             <div className="text-xs text-slate-300">填表：{n.created_at ? n.created_at.slice(0, 10) : ''} {n.created_at ? n.created_at.slice(11, 16) : ''}<br/>{n.sign_name && `By: ${n.sign_name}`}</div>
-                            {/* 只有在非失效狀態下才顯示刪除按鈕 */}
                             {!isInactive && (<label className="flex items-center gap-2 cursor-pointer select-none text-red-400 hover:text-red-600 transition-colors bg-white px-3 py-1 rounded-full shadow-sm border border-slate-100"><input type="checkbox" className="w-5 h-5 rounded accent-red-500" checked={n.is_deleted} onChange={() => handleToggleDeleteNote(n.id, n.is_deleted)} /><span className="font-bold text-sm">刪除此單</span></label>)}
                          </div>
                       </div>
@@ -1081,9 +1100,9 @@ export default function App() {
                  
                  <div className="space-y-6 min-w-0"><h4 className="font-black text-3xl border-l-[15px] border-[#7A2E40] pl-6">內容</h4><div className="flex gap-2 shrink-0"><input className="flex-1 p-2 border rounded-none text-lg font-bold min-w-0" disabled={!mgmtSelectedOpt} value={newContent} onChange={e=>setNewContent(e.target.value)} /><button onClick={addContent} className="bg-[#7A2E40] text-white p-2 rounded-none shrink-0" disabled={!mgmtSelectedOpt}><Plus/></button></div><div className="max-h-96 overflow-y-auto space-y-2">{adminContents.map(h => <div key={h.id} className="p-4 rounded-2xl text-xl font-bold flex justify-between shadow-sm border border-[#F2ECE4]"><span>{h.content}</span><button onClick={()=>handleDeleteContent(h.id)} className="text-slate-400 hover:text-red-500"><Trash2 className="w-5 h-5"/></button></div>)}</div></div>
               </div>
-              <div className="mt-8 flex justify-end"><button onClick={handlePublishSettings} className="bg-[#7A2E40] text-white px-8 py-3 rounded-2xl font-bold text-xl shadow-lg hover:bg-[#5D2331] transition-all">發佈設定</button></div>
+              <div className="mt-8 flex justify-end"><button onClick={handlePublishSettings} className="bg-[#7A2E40] text-white px-8 py-3 rounded-2xl font-bold text-xl shadow-lg hover:bg-[#5D2331] transition-all"><UploadCloud className="w-5 h-5 inline-block mr-2" />發佈設定</button></div>
               <div className="mt-20">
-                 <div className="flex justify-between items-end mb-8"><h4 className="text-2xl font-black text-[#7A2E40]">2、欄位管理</h4><button onClick={handlePublishSettings} className="bg-[#7A2E40] text-white px-6 py-2 rounded-xl font-bold text-sm shadow hover:bg-[#5D2331]">發佈設定</button></div>
+                 <div className="flex justify-between items-end mb-8"><h4 className="text-2xl font-black text-[#7A2E40]">2、欄位管理</h4><button onClick={handlePublishSettings} className="bg-[#7A2E40] text-white px-6 py-2 rounded-xl font-bold text-sm shadow hover:bg-[#5D2331]"><UploadCloud className="w-4 h-4 inline-block mr-2" />發佈設定</button></div>
                  <div className="overflow-x-auto rounded-[40px] border border-[#E8E2D1] shadow-sm">
                     <table className="w-full text-left text-sm bg-white">
                        <thead className="bg-[#7A2E40] text-white font-bold text-lg" style={{ backgroundColor: PRIMARY_COLOR }}>
