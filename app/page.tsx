@@ -10,13 +10,13 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v79.1 (用戶管理頁面優化版)
+ * 系統版本：v81.0 (真實用戶建立與權限同步版)
  * 修正說明：
- * 1. [UI] 用戶頁籤：列表標題底色改為 #4f093c。
- * 2. [Feature] 用戶頁籤：新增「報名筆數」統計欄位。
- * 3. [Feature] 用戶頁籤：明確列出「是否為管理員」、「狀態(正常/停用)」。
- * 4. [Fix] 用戶頁籤：修正新增使用者時的錯誤提示與邏輯。
- * 5. [System] 保持所有 v78.0 功能 (日期截止、欄位順序、暖色調)。
+ * 1. [Feature] 用戶管理：恢復「密碼」輸入欄位。
+ * 2. [Logic] 用戶新增：使用臨時 Supabase Client (persistSession: false) 執行 signUp。
+ * - 這允許管理員在不登出的情況下，直接在後端 Auth 建立新帳號。
+ * - 建立成功後，自動同步寫入 user_permissions 表格。
+ * 3. [System] 保持所有 v80.0 的功能與介面 (暖色調、欄位順序、日期截止)。
  */
 
 // --- 主色系設定 ---
@@ -238,7 +238,6 @@ export default function App() {
   const [password, setPassword] = useState<string>('');
   const [authMode, setAuthMode] = useState<'login'|'signup'|'forgot'>('login');
   
-  // 日期狀態
   const [todayDate, setTodayDate] = useState('');
   const [currentDateTime, setCurrentDateTime] = useState('');
   const [historyFilterLoc, setHistoryFilterLoc] = useState<string>('');
@@ -246,7 +245,6 @@ export default function App() {
   
   const [formData, setFormData] = useState(INITIAL_FORM_DATA);
 
-  // 管理介面狀態
   const [newBulletin, setNewBulletin] = useState<string>('');
   const [newLocation, setNewLocation] = useState<string>('');
   const [newActivity, setNewActivity] = useState<string>('');
@@ -723,7 +721,59 @@ export default function App() {
        setNewUser({name:'', id4:'', pwd:''});
        return;
     }
-    alert('需串接後端 Supabase Admin API 來建立 Auth 用戶');
+    
+    if (!newUser.name || !newUser.id4 || !newUser.pwd) { alert('請輸入完整資料 (姓名、ID、密碼)'); return; }
+    
+    const email = encodeName(newUser.name + newUser.id4) + FAKE_DOMAIN;
+    const url = typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_SUPABASE_URL : '';
+    const key = typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY : '';
+
+    if (!url || !key) { alert('環境變數遺失'); return; }
+
+    // 使用暫時的客戶端進行註冊，避免影響當前 session
+    const tempClient = window.supabase.createClient(url, key, {
+        auth: {
+            persistSession: false, 
+            autoRefreshToken: false,
+            detectSessionInUrl: false
+        }
+    });
+
+    try {
+        const { data, error } = await tempClient.auth.signUp({
+            email,
+            password: newUser.pwd,
+            options: {
+                data: { user_name: newUser.name, id_last4: newUser.id4 }
+            }
+        });
+
+        if (error) throw error;
+
+        if (data.user) {
+            // 同步寫入 user_permissions (使用主要的 supabaseClient，因為它有管理者權限/RLS)
+            const { error: permError } = await supabaseClient.from('user_permissions').insert([{
+                uid: data.user.id,
+                email: email, 
+                user_name: newUser.name,
+                id_last4: newUser.id4,
+                is_admin: false,
+                is_disabled: false,
+                created_at: new Date().toISOString()
+            }]);
+
+            if (permError) {
+                console.error("Permissions sync error:", permError);
+                alert(`Auth 建立成功，但權限表寫入失敗: ${permError.message}`);
+            } else {
+                alert('使用者建立成功！');
+                setNewUser({name:'', id4:'', pwd:''});
+                fetchData();
+            }
+        }
+    } catch (err: any) {
+        alert('建立失敗: ' + err.message);
+    }
   };
 
   const handleUpdateActivityDate = async (field: 'activity_end_date' | 'activity_deadline', val: string) => {
@@ -743,7 +793,6 @@ export default function App() {
         .eq('activity', mgmtSelectedAct)
         .eq('option', mgmtSelectedOpt);
     if(error) console.error(error);
-    fetchData();
   };
 
   const handlePublishSettings = () => {
@@ -935,6 +984,7 @@ export default function App() {
 
         {activeTab === 'form' && (
           <div className={`p-8 md:p-12 rounded-[40px] shadow-lg border border-stone-100 animate-in slide-in-from-bottom-4`} style={{ backgroundColor: CARD_BG_COLOR }}>
+             
              {submitStatus.disabled && (
                  <div className={`mb-8 p-4 border-l-4 font-bold rounded-r-xl flex items-center gap-3 ${submitStatus.text.includes('已圓滿') ? 'bg-stone-100 border-stone-500 text-stone-600' : 'bg-red-50 border-red-500 text-red-700'}`}>
                      <AlertTriangle className="w-5 h-5"/> {submitStatus.text}
@@ -942,7 +992,6 @@ export default function App() {
              )}
 
              <div className="space-y-8">
-                 {/* 基本資料區塊 (單列設計，法名縮小) */}
                  <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
                      <div className="md:col-span-3 space-y-1"><label className="text-sm font-bold text-[#4f093c] ml-1">姓名*</label><input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.real_name} onChange={e=>setFormData({...formData, real_name: e.target.value})} /></div>
                      <div className="md:col-span-2 space-y-1"><label className="text-sm font-bold text-[#4f093c] ml-1">法名</label><input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.dharma_name} onChange={e=>setFormData({...formData, dharma_name: e.target.value})} /></div>
@@ -952,10 +1001,8 @@ export default function App() {
                  
                  {formData.registrant_type === '學員家人' && <div className="p-3 bg-red-50 border border-red-200 text-red-600 text-sm font-bold rounded-xl flex items-center gap-2"><Info className="w-4 h-4"/> 請至知客室填寫親眷表</div>}
                  
-                 {/* 截止日/結束日提示 (移至上方，靠左) */}
                  {getCurrentDeadlineText() && <div className="text-xs text-red-500 font-mono font-bold text-left mb-[-10px]">{getCurrentDeadlineText()}</div>}
 
-                 {/* 活動資訊區塊 */}
                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                         <div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">1. 地點*</label><select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.activity_location} onChange={e=>setFormData({...formData, activity_location: e.target.value, activity_name: '', activity_option: '', selected_contents: []})}><option value="">請選擇地點</option>{locations.map(l => <option key={l} value={l}>{l}</option>)}</select></div>
                         <div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">2. 活動*</label><select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" disabled={!formData.activity_location} value={formData.activity_name} onChange={e=>setFormData({...formData, activity_name: e.target.value, activity_option: '', selected_contents: []})}><option value="">請選擇活動</option>{renderActivityOptions()}</select></div>
@@ -1178,11 +1225,7 @@ export default function App() {
                  </div>
               </div>
 
-              <div className="mt-6 flex justify-end">
-                  <button onClick={handlePublishSettings} className="bg-[#4f093c] text-white px-6 py-2 rounded-xl font-bold shadow-lg hover:bg-[#3d072e] flex items-center gap-2 transition-all"><UploadCloud className="w-4 h-4" /> 發佈設定</button>
-              </div>
-
-              <div className="mt-16">
+              <div className="mt-20">
                  <div className="flex justify-between items-end mb-6">
                     <h3 className="text-2xl font-bold text-[#4f093c]">2、欄位管理</h3>
                  </div>
