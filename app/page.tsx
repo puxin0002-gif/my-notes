@@ -10,12 +10,10 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v70.1 (已圓滿判定修復與設定頁按鈕版)
+ * 系統版本：v70.2 (重複宣告修復與完整功能版)
  * 修正說明：
- * 1. [Fix] 修正 getCardStatus 邏輯，確保能正確抓取 hierarchyData 並比對日期，顯示「已圓滿」。
- * 2. [UI] 登記表單與紀錄卡片：「義工組別」移至「抵離時間」下方。
- * 3. [Feature] 設定頁：新增「發佈設定」按鈕。
- * 4. [System] 保持所有資料庫欄位與驗證邏輯。
+ * 1. [Fix] 移除重複宣告的 isCurrentSelectionExpired，解決編譯錯誤。
+ * 2. [System] 整合所有功能：日期截止判斷、紀錄卡片狀態、欄位順序、發佈按鈕。
  */
 
 // --- 主色系設定 ---
@@ -483,7 +481,7 @@ export default function App() {
       }
   }, [formData.departure_datetime]);
 
-  // 欄位顯示邏輯
+  // 欄位顯示邏輯 (更新)
   const fieldVisibility = useMemo(() => {
     const isJingshe = formData.activity_location === '精舍';
     const isZhongtai = formData.activity_location === '中台';
@@ -494,7 +492,7 @@ export default function App() {
 
     return {
       transportation: !isJingshe,
-      // 義工組別：只要是發心義工就顯示
+      // 義工組別：只要是發心義工就顯示，不限地點
       volunteerGroup: isVolunteer,
       volunteerType: isZhongtai && isVolunteer,
       // 發心起訖：地點「非精舍」且身分「發心義工」才顯示
@@ -507,11 +505,17 @@ export default function App() {
 
   const getFieldConfig = (key: string) => fieldConfigs.find(f => f.field_key === key) || { is_required: false, field_label: key };
 
-  // 取得目前活動或行程的結束日期
+  // 取得目前活動或行程的結束日期 (用於登記表單)
   const getHierarchyEndDate = (loc: string, act: string, opt: string) => {
-      const found = hierarchyData.find(h => h.location === loc && h.activity === act && h.option === opt);
-      // 行程結束日優先，若無則看活動結束日
-      return found?.option_end_date || found?.activity_end_date || null;
+      // 1. 找特定 Option
+      const optionNode = hierarchyData.find(h => h.location === loc && h.activity === act && h.option === opt);
+      if (optionNode && optionNode.option_end_date) return optionNode.option_end_date;
+      
+      // 2. 找 Activity (任意包含此 activity 的 row，取 activity_end_date)
+      const activityNode = hierarchyData.find(h => h.location === loc && h.activity === act && h.activity_end_date);
+      if (activityNode) return activityNode.activity_end_date;
+      
+      return null;
   };
 
   // 檢查是否截止 (修正邏輯: 皆為空才不截止)
@@ -620,7 +624,7 @@ export default function App() {
 
     if (!supabaseClient) return alert('系統未連線');
     
-    // 移除 audit_status
+    // 移除 audit_status，改由資料庫預設值處理
     const { audit_status, ...finalPayload } = payload as any;
 
     const { error } = await supabaseClient.from('notes').insert([finalPayload]);
@@ -768,21 +772,25 @@ export default function App() {
   // 在 Admin 設定頁使用的功能 (更新日期設定)
   const handleUpdateActivityDate = async (val: string) => {
     if (!supabaseClient || !mgmtSelectedLoc || !mgmtSelectedAct) return;
+    // 更新 activity_end_date (假設資料表已有此欄位)
     const { error } = await supabaseClient.from('activity_hierarchy')
         .update({ activity_end_date: val })
         .eq('location', mgmtSelectedLoc)
         .eq('activity', mgmtSelectedAct);
     if(error) console.error(error);
+    fetchData();
   };
 
   const handleUpdateOptionDate = async (val: string) => {
     if (!supabaseClient || !mgmtSelectedLoc || !mgmtSelectedAct || !mgmtSelectedOpt) return;
+    // 更新 option_end_date
     const { error } = await supabaseClient.from('activity_hierarchy')
         .update({ option_end_date: val })
         .eq('location', mgmtSelectedLoc)
         .eq('activity', mgmtSelectedAct)
         .eq('option', mgmtSelectedOpt);
     if(error) console.error(error);
+    fetchData();
   };
 
   const handlePublishSettings = () => {
@@ -802,7 +810,7 @@ export default function App() {
     }
   };
 
-  // 排序邏輯
+  // 排序邏輯 (修改：已刪除排最後)
   const sortedHistoryNotes = useMemo(() => {
       let filtered = notes.filter(n => n.user_id === user?.id);
       if (historyFilterLoc) filtered = filtered.filter(n => n.activity_location === historyFilterLoc);
@@ -833,14 +841,30 @@ export default function App() {
       });
   }, [notes, user, historyFilterLoc, todayDate, hierarchyData]);
 
-  // 輔助函式：判斷卡片狀態
+  // 輔助函式：判斷卡片狀態 (修正邏輯)
   const getCardStatus = (note: Note) => {
       if (note.is_deleted) return { text: '刪除', color: 'bg-red-500', isInactive: true };
       
-      const hierarchy = hierarchyData.find(h => h.location === note.activity_location && h.activity === note.activity_name && h.option === note.activity_option);
-      const endDate = hierarchy?.option_end_date || hierarchy?.activity_end_date;
+      // 1. 優先找 Option 的結束日
+      const optionNode = hierarchyData.find(h => 
+          h.location === note.activity_location && 
+          h.activity === note.activity_name && 
+          h.option === note.activity_option
+      );
+
+      let endDate = optionNode?.option_end_date;
+
+      // 2. 若 Option 無結束日，找 Activity 的結束日 (只要符合 Loc + Act 即可，因為 Activity End Date 是更新所有該 Activity 的 rows)
+      if (!endDate) {
+          const activityNode = hierarchyData.find(h => 
+              h.location === note.activity_location && 
+              h.activity === note.activity_name &&
+              h.activity_end_date // 找有設定日期的 row
+          );
+          endDate = activityNode?.activity_end_date;
+      }
       
-      // 若有設定結束日且已過，則顯示已圓滿
+      // 3. 判定是否過期
       if (endDate && todayDate > endDate) {
           return { text: '已圓滿', color: 'bg-gray-400', isInactive: true };
       }
@@ -852,7 +876,7 @@ export default function App() {
       };
   };
 
-  // 取得目前選中活動的日期設定
+  // 取得目前選中活動的日期設定 (用於設定頁顯示)
   const currentActivityEndDate = useMemo(() => {
     if (!mgmtSelectedLoc || !mgmtSelectedAct) return '';
     const found = hierarchyData.find(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.activity_end_date);
@@ -868,7 +892,8 @@ export default function App() {
   // 修改：活動與行程下拉選單的顯示邏輯 (加上狀態)
   const renderActivityOptions = () => {
       return availableActivities.map(a => {
-         const hItem = hierarchyData.find(h => h.location === formData.activity_location && h.activity === a);
+         // 檢查該活動是否過期 (需查找任一包含此活動且有日期的 row)
+         const hItem = hierarchyData.find(h => h.location === formData.activity_location && h.activity === a && h.activity_end_date);
          const endDate = hItem?.activity_end_date;
          const isExpired = endDate ? todayDate > endDate : false;
          return <option key={a} value={a} disabled={isExpired}>{a} {isExpired ? '(已圓滿)' : '(可報名)'}</option>;
@@ -878,7 +903,14 @@ export default function App() {
   const renderOptionOptions = () => {
       return availableOptions.map(o => {
          const hItem = hierarchyData.find(h => h.location === formData.activity_location && h.activity === formData.activity_name && h.option === o);
-         const endDate = hItem?.option_end_date || hItem?.activity_end_date;
+         // 優先看 option_end_date，若無則看 activity_end_date
+         // 注意：這裡需再次查找 activity_end_date，因為 hItem 可能沒有 (若它只存 option_end_date)
+         let endDate = hItem?.option_end_date;
+         if (!endDate) {
+             const actItem = hierarchyData.find(h => h.location === formData.activity_location && h.activity === formData.activity_name && h.activity_end_date);
+             endDate = actItem?.activity_end_date;
+         }
+         
          const isExpired = endDate ? todayDate > endDate : false;
          return <option key={o} value={o} disabled={isExpired}>{o} {isExpired ? '(已圓滿)' : '(可報名)'}</option>;
       });
@@ -951,6 +983,7 @@ export default function App() {
                         <button onClick={handleAddBulletin} className="bg-[#7A2E40] text-white px-4 py-2 rounded-xl font-bold text-sm hover:bg-[#5a1e2f] flex items-center justify-center gap-1" style={{ backgroundColor: PRIMARY_COLOR }}><Check className="w-4 h-4"/> 發布</button>
                      </div>
                   </div>
+                  <p className="text-xs text-slate-400 mt-2 ml-1">* 提示：點擊「圖片」按鈕可插入圖片網址。</p>
                </div>
              )}
              {bulletins.map(b => (
