@@ -10,13 +10,11 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v77.0 (介面微調與顯示邏輯修正版)
+ * 系統版本：v77.1 (介面微調版)
  * 修正說明：
- * 1. [UI] 紀錄卡片：行程移除白框；發心時間改為藍底樣式 (比照抵離)。
- * 2. [UI] 登記頁：截止日/結束日提示靠左對齊。
- * 3. [UI] 登記頁：屬性選「學員家人」顯示填寫親眷表提示。
- * 4. [UI] 登記頁：自訂備註移至行程下方；行程標籤去除 * 號。
- * 5. [System] 保持所有 v74.0 功能 (防呆、截止判斷、暖色調 #f0e6d5)。
+ * 1. [UI] 登記頁：截止日/結束日提示移至地點/活動選單下方，並靠左對齊。
+ * 2. [UI] 紀錄卡片：發心時間改用 formatDateTime 顯示完整日期時間。
+ * 3. [System] 保持所有 v77.0 的功能與邏輯。
  */
 
 // --- 主色系設定 ---
@@ -937,8 +935,6 @@ export default function App() {
           <div className={`p-8 md:p-12 rounded-[40px] shadow-lg border border-stone-100 animate-in slide-in-from-bottom-4`} style={{ backgroundColor: CARD_BG_COLOR }}>
              {/* 移除標題列 */}
              
-             {getCurrentDeadlineText() && <div className="text-xs text-red-400 font-mono text-center mb-4">{getCurrentDeadlineText()}</div>}
-
              {submitStatus.disabled && (
                  <div className={`mb-8 p-4 border-l-4 font-bold rounded-r-xl flex items-center gap-3 ${submitStatus.text.includes('已圓滿') ? 'bg-stone-100 border-stone-500 text-stone-600' : 'bg-red-50 border-red-500 text-red-700'}`}>
                      <AlertTriangle className="w-5 h-5"/> {submitStatus.text}
@@ -955,6 +951,9 @@ export default function App() {
                  </div>
                  
                  {formData.registrant_type === '學員家人' && <div className="p-3 bg-red-50 border border-red-200 text-red-600 text-sm font-bold rounded-xl flex items-center gap-2"><Info className="w-4 h-4"/> 請至知客室填寫親眷表</div>}
+                 
+                 {/* 截止日/結束日提示 (移至上方) */}
+                 {getCurrentDeadlineText() && <div className="text-xs text-red-500 font-mono font-bold text-left mb-[-10px]">{getCurrentDeadlineText()}</div>}
 
                  {/* 活動資訊區塊 */}
                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -962,10 +961,10 @@ export default function App() {
                         <div className="space-y-2"><label className="text-sm font-bold text-slate-500 ml-1">2. 活動*</label><select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" disabled={!formData.activity_location} value={formData.activity_name} onChange={e=>setFormData({...formData, activity_name: e.target.value, activity_option: '', selected_contents: []})}><option value="">請選擇活動</option>{renderActivityOptions()}</select></div>
                         <div className="space-y-2"><label className="text-sm font-bold text-slate-500 ml-1">3. 行程</label><select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" disabled={!formData.activity_name} value={formData.activity_option} onChange={e=>setFormData({...formData, activity_option: e.target.value, selected_contents: []})}><option value="">請選擇行程</option>{renderOptionOptions()}</select></div>
                  </div>
-                 
-                 {formData.activity_option.includes('自訂') && <div className="space-y-2"><label className="text-sm font-bold text-orange-600 ml-1">自訂備註*</label><textarea rows={2} className="w-full p-3 text-lg border border-orange-200 rounded-xl focus:ring-2 focus:ring-orange-200 bg-white" value={formData.other_remarks} onChange={e=>setFormData({...formData, other_remarks: e.target.value})} /></div>}
 
                  {availableContents.length > 0 && <div className="p-4 bg-white/50 rounded-xl border border-stone-200"><div className="flex flex-wrap gap-2">{availableContents.map(c => <button key={c} type="button" onClick={() => setFormData(p => ({ ...p, selected_contents: p.selected_contents.includes(c) ? p.selected_contents.filter(i => i !== c) : [...p.selected_contents, c] }))} className={`px-4 py-1 rounded-lg font-bold text-sm border transition-all ${formData.selected_contents.includes(c) ? 'bg-[#4f093c] text-white border-[#4f093c]' : 'bg-white text-stone-600 border-stone-300 hover:border-[#4f093c]'}`}>{c}</button>)}</div></div>}
+                 
+                 {formData.activity_option.includes('自訂') && <div className="space-y-2"><label className="text-sm font-bold text-orange-600 ml-1">自訂備註*</label><textarea rows={2} className="w-full p-3 text-lg border border-orange-200 rounded-xl focus:ring-2 focus:ring-orange-200 bg-white" value={formData.other_remarks} onChange={e=>setFormData({...formData, other_remarks: e.target.value})} /></div>}
 
                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div className="space-y-2"><label className="text-sm font-bold text-slate-500 ml-1">身分*</label><select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl bg-white" value={formData.identity} onChange={e=>setFormData({...formData, identity: e.target.value})}><option value="">請選擇</option><option value="參加法會">參加法會</option><option value="發心義工">發心義工</option></select></div>
@@ -973,7 +972,7 @@ export default function App() {
                  </div>
 
                  {fieldVisibility.arrivalDeparture && <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-4 bg-white/50 rounded-2xl border border-blue-100"><div className="space-y-2"><label className="text-sm font-bold text-blue-800 ml-1">抵寺時間*</label><input type="datetime-local" min={currentDateTime} className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white" value={formData.arrival_datetime || ''} onChange={e=>setFormData({...formData, arrival_datetime: e.target.value})} /></div><div className="space-y-2"><label className="text-sm font-bold text-blue-800 ml-1">離寺時間*</label><input type="datetime-local" min={formData.arrival_datetime || currentDateTime} className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white" value={formData.departure_datetime || ''} onChange={e=>setFormData({...formData, departure_datetime: e.target.value})} /></div></div>}
-
+                 
                  {fieldVisibility.volunteerGroup && <div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">義工組別*</label><input className="w-full p-3 text-lg border border-stone-200 rounded-xl bg-white" value={formData.volunteer_group} onChange={e=>setFormData({...formData, volunteer_group: e.target.value})} /></div>}
                  
                  {fieldVisibility.volunteerType && <div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">義工選項*</label><select className="w-full p-3 text-lg border border-stone-200 rounded-xl bg-white" value={formData.volunteer_type} onChange={e=>setFormData({...formData, volunteer_type: e.target.value})}><option value="">請選擇</option><option value="一般義工-由精舍安排組別">一般義工-由精舍安排組別</option><option value="長期義工-已於平台報名">長期義工-已於平台報名</option><option value="佛巡-已於平台報名">佛巡-已於平台報名</option></select></div>}
@@ -1023,8 +1022,8 @@ export default function App() {
                           </div>
                           
                           <div className={`mt-4 space-y-3 ${isInactive ? 'opacity-50 pointer-events-none' : ''}`}>
-                             <div className="flex items-center gap-2 mb-2 text-sm">
-                                 <span className="text-stone-400 font-bold">行程：</span>
+                             <div className="flex items-center gap-2 mb-2 text-sm text-stone-600">
+                                 <span className="font-bold">行程：</span>
                                  <span className="font-bold text-[#7A2E40]">{n.activity_option}</span>
                              </div>
                              
@@ -1047,8 +1046,8 @@ export default function App() {
                                 {(n.start_date || n.end_date) && (
                                     <div className="text-sm bg-blue-50/50 p-2 rounded-lg text-blue-800 font-mono mt-2">
                                         <div className="font-bold text-stone-500 mb-1">發心時間：</div>
-                                        <div>始：{n.start_date ? n.start_date.replace('T', ' ') : '-'}</div>
-                                        <div>終：{n.end_date ? n.end_date.replace('T', ' ') : '-'}</div>
+                                        <div>始：{n.start_date ? formatDateTime(n.start_date) : '-'}</div>
+                                        <div>終：{n.end_date ? formatDateTime(n.end_date) : '-'}</div>
                                     </div>
                                 )}
                                 <p className="text-sm text-stone-500 mt-2"><span className="font-bold text-stone-400">安單：</span> {n.accommodation_option || '不安單'} {n.accommodation_option === '須安單' ? `(${n.stay_start_date} ~ ${n.stay_end_date})` : ''}</p>
