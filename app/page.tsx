@@ -10,12 +10,10 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v74.1 (語法錯誤修復版)
+ * 系統版本：v74.2 (紀錄卡片閉合標籤修復版)
  * 修正說明：
- * 1. [Fix] 修復紀錄頁 JSX 閉合標籤錯誤 (The character "}" is not valid)。
- * 2. [UI] 內容區塊底色全面改為 #f0e6d5。
- * 3. [UI] 登記頁：移除「後勤資訊」標題。
- * 4. [Feature] 紀錄頁：卡片顯示所有已填寫欄位。
+ * 1. [Fix] 修復紀錄頁卡片缺少閉合 </div> 導致的 "Unexpected token" 編譯錯誤。
+ * 2. [System] 保持所有 v74.0 功能 (暖色調介面、完整欄位顯示、移除後勤標題)。
  */
 
 // --- 主色系設定 ---
@@ -144,6 +142,9 @@ const FAKE_DOMAIN = "@my-notes.com";
 const encodeName = (name: string): string => {
   try { let hex = ''; for (let i = 0; i < name.length; i++) hex += ('0000' + name.charCodeAt(i).toString(16)).slice(-4); return hex; } catch { return name; }
 };
+const decodeName = (email: string): string => {
+  try { const hex = email.split('@')[0]; let str = ''; for (let i = 0; i < hex.length; i += 4) str += String.fromCharCode(parseInt(hex.substr(i, 4), 16)); return str; } catch { return email?.split('@')[0] || ''; }
+};
 const getDisplayNameOnly = (email: string | undefined | null): string => {
   if (!email) return 'User';
   try {
@@ -152,6 +153,15 @@ const getDisplayNameOnly = (email: string | undefined | null): string => {
     for (let i = 0; i < hex.length; i += 4) str += String.fromCharCode(parseInt(hex.substr(i, 4), 16)); 
     return str.length > 4 ? str.slice(0, -4) : str;
   } catch { return email.split('@')[0]; }
+};
+const getIdLast4FromEmail = (email: string | undefined | null): string => {
+  if (!email) return '0000';
+  try {
+    const hex = email.split('@')[0]; 
+    let str = ''; 
+    for (let i = 0; i < hex.length; i += 4) str += String.fromCharCode(parseInt(hex.substr(i, 4), 16)); 
+    return str.length > 4 ? str.slice(-4) : '0000';
+  } catch { return '0000'; }
 };
 const formatDateTime = (isoString: string | undefined | null): string => {
   if (!isoString) return '-';
@@ -750,8 +760,6 @@ export default function App() {
       let filtered = notes.filter(n => n.user_id === user?.id);
       if (historyFilterLoc) filtered = filtered.filter(n => n.activity_location === historyFilterLoc);
       
-      const now = currentDateTime ? new Date(currentDateTime) : null;
-      
       return filtered.sort((a, b) => {
           const statusA = getRestrictionStatus(a.activity_location, a.activity_name, a.activity_option);
           const statusB = getRestrictionStatus(b.activity_location, b.activity_name, b.activity_option);
@@ -948,6 +956,7 @@ export default function App() {
                  </div>
 
                  <div className="space-y-6">
+                    {/* 移除了「後勤資訊」標題 */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div className="space-y-2"><label className="text-sm font-bold text-slate-500 ml-1">身分*</label><select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl bg-white" value={formData.identity} onChange={e=>setFormData({...formData, identity: e.target.value})}><option value="">請選擇</option><option value="參加法會">參加法會</option><option value="發心義工">發心義工</option></select></div>
                         {fieldVisibility.transportation && <div className="space-y-2"><label className="text-sm font-bold text-slate-500 ml-1">交通*</label><select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl bg-white" value={formData.transportation} onChange={e=>setFormData({...formData, transportation: e.target.value})}><option value="">請選擇</option>{filteredTransportOptions.map(o => <option key={o} value={o}>{o}</option>)}</select></div>}
@@ -1001,29 +1010,50 @@ export default function App() {
                       <div className="relative p-6 pb-0">
                           <div className={`inline-block px-3 py-1 rounded-lg text-xs font-bold text-white mb-3 ${status.color}`}>{status.text}</div>
                           
-                          {/* 詳細內容區 (若失效則反灰) */}
-                          <div className={`mt-8 space-y-4 ${isInactive ? 'opacity-50 pointer-events-none' : ''}`}>
-                             <h3 className="text-3xl font-black text-slate-800 border-b-4 border-[#F2ECE4] pb-2">{n.activity_location} <span className="text-stone-300 mx-1">|</span> {n.activity_name}</h3>
-                             <div className="bg-white p-3 rounded-xl border border-[#E8E2D1]"><span className="text-xs text-slate-400 font-bold block mb-1">行程方案</span><div className="text-xl font-bold text-[#7A2E40]">{n.activity_option}</div></div>
+                          <div className={`mt-4 space-y-3 ${isInactive ? 'opacity-50 pointer-events-none' : ''}`}>
+                             <div className="flex justify-between items-start border-b-4 border-[#F2ECE4] pb-2">
+                                 <div>
+                                     <h3 className="text-xl font-black text-slate-800">{n.activity_location} <span className="text-stone-300">|</span> {n.activity_name}</h3>
+                                     <div className="text-sm font-bold text-[#4f093c] mt-1">{n.activity_option}</div>
+                                 </div>
+                             </div>
+
                              <div className="space-y-2 text-base text-stone-600">
                                 <p><span className="font-bold text-slate-400">學員：</span> {n.real_name} {n.dharma_name ? `(${n.dharma_name})` : ''} <span className="text-xs bg-white px-2 py-0.5 rounded text-stone-500">{n.registrant_type}</span></p>
-                                {n.other_remarks && <p><span className="font-bold text-orange-500">自訂備註：</span> {n.other_remarks}</p>}
-                                {n.selected_contents && Array.isArray(n.selected_contents) && n.selected_contents.length > 0 && <p><span className="font-bold text-stone-400">複選內容：</span> {n.selected_contents.join('、')}</p>}
+                                {n.other_remarks && <p><span className="font-bold text-orange-500">備註：</span> {n.other_remarks}</p>}
+                                {n.selected_contents && Array.isArray(n.selected_contents) && n.selected_contents.length > 0 && <p className="text-sm bg-white/50 p-2 rounded-lg text-stone-500">{n.selected_contents.join('、')}</p>}
+                                
                                 {n.transportation && <p><span className="font-bold text-slate-400">交通：</span> {n.transportation}</p>}
-                                {(n.arrival_datetime || n.departure_datetime) && (<div className="text-sm bg-blue-50/50 p-2 rounded-lg text-blue-800"><div>抵：{formatDateTime(n.arrival_datetime)}</div><div>離：{formatDateTime(n.departure_datetime)}</div></div>)}
+                                {(n.arrival_datetime || n.departure_datetime) && (
+                                    <div className="text-sm bg-blue-50/50 p-2 rounded-lg text-blue-800 font-mono">
+                                        <div>抵：{n.arrival_datetime ? formatDateTime(n.arrival_datetime) : '-'}</div>
+                                        <div>離：{n.departure_datetime ? formatDateTime(n.departure_datetime) : '-'}</div>
+                                    </div>
+                                )}
+
                                 <p><span className="font-bold text-slate-400">身分：</span> {n.identity} {n.volunteer_type ? ` - ${n.volunteer_type}` : ''}</p>
+                                {n.volunteer_group && <p className="text-sm font-bold text-[#4f093c]">組別：{n.volunteer_group}</p>}
+
+                                {(n.start_date || n.end_date) && (<p className="text-sm text-stone-500"><span className="font-bold text-slate-400">發心：</span> {n.start_date?.slice(0,16).replace('T', ' ') || '?'} ~ {n.end_date?.slice(0,16).replace('T', ' ') || '?'}</p>)}
+                                {n.accommodation_option === '須安單' && (<p className="text-sm text-stone-500"><span className="font-bold text-slate-400">安單：</span> {n.stay_start_date} ~ {n.stay_end_date}</p>)}
                                 
-                                {n.volunteer_group && <p><span className="font-bold text-slate-400">組別：</span> {n.volunteer_group}</p>}
-                                
-                                {(n.start_date || n.end_date) && (<p><span className="font-bold text-slate-400">發心：</span> {n.start_date?.replace('T', ' ') || '?'} ~ {n.end_date?.replace('T', ' ') || '?'}</p>)}
-                                {n.accommodation_option === '須安單' && (<p><span className="font-bold text-slate-400">安單：</span> {n.stay_start_date} ~ {n.stay_end_date}</p>)}
-                                {n.memo && <div className="mt-2 pt-2 border-t border-dashed border-stone-200 text-sm text-slate-500 italic">{n.memo}</div>}
+                                {n.memo && <div className="mt-2 pt-2 border-t border-dashed border-stone-200 text-sm text-stone-500 italic">{n.memo}</div>}
                              </div>
-                             <div className="mt-6 pt-4 border-t border-stone-100 flex justify-between items-end">
-                                <div className="text-xs text-slate-300">填表：{n.created_at ? n.created_at.slice(0, 10) : ''} {n.created_at ? n.created_at.slice(11, 16) : ''}<br/>{n.sign_name && `By: ${n.sign_name}`}</div>
-                                {!isInactive && (<label className="flex items-center gap-2 cursor-pointer select-none text-red-400 hover:text-red-600 transition-colors bg-white px-3 py-1 rounded-full shadow-sm border border-stone-100"><input type="checkbox" className="w-5 h-5 rounded accent-red-500" checked={n.is_deleted} onChange={() => handleToggleDeleteNote(n.id, n.is_deleted)} /><span className="font-bold text-sm">刪除此單</span></label>)}
+                             
+                             <div className="pt-4 mt-2 border-t border-stone-100 flex justify-between items-end">
+                                <div className="text-xs text-stone-400">
+                                   填表：{n.created_at ? n.created_at.slice(0, 16).replace('T', ' ') : ''}<br/>
+                                   {n.sign_name && `By: ${n.sign_name}`}
+                                </div>
+                                {!isInactive && (
+                                   <label className="flex items-center gap-2 cursor-pointer select-none text-red-400 hover:text-red-600 transition-colors bg-white px-3 py-1 rounded-full shadow-sm border border-stone-100">
+                                      <input type="checkbox" className="w-4 h-4 rounded accent-red-500" checked={n.is_deleted} onChange={() => handleToggleDeleteNote(n.id, n.is_deleted)} />
+                                      <span className="font-bold text-xs">刪除</span>
+                                   </label>
+                                )}
                              </div>
                           </div>
+                      </div>
                    </div>
                  );
                })}
