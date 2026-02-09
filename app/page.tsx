@@ -10,10 +10,11 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v78.0 (標題樣式統一版)
+ * 系統版本：v79.0 (設定頁版面優化版)
  * 修正說明：
- * 1. [UI] 登記頁：將所有欄位標題 (Label) 的樣式統一為深紫紅色 (比照義工組別)。
- * 2. [System] 保持所有 v77.1 的功能與邏輯 (截止提示位置、紀錄時間格式)。
+ * 1. [UI] 設定頁：「報名行程設定」四欄間距縮小 (gap-3)，輸入框內距縮小，確保「+」按鈕完整顯示。
+ * 2. [UI] 設定頁：「欄位管理」的發佈按鈕移至表格下方，且樣式與上方發佈按鈕完全一致。
+ * 3. [System] 保持所有 v78.0 的功能與邏輯。
  */
 
 // --- 主色系設定 ---
@@ -867,9 +868,9 @@ export default function App() {
           </div>
           
           <div className="space-y-4">
-             <div><label className="text-xs font-bold text-[#4f093c] ml-1">姓名</label><input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20" value={username} onChange={e=>setUsername(e.target.value)} /></div>
-             <div><label className="text-xs font-bold text-[#4f093c] ml-1">ID後四碼</label><input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20" placeholder="如：1234" maxLength={4} value={idLast4} onChange={e=>setIdLast4(e.target.value)} /></div>
-             {authMode !== 'forgot' && (<div><label className="text-xs font-bold text-[#4f093c] ml-1">密碼</label><input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20" type="password" value={password} onChange={e=>setPassword(e.target.value)} /></div>)}
+             <div><label className="text-sm font-bold text-[#4f093c] ml-1">姓名</label><input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20" value={username} onChange={e=>setUsername(e.target.value)} /></div>
+             <div><label className="text-sm font-bold text-[#4f093c] ml-1">ID後四碼</label><input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20" placeholder="如：1234" maxLength={4} value={idLast4} onChange={e=>setIdLast4(e.target.value)} /></div>
+             {authMode !== 'forgot' && (<div><label className="text-sm font-bold text-[#4f093c] ml-1">密碼</label><input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20" type="password" value={password} onChange={e=>setPassword(e.target.value)} /></div>)}
           </div>
 
           <button onClick={handleAuthAction} className="w-full bg-[#4f093c] hover:bg-[#3d072e] text-white py-3 rounded-xl font-bold shadow-md transition-all active:scale-95 flex justify-center items-center gap-2">
@@ -934,6 +935,8 @@ export default function App() {
           <div className={`p-8 md:p-12 rounded-[40px] shadow-lg border border-stone-100 animate-in slide-in-from-bottom-4`} style={{ backgroundColor: CARD_BG_COLOR }}>
              {/* 移除標題列 */}
              
+             {getCurrentDeadlineText() && <div className="text-xs text-red-500 font-mono font-bold text-left mb-4">{getCurrentDeadlineText()}</div>}
+
              {submitStatus.disabled && (
                  <div className={`mb-8 p-4 border-l-4 font-bold rounded-r-xl flex items-center gap-3 ${submitStatus.text.includes('已圓滿') ? 'bg-stone-100 border-stone-500 text-stone-600' : 'bg-red-50 border-red-500 text-red-700'}`}>
                      <AlertTriangle className="w-5 h-5"/> {submitStatus.text}
@@ -951,9 +954,6 @@ export default function App() {
                  
                  {formData.registrant_type === '學員家人' && <div className="p-3 bg-red-50 border border-red-200 text-red-600 text-sm font-bold rounded-xl flex items-center gap-2"><Info className="w-4 h-4"/> 請至知客室填寫親眷表</div>}
                  
-                 {/* 截止日/結束日提示 (移至上方) */}
-                 {getCurrentDeadlineText() && <div className="text-xs text-red-500 font-mono font-bold text-left mb-[-10px]">{getCurrentDeadlineText()}</div>}
-
                  {/* 活動資訊區塊 */}
                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                         <div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">1. 地點*</label><select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.activity_location} onChange={e=>setFormData({...formData, activity_location: e.target.value, activity_name: '', activity_option: '', selected_contents: []})}><option value="">請選擇地點</option>{locations.map(l => <option key={l} value={l}>{l}</option>)}</select></div>
@@ -1022,8 +1022,9 @@ export default function App() {
                           </div>
                           
                           <div className={`mt-4 space-y-3 ${isInactive ? 'opacity-50 pointer-events-none' : ''}`}>
-                             <div className="text-sm text-stone-600 font-bold mb-2">
-                                 {n.activity_option}
+                             <div className="flex items-center gap-2 mb-2 text-sm text-stone-600">
+                                 <span className="font-bold">行程：</span>
+                                 <span className="font-bold text-[#7A2E40]">{n.activity_option}</span>
                              </div>
                              
                              <div className="space-y-2 text-sm text-stone-600">
@@ -1083,13 +1084,13 @@ export default function App() {
               <h3 className="text-2xl font-bold text-[#4f093c] mb-2">1、報名行程設定</h3>
               <p className="text-sm text-stone-400 mb-10">設定地點、活動、行程層級與日期控制</p>
               
-              <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 h-[600px]">
+              <div className="grid grid-cols-1 lg:grid-cols-4 gap-3 h-[600px]">
                  {/* Column 1: Location */}
                  <div className="flex flex-col bg-white/50 rounded-3xl border border-stone-100 overflow-hidden">
-                    <div className="p-4 border-b border-stone-100 bg-white"><h4 className="font-bold text-slate-700 flex items-center gap-2"><div className="w-2 h-6 bg-[#4f093c] rounded-full"></div>地點</h4></div>
+                    <div className="p-3 border-b border-stone-100 bg-white"><h4 className="font-bold text-slate-700 flex items-center gap-2"><div className="w-2 h-6 bg-[#4f093c] rounded-full"></div>地點</h4></div>
                     
-                    {/* 新增輸入框 (移至最上方) */}
-                    <div className="p-4 flex gap-2 border-b border-stone-100"><input className="flex-1 p-2 text-sm border rounded-lg" placeholder="新地點..." value={newLocation} onChange={e=>setNewLocation(e.target.value)} /><button onClick={addLocation} className="bg-[#4f093c] text-white p-2 rounded-lg hover:bg-[#3d072e]"><Plus/></button></div>
+                    {/* 新增輸入框 (移至最上方) - p-2 */}
+                    <div className="p-2 flex gap-2 border-b border-stone-100"><input className="flex-1 p-2 text-sm border rounded-lg" placeholder="新地點..." value={newLocation} onChange={e=>setNewLocation(e.target.value)} /><button onClick={addLocation} className="bg-[#4f093c] text-white p-2 rounded-lg hover:bg-[#3d072e] shrink-0"><Plus/></button></div>
                     
                     <div className="flex-1 overflow-y-auto p-2 space-y-1">
                         {locations.map(l => (
@@ -1103,13 +1104,13 @@ export default function App() {
 
                  {/* Column 2: Activity */}
                  <div className="flex flex-col bg-white/50 rounded-3xl border border-stone-100 overflow-hidden">
-                    <div className="p-4 border-b border-stone-100 bg-white"><h4 className="font-bold text-slate-700 flex items-center gap-2"><div className="w-2 h-6 bg-[#4f093c] rounded-full"></div>活動</h4></div>
+                    <div className="p-3 border-b border-stone-100 bg-white"><h4 className="font-bold text-slate-700 flex items-center gap-2"><div className="w-2 h-6 bg-[#4f093c] rounded-full"></div>活動</h4></div>
                     
-                    {/* 新增輸入框 (移至最上方) */}
-                    <div className="p-4 flex gap-2 border-b border-stone-100"><input className="flex-1 p-2 text-sm border rounded-lg" placeholder="新活動..." disabled={!mgmtSelectedLoc} value={newActivity} onChange={e=>setNewActivity(e.target.value)} /><button onClick={addActivity} className="bg-[#4f093c] text-white p-2 rounded-lg hover:bg-[#3d072e] disabled:opacity-50"><Plus/></button></div>
+                    {/* 新增輸入框 (移至最上方) - p-2 */}
+                    <div className="p-2 flex gap-2 border-b border-stone-100"><input className="flex-1 p-2 text-sm border rounded-lg" placeholder="新活動..." disabled={!mgmtSelectedLoc} value={newActivity} onChange={e=>setNewActivity(e.target.value)} /><button onClick={addActivity} className="bg-[#4f093c] text-white p-2 rounded-lg hover:bg-[#3d072e] disabled:opacity-50 shrink-0"><Plus/></button></div>
 
-                    {/* Date Settings for Activity */}
-                    <div className="px-4 pt-4 pb-2 space-y-3 bg-white border-b border-stone-100">
+                    {/* Date Settings for Activity - slightly reduced padding */}
+                    <div className="px-3 pt-3 pb-2 space-y-3 bg-white border-b border-stone-100">
                         <div className="space-y-1">
                             <label className="text-[10px] font-bold text-stone-400 uppercase tracking-wider">截止報名</label>
                             <input type="date" className="w-full p-2 text-xs border border-stone-200 rounded-lg bg-stone-50" disabled={!mgmtSelectedAct} value={currentActivityDates.dead} onChange={(e) => handleUpdateActivityDate('activity_deadline', e.target.value)} />
@@ -1132,13 +1133,13 @@ export default function App() {
 
                  {/* Column 3: Option */}
                  <div className="flex flex-col bg-white/50 rounded-3xl border border-stone-100 overflow-hidden">
-                    <div className="p-4 border-b border-stone-100 bg-white"><h4 className="font-bold text-slate-700 flex items-center gap-2"><div className="w-2 h-6 bg-[#4f093c] rounded-full"></div>行程</h4></div>
+                    <div className="p-3 border-b border-stone-100 bg-white"><h4 className="font-bold text-slate-700 flex items-center gap-2"><div className="w-2 h-6 bg-[#4f093c] rounded-full"></div>行程</h4></div>
                     
-                    {/* 新增輸入框 (移至最上方) */}
-                    <div className="p-4 flex gap-2 border-b border-stone-100"><input className="flex-1 p-2 text-sm border rounded-lg" placeholder="新行程..." disabled={!mgmtSelectedAct} value={newOption} onChange={e=>setNewOption(e.target.value)} /><button onClick={addOption} className="bg-[#4f093c] text-white p-2 rounded-lg hover:bg-[#3d072e] disabled:opacity-50"><Plus/></button></div>
+                    {/* 新增輸入框 - p-2 */}
+                    <div className="p-2 flex gap-2 border-b border-stone-100"><input className="flex-1 p-2 text-sm border rounded-lg" placeholder="新行程..." disabled={!mgmtSelectedAct} value={newOption} onChange={e=>setNewOption(e.target.value)} /><button onClick={addOption} className="bg-[#4f093c] text-white p-2 rounded-lg hover:bg-[#3d072e] disabled:opacity-50 shrink-0"><Plus/></button></div>
 
                     {/* Date Settings for Option */}
-                    <div className="px-4 pt-4 pb-2 space-y-3 bg-white border-b border-stone-100">
+                    <div className="px-3 pt-3 pb-2 space-y-3 bg-white border-b border-stone-100">
                         <div className="space-y-1">
                             <label className="text-[10px] font-bold text-stone-400 uppercase tracking-wider">截止報名</label>
                             <input type="date" className="w-full p-2 text-xs border border-stone-200 rounded-lg bg-stone-50" disabled={!mgmtSelectedOpt || !!currentActivityDates.dead} value={currentActivityDates.dead || currentOptionDates.dead} onChange={(e) => handleUpdateOptionDate('option_deadline', e.target.value)} />
@@ -1161,10 +1162,10 @@ export default function App() {
 
                  {/* Column 4: Content */}
                  <div className="flex flex-col bg-white/50 rounded-3xl border border-stone-100 overflow-hidden">
-                    <div className="p-4 border-b border-stone-100 bg-white"><h4 className="font-bold text-slate-700 flex items-center gap-2"><div className="w-2 h-6 bg-[#4f093c] rounded-full"></div>內容</h4></div>
+                    <div className="p-3 border-b border-stone-100 bg-white"><h4 className="font-bold text-slate-700 flex items-center gap-2"><div className="w-2 h-6 bg-[#4f093c] rounded-full"></div>內容</h4></div>
                     
-                    {/* 新增輸入框 (移至最上方) */}
-                    <div className="p-4 flex gap-2 border-b border-stone-100"><input className="flex-1 p-2 text-sm border rounded-lg" placeholder="新內容..." disabled={!mgmtSelectedOpt} value={newContent} onChange={e=>setNewContent(e.target.value)} /><button onClick={addContent} className="bg-[#4f093c] text-white p-2 rounded-lg hover:bg-[#3d072e] disabled:opacity-50"><Plus/></button></div>
+                    {/* 新增輸入框 - p-2 */}
+                    <div className="p-2 flex gap-2 border-b border-stone-100"><input className="flex-1 p-2 text-sm border rounded-lg" placeholder="新內容..." disabled={!mgmtSelectedOpt} value={newContent} onChange={e=>setNewContent(e.target.value)} /><button onClick={addContent} className="bg-[#4f093c] text-white p-2 rounded-lg hover:bg-[#3d072e] disabled:opacity-50 shrink-0"><Plus/></button></div>
 
                     <div className="flex-1 overflow-y-auto p-2 space-y-1">
                         {adminContents.map(c => (
@@ -1178,13 +1179,12 @@ export default function App() {
               </div>
 
               <div className="mt-6 flex justify-end">
-                  <button onClick={handlePublishSettings} className="bg-[#4f093c] text-white px-6 py-2 rounded-xl font-bold shadow-lg hover:bg-[#3d072e] flex items-center gap-2"><UploadCloud className="w-4 h-4" /> 發佈設定</button>
+                  <button onClick={handlePublishSettings} className="bg-[#4f093c] text-white px-6 py-2 rounded-xl font-bold shadow-lg hover:bg-[#3d072e] flex items-center gap-2 transition-all"><UploadCloud className="w-4 h-4" /> 發佈設定</button>
               </div>
 
               <div className="mt-16">
                  <div className="flex justify-between items-end mb-6">
                     <h3 className="text-2xl font-bold text-[#4f093c]">2、欄位管理</h3>
-                    <button onClick={handlePublishSettings} className="bg-[#4f093c] text-white px-6 py-2 rounded-xl font-bold text-sm shadow hover:bg-[#3d072e]"><UploadCloud className="w-4 h-4 inline-block mr-2" />發佈設定</button>
                  </div>
                  <div className="overflow-x-auto rounded-[40px] border border-stone-100 shadow-sm">
                     <table className="w-full text-left text-sm bg-white">
@@ -1195,6 +1195,9 @@ export default function App() {
                           {fieldConfigs.map((col) => <tr key={col.field_key} className="hover:bg-[#FAF9F6] transition-colors"><td className="p-6 font-mono text-[#4f093c]">{col.field_key}</td><td className="p-6">{col.field_label}</td><td className="p-6 font-mono text-slate-400">{col.field_type}</td><td className="p-6"><label className="flex items-center cursor-pointer"><input type="checkbox" checked={col.is_required} onChange={(e) => handleUpdateFieldConfig(col.field_key, 'is_required', e.target.checked)} className="w-5 h-5 rounded border-slate-300 text-[#4f093c] focus:ring-[#4f093c]" /><span className="ml-2 text-sm">{col.is_required ? '必填' : '選填'}</span></label></td><td className="p-6"><input type="text" value={col.description || ''} onChange={(e) => handleUpdateFieldConfig(col.field_key, 'description', e.target.value)} className="w-full p-2 border rounded-lg text-sm" placeholder="備註..." /></td></tr>)}
                        </tbody>
                     </table>
+                 </div>
+                 <div className="mt-6 flex justify-end">
+                    <button onClick={handlePublishSettings} className="bg-[#4f093c] text-white px-6 py-2 rounded-xl font-bold shadow-lg hover:bg-[#3d072e] flex items-center gap-2 transition-all"><UploadCloud className="w-4 h-4" /> 發佈設定</button>
                  </div>
               </div>
            </div>
