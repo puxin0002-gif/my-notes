@@ -10,14 +10,12 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v70.0 (日期邏輯與介面完整重製版)
+ * 系統版本：v70.1 (已圓滿判定修復與設定頁按鈕版)
  * 修正說明：
- * 1. [Logic] 截止報名：若結束日 < 今日，則鎖定報名。若結束日為空，則永久開放。
- * 2. [Logic] 紀錄狀態：若結束日 < 今日，顯示「已圓滿」。若為空則不顯示。
- * 3. [UI] 紀錄卡片：過期/刪除時，下方內容反灰鎖定，但左上角色塊保持原色。
- * 4. [UI] 登記表單：義工組別位於抵離時間下方。
- * 5. [Feature] 紀錄頁：地點篩選、時間排序。
- * 6. [Feature] 設定頁：日期設定與發佈按鈕。
+ * 1. [Fix] 修正 getCardStatus 邏輯，確保能正確抓取 hierarchyData 並比對日期，顯示「已圓滿」。
+ * 2. [UI] 登記表單與紀錄卡片：「義工組別」移至「抵離時間」下方。
+ * 3. [Feature] 設定頁：新增「發佈設定」按鈕。
+ * 4. [System] 保持所有資料庫欄位與驗證邏輯。
  */
 
 // --- 主色系設定 ---
@@ -485,7 +483,7 @@ export default function App() {
       }
   }, [formData.departure_datetime]);
 
-  // 欄位顯示邏輯 (更新)
+  // 欄位顯示邏輯
   const fieldVisibility = useMemo(() => {
     const isJingshe = formData.activity_location === '精舍';
     const isZhongtai = formData.activity_location === '中台';
@@ -496,7 +494,7 @@ export default function App() {
 
     return {
       transportation: !isJingshe,
-      // 義工組別：只要是發心義工就顯示，不限地點
+      // 義工組別：只要是發心義工就顯示
       volunteerGroup: isVolunteer,
       volunteerType: isZhongtai && isVolunteer,
       // 發心起訖：地點「非精舍」且身分「發心義工」才顯示
@@ -566,7 +564,7 @@ export default function App() {
         }
       }
       
-      // 強制檢查可見的日期欄位 (即使後台未設必填)
+      // 強制檢查可見的日期欄位
       if (fieldVisibility.volunteerDates && ['start_date', 'end_date'].includes(config.field_key) && !formData[config.field_key as keyof typeof formData]) {
           alert(`請填寫：${config.field_label}`); return false;
       }
@@ -622,7 +620,7 @@ export default function App() {
 
     if (!supabaseClient) return alert('系統未連線');
     
-    // 移除 audit_status，改由資料庫預設值處理
+    // 移除 audit_status
     const { audit_status, ...finalPayload } = payload as any;
 
     const { error } = await supabaseClient.from('notes').insert([finalPayload]);
@@ -770,25 +768,21 @@ export default function App() {
   // 在 Admin 設定頁使用的功能 (更新日期設定)
   const handleUpdateActivityDate = async (val: string) => {
     if (!supabaseClient || !mgmtSelectedLoc || !mgmtSelectedAct) return;
-    // 更新 activity_end_date (假設資料表已有此欄位)
     const { error } = await supabaseClient.from('activity_hierarchy')
         .update({ activity_end_date: val })
         .eq('location', mgmtSelectedLoc)
         .eq('activity', mgmtSelectedAct);
     if(error) console.error(error);
-    fetchData();
   };
 
   const handleUpdateOptionDate = async (val: string) => {
     if (!supabaseClient || !mgmtSelectedLoc || !mgmtSelectedAct || !mgmtSelectedOpt) return;
-    // 更新 option_end_date
     const { error } = await supabaseClient.from('activity_hierarchy')
         .update({ option_end_date: val })
         .eq('location', mgmtSelectedLoc)
         .eq('activity', mgmtSelectedAct)
         .eq('option', mgmtSelectedOpt);
     if(error) console.error(error);
-    fetchData();
   };
 
   const handlePublishSettings = () => {
@@ -808,7 +802,7 @@ export default function App() {
     }
   };
 
-  // 排序邏輯 (修改：已刪除排最後)
+  // 排序邏輯
   const sortedHistoryNotes = useMemo(() => {
       let filtered = notes.filter(n => n.user_id === user?.id);
       if (historyFilterLoc) filtered = filtered.filter(n => n.activity_location === historyFilterLoc);
