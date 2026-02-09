@@ -10,13 +10,12 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v71.0 (新增報名截止日功能版)
+ * 系統版本：v72.0 (權限分級報名版)
  * 修正說明：
- * 1. [Feature] 設定頁：新增「活動報名截止日」與「行程報名截止日」設定。
- * 2. [Logic] 登記判斷：新增截止日檢查邏輯，區分「已圓滿」(結束日過期) 與 「已截止」(截止日過期)。
- * 3. [UI] 登記下拉選單：依據狀態顯示 (可報名/已截止/已圓滿) 並控制選項是否可選。
- * 4. [System] 保持原有紀錄顯示邏輯，紀錄卡片狀態仍依據「結束日」判定圓滿。
- * 5. [SQL] 請執行新的 SQL 指令以擴充 activity_hierarchy 資料表 (activity_deadline, option_deadline)。
+ * 1. [Logic] 報名截止 (Deadline)：一般人不可報名，管理員可報名。
+ * 2. [Logic] 活動圓滿 (End Date)：所有人都不可報名。
+ * 3. [UI] 下拉選單：依據權限動態顯示「已截止」或「已截止-管理員可報」。
+ * 4. [System] 繼承所有 v71.0 功能 (發佈按鈕、紀錄篩選、欄位順序)。
  */
 
 // --- 主色系設定 ---
@@ -34,10 +33,9 @@ interface ActivityHierarchy {
   activity: string | null;
   option: string | null;
   content: string | null;
-  // 日期設定欄位
-  activity_end_date?: string | null; // 活動結束日 (圓滿)
+  activity_end_date?: string | null;
   option_end_date?: string | null;
-  activity_deadline?: string | null; // 活動截止日 (報名截止)
+  activity_deadline?: string | null;
   option_deadline?: string | null;
 }
 
@@ -463,9 +461,9 @@ export default function App() {
           const dateOnly = formData.arrival_datetime.split('T')[0];
           setFormData(p => ({ 
               ...p, 
-              // 若 start_date 為空，則填入完整 datetime；否則維持原值
+              // 發心起訖：使用完整 datetime
               start_date: p.start_date ? p.start_date : fullDateTime,
-              // 若 stay_start_date 為空，則填入 date only
+              // 安單起訖：使用 date only
               stay_start_date: p.stay_start_date ? p.stay_start_date : dateOnly 
           }));
       }
@@ -478,9 +476,9 @@ export default function App() {
 
           setFormData(p => ({ 
               ...p, 
-              // 若 end_date 為空，則填入完整 datetime；否則維持原值
+              // 發心起訖：使用完整 datetime
               end_date: p.end_date ? p.end_date : fullDateTime,
-              // 若 stay_end_date 為空，則填入 date only
+              // 安單起訖：使用 date only
               stay_end_date: p.stay_end_date ? p.stay_end_date : dateOnly 
           }));
       }
@@ -536,14 +534,19 @@ export default function App() {
 
   const isCurrentSelectionExpired = useMemo(() => {
       const status = getRestrictionStatus(formData.activity_location, formData.activity_name, formData.activity_option);
-      return status.isEnded || status.isDeadlined;
-  }, [formData, getRestrictionStatus]);
+      // 如果已圓滿(結束)，永遠截止
+      if (status.isEnded) return true;
+      // 如果已截止(報名期限)，非管理員被阻擋
+      if (status.isDeadlined) return !isAdmin;
+      
+      return false;
+  }, [formData, getRestrictionStatus, isAdmin]);
 
   // 驗證邏輯
   const validateForm = () => {
     const status = getRestrictionStatus(formData.activity_location, formData.activity_name, formData.activity_option);
     if (status.isEnded) { alert("此行程已圓滿結束，無法報名"); return false; }
-    if (status.isDeadlined) { alert("此行程已截止報名"); return false; }
+    if (status.isDeadlined && !isAdmin) { alert("此行程已截止報名"); return false; }
 
     for (const config of fieldConfigs) {
       if (config.is_required) {
@@ -846,7 +849,7 @@ export default function App() {
       });
   }, [notes, user, historyFilterLoc, todayDate, hierarchyData]);
 
-  // 輔助函式：判斷卡片狀態 (修正邏輯：僅「結束日」過期才算圓滿)
+  // 輔助函式：判斷卡片狀態
   const getCardStatus = (note: Note) => {
       if (note.is_deleted) return { text: '刪除', color: 'bg-red-500', isInactive: true };
       
@@ -882,9 +885,11 @@ export default function App() {
          const { isEnded, isDeadlined } = getRestrictionStatus(formData.activity_location, a, '');
          let label = '(可報名)';
          if (isEnded) label = '(已圓滿)';
-         else if (isDeadlined) label = '(已截止)';
+         else if (isDeadlined) {
+             label = isAdmin ? '(已截止-管理員可報)' : '(已截止)';
+         }
          
-         const isDisabled = isEnded || isDeadlined;
+         const isDisabled = isEnded || (isDeadlined && !isAdmin);
          return <option key={a} value={a} disabled={isDisabled}>{a} {label}</option>;
       });
   };
@@ -894,9 +899,11 @@ export default function App() {
          const { isEnded, isDeadlined } = getRestrictionStatus(formData.activity_location, formData.activity_name, o);
          let label = '(可報名)';
          if (isEnded) label = '(已圓滿)';
-         else if (isDeadlined) label = '(已截止)';
+         else if (isDeadlined) {
+             label = isAdmin ? '(已截止-管理員可報)' : '(已截止)';
+         }
          
-         const isDisabled = isEnded || isDeadlined;
+         const isDisabled = isEnded || (isDeadlined && !isAdmin);
          return <option key={o} value={o} disabled={isDisabled}>{o} {label}</option>;
       });
   };
@@ -904,6 +911,18 @@ export default function App() {
   const filteredAdminNotes = useMemo(() => {
     return notes.filter(n => (!filterLoc || n.activity_location === filterLoc));
   }, [notes, filterLoc]);
+
+  // 按鈕顯示邏輯
+  const getSubmitButtonStatus = () => {
+      const { isEnded, isDeadlined } = getRestrictionStatus(formData.activity_location, formData.activity_name, formData.activity_option);
+      if (isEnded) return { disabled: true, text: '已圓滿 (無法報名)' };
+      if (isDeadlined) {
+          return isAdmin ? { disabled: false, text: '確認送出 (管理員權限)' } : { disabled: true, text: '已截止報名' };
+      }
+      return { disabled: false, text: '確認送出' };
+  };
+  
+  const submitStatus = getSubmitButtonStatus();
 
   if (loading) return <div className="min-h-screen bg-[#F8F7F2] flex items-center justify-center font-black text-[#7A2E40] text-4xl animate-pulse">學員登記系統 加載中...</div>;
 
@@ -985,6 +1004,12 @@ export default function App() {
           <div className="bg-white p-8 rounded-[40px] shadow-2xl border border-[#E8E2D1] animate-in slide-in-from-bottom-12">
              <div className="flex items-center gap-4 border-b border-[#F2ECE4] pb-6 mb-6"><div className="p-3 bg-[#7A2E40] rounded-2xl text-white shadow-lg" style={{ backgroundColor: PRIMARY_COLOR }}><Edit className="w-6 h-6" /></div><h3 className="text-2xl font-black text-[#7A2E40] tracking-tight">發心登記表</h3></div>
              
+             {submitStatus.disabled && (
+                 <div className={`mb-6 p-4 border-l-4 font-bold rounded-r ${submitStatus.text.includes('已圓滿') ? 'bg-gray-100 border-gray-500 text-gray-700' : 'bg-red-100 border-red-500 text-red-700'}`}>
+                     ⚠️ {submitStatus.text}
+                 </div>
+             )}
+
              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                 <div className="lg:col-span-3 space-y-2"><label className="text-lg font-black text-[#7A2E40] ml-1">{getFieldConfig('real_name').field_label}{getFieldConfig('real_name').is_required?'*':''}</label><input className="w-full p-2 text-lg font-bold border rounded-none" value={formData.real_name} onChange={e=>setFormData({...formData, real_name: e.target.value})} /></div>
                 <div className="lg:col-span-2 space-y-2"><label className="text-lg font-black text-[#7A2E40] ml-1">{getFieldConfig('dharma_name').field_label}{getFieldConfig('dharma_name').is_required?'*':''}</label><input className="w-full p-2 text-lg font-bold border rounded-none" value={formData.dharma_name} onChange={e=>setFormData({...formData, dharma_name: e.target.value})} /></div>
@@ -1013,7 +1038,7 @@ export default function App() {
                {fieldVisibility.volunteerDates && <div className="p-6 bg-[#F2ECE4]/30 rounded-3xl border border-[#E8E2D1] space-y-4"><label className="text-lg font-black text-[#7A2E40]">發心起訖</label><input type="datetime-local" min={currentDateTime} className="w-full p-2 rounded-none border text-lg" value={formData.start_date || ''} onChange={e=>setFormData({...formData, start_date: e.target.value})} /><input type="datetime-local" min={formData.start_date || currentDateTime} className="w-full p-2 rounded-none border text-lg mt-2" value={formData.end_date || ''} onChange={e=>setFormData({...formData, end_date: e.target.value})} /></div>}
                {fieldVisibility.accommodation && <div className="p-6 bg-slate-50 rounded-3xl border border-slate-200"><label className="text-lg font-black">安單選項</label><select className="w-full p-2 rounded-none text-lg mb-4" value={formData.accommodation_option} onChange={e=>setFormData({...formData, accommodation_option: e.target.value})}><option value="不安單">不安單</option><option value="須安單">須安單</option></select>{fieldVisibility.accommodationDates && <><label className="text-lg font-black">安單起訖</label><input type="date" min={todayDate} className="w-full p-2 text-lg rounded-none" value={formData.stay_start_date || ''} onChange={e=>setFormData({...formData, stay_start_date: e.target.value})} /><input type="date" min={formData.stay_start_date || todayDate} className="w-full p-2 text-lg rounded-none mt-4" value={formData.stay_end_date || ''} onChange={e=>setFormData({...formData, stay_end_date: e.target.value})} /></>}</div>}</div>
              <div className="mt-8 border-t border-[#F2ECE4] pt-6 space-y-2"><label className="text-lg font-black text-slate-500">{getFieldConfig('memo').field_label}{getFieldConfig('memo').is_required?'*':''}</label><textarea rows={3} className="w-full p-2 text-lg border rounded-none" placeholder="若有其他需求請填寫於此..." value={formData.memo} onChange={e=>setFormData({...formData, memo: e.target.value})} /></div>
-             <button onClick={handleSubmitNote} disabled={loading || isCurrentSelectionExpired} className={`w-full mt-10 text-white py-4 rounded-2xl font-black text-3xl shadow-lg transition-all ${isCurrentSelectionExpired ? 'bg-gray-400 cursor-not-allowed' : 'bg-[#7A2E40] hover:bg-[#5D2331]'}`} style={!isCurrentSelectionExpired ? { backgroundColor: PRIMARY_COLOR } : {}}>{isCurrentSelectionExpired ? '已截止/圓滿' : '確認送出'}</button>
+             <button onClick={handleSubmitNote} disabled={loading || submitStatus.disabled} className={`w-full mt-10 text-white py-4 rounded-2xl font-black text-3xl shadow-lg transition-all ${submitStatus.disabled ? 'bg-gray-400 cursor-not-allowed' : 'bg-[#7A2E40] hover:bg-[#5D2331]'}`} style={!submitStatus.disabled ? { backgroundColor: PRIMARY_COLOR } : {}}>{submitStatus.text}</button>
           </div>
         )}
 
@@ -1076,7 +1101,7 @@ export default function App() {
         {activeTab === 'users' && isAdmin && <div className="bg-white rounded-3xl shadow-sm border border-[#E8E2D1] overflow-hidden mt-8"><table className="w-full text-sm text-left"><thead className="bg-slate-50 text-slate-500 font-bold border-b"><tr><th className="p-4">姓名</th><th className="p-4">ID後4碼</th><th className="p-4">管理員</th><th className="p-4">狀態</th><th className="p-4 text-right">報名數</th></tr></thead><tbody className="divide-y">{allUsers.map(u => <tr key={u.id} className="hover:bg-slate-50"><td className="p-4 font-bold text-[#7A2E40]">{u.user_name}</td><td className="p-4 font-mono text-slate-400">{u.id_last4}</td><td className="p-4"><input type="checkbox" checked={u.is_admin} onChange={() => handleToggleAdmin(u.uid!, u.is_admin)} className="w-5 h-5 rounded border-slate-300 cursor-pointer" /></td><td className="p-4"><span className={`px-2 py-1 rounded text-xs font-bold ${u.is_disabled ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>{u.is_disabled ? '已停用' : '啟用中'}</span></td><td className="p-4 text-right"><button onClick={()=>handleToggleUserStatus(u.uid!, u.is_disabled)} className="text-blue-500 hover:underline">{u.is_disabled ? '啟用' : '停用'}</button></td></tr>)}</tbody></table></div>}
         
         {/* 審核頁籤：僅顯示密碼重設 (已移除報名表審核) */}
-        {activeTab === 'audit' && isAdmin && <div className="space-y-12 animate-in fade-in"><div className="bg-[#7A2E40] p-10 rounded-[50px] flex justify-between items-center shadow-xl"><h2 className="text-4xl font-black text-white">審核中心 (密碼重設)</h2></div><div className="grid grid-cols-1 md:grid-cols-2 gap-12">{resetRequests.filter(r => r.status === 'pending').map(r => <div key={r.id} className="bg-white p-12 rounded-[60px] shadow-lg border-4 border-blue-200 relative overflow-hidden"><div className="absolute top-0 right-0 px-12 py-5 rounded-bl-[60px] font-black text-white text-xl bg-blue-500">重設密碼</div><div className="text-blue-900 font-black text-5xl mb-4">{r.user_name}</div><div className="text-slate-400 text-2xl font-mono">ID: {r.id_last4}</div><div className="flex gap-4 mt-8"><button onClick={()=>handleResetAction(r.id, 'approve')} className="flex-1 py-6 bg-blue-50 text-blue-700 font-black text-3xl rounded-[30px] border-4 border-blue-600 hover:bg-blue-600 hover:text-white transition-all">批准</button><button onClick={()=>handleResetAction(r.id, 'reject')} className="flex-1 py-6 bg-slate-50 text-slate-700 font-black text-3xl rounded-[30px] border-4 border-slate-700 hover:bg-slate-600 hover:text-white transition-all">拒絕</button></div></div>)}</div></div>}
+        {activeTab === 'audit' && isAdmin && <div className="space-y-12 animate-in fade-in"><div className="bg-[#7A2E40] p-10 rounded-[50px] flex justify-between items-center shadow-xl"><h2 className="text-4xl font-black text-white">審核中心 (密碼重設)</h2></div><div className="grid grid-cols-1 md:grid-cols-2 gap-12">{resetRequests.filter(r => r.status === 'pending').map(r => <div key={r.id} className="bg-white p-12 rounded-[60px] shadow-lg border-4 border-blue-200 relative overflow-hidden"><div className="absolute top-0 right-0 px-12 py-5 rounded-bl-[60px] font-black text-white text-xl bg-blue-500">重設密碼</div><div className="text-blue-900 font-black text-5xl mb-4">{r.user_name}</div><div className="text-slate-400 text-2xl font-mono">ID: {r.id_last4}</div><div className="flex gap-4 mt-8"><button onClick={()=>handleResetAction(r.id, 'approve')} className="flex-1 py-6 bg-blue-50 text-blue-700 font-black text-3xl rounded-[30px] border-4 border-blue-600 hover:bg-blue-600 hover:text-white transition-all">批准</button><button onClick={()=>handleResetAction(r.id, 'reject')} className="flex-1 py-6 bg-slate-50 text-slate-700 font-black text-3xl rounded-[30px] border-4 border-slate-600 hover:bg-slate-600 hover:text-white transition-all">拒絕</button></div></div>)}</div></div>}
         
         {activeTab === 'admin_data' && isAdmin && <div className="bg-white p-10 rounded-[60px] shadow-sm border border-[#E8E2D1] animate-in fade-in"><div className="flex justify-between items-center mb-10 gap-6 border-b border-[#F2ECE4] pb-8"><h3 className="text-2xl font-black text-[#7A2E40]">資料總覽</h3><div className="flex gap-4"><select className="p-2 bg-[#FAF9F6] border rounded-none text-xs font-bold" value={filterLoc} onChange={e=>setFilterLoc(e.target.value)}><option value="">所有地點</option>{locations.map(l => <option key={l} value={l}>{l}</option>)}</select><button onClick={handleExport} className="bg-emerald-600 text-white px-6 py-2 rounded-2xl flex items-center gap-2 text-sm font-black hover:bg-emerald-700">匯出</button></div></div><div className="overflow-x-auto rounded-3xl border border-[#F2ECE4]"><table className="w-full text-left text-sm"><thead><tr className="bg-[#7A2E40] text-white"><th>姓名</th><th>地點</th><th>活動</th><th>行程</th><th>備註</th></tr></thead><tbody>{filteredAdminNotes.map(n => <tr key={n.id} className="hover:bg-slate-50"><td className="p-4">{n.real_name}</td><td className="p-4">{n.activity_location}</td><td className="p-4">{n.activity_name}</td><td className="p-4">{n.activity_option}</td><td className="p-4">{n.memo || '-'}</td></tr>)}</tbody></table></div></div>}
         {activeTab === 'admin_settings' && isAdmin && (
@@ -1088,13 +1113,17 @@ export default function App() {
                  
                  <div className="space-y-6 min-w-0">
                     <h4 className="font-black text-3xl border-l-[15px] border-[#7A2E40] pl-6">活動</h4>
-                    <div className="mb-4 bg-slate-50 p-3 rounded-lg border border-slate-200">
-                        <label className="text-xs font-bold text-slate-400 block mb-1">活動報名截止日</label>
-                        <input type="date" className="w-full p-2 text-sm border rounded" disabled={!mgmtSelectedLoc || !mgmtSelectedAct} value={currentActivityDates.dead} onChange={(e) => handleUpdateActivityDate('activity_deadline', e.target.value)} />
-                    </div>
-                    <div className="mb-4 bg-slate-50 p-3 rounded-lg border border-slate-200">
-                        <label className="text-xs font-bold text-slate-400 block mb-1">活動結束日 (圓滿)</label>
-                        <input type="date" className="w-full p-2 text-sm border rounded" disabled={!mgmtSelectedLoc || !mgmtSelectedAct} value={currentActivityDates.end} onChange={(e) => handleUpdateActivityDate('activity_end_date', e.target.value)} />
+                    {/* 活動日期設定 */}
+                    <div className="mb-4 bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-2">
+                        <div>
+                            <label className="text-xs font-bold text-slate-400 block mb-1">活動報名截止日 (影響所有行程)</label>
+                            <input type="date" className="w-full p-2 text-sm border rounded" disabled={!mgmtSelectedLoc || !mgmtSelectedAct} value={currentActivityDates.dead} onChange={(e) => handleUpdateActivityDate('activity_deadline', e.target.value)} />
+                        </div>
+                        <div>
+                            <label className="text-xs font-bold text-slate-400 block mb-1">活動結束日/圓滿日 (影響所有行程)</label>
+                            <input type="date" className="w-full p-2 text-sm border rounded" disabled={!mgmtSelectedLoc || !mgmtSelectedAct} value={currentActivityDates.end} onChange={(e) => handleUpdateActivityDate('activity_end_date', e.target.value)} />
+                        </div>
+                        <div className="flex justify-end pt-2"><button onClick={handlePublishSettings} className="text-xs bg-[#7A2E40] text-white px-3 py-1 rounded-lg">發佈設定</button></div>
                     </div>
                     <div className="flex gap-2 shrink-0"><input className="flex-1 p-2 border rounded-none text-lg font-bold min-w-0" disabled={!mgmtSelectedLoc} value={newActivity} onChange={e=>setNewActivity(e.target.value)} /><button onClick={addActivity} className="bg-[#7A2E40] text-white p-2 rounded-none shrink-0" disabled={!mgmtSelectedLoc}><Plus/></button></div>
                     <div className="max-h-96 overflow-y-auto space-y-2">{adminActivities.map(a => <div key={a} onClick={()=>setMgmtSelectedAct(a)} className={`p-4 rounded-2xl text-xl font-bold cursor-pointer flex justify-between items-center ${mgmtSelectedAct === a ? 'bg-[#7A2E40] text-white' : 'bg-slate-100'}`}><span>{a}</span><button onClick={(e)=>{e.stopPropagation(); handleDeleteActivity(a)}} className={mgmtSelectedAct === a ? "text-white/80 hover:text-white" : "text-slate-400 hover:text-red-500"}><Trash2 className="w-5 h-5"/></button></div>)}</div>
@@ -1102,13 +1131,18 @@ export default function App() {
                  
                  <div className="space-y-6 min-w-0">
                     <h4 className="font-black text-3xl border-l-[15px] border-[#7A2E40] pl-6">行程</h4>
-                    <div className="mb-4 bg-slate-50 p-3 rounded-lg border border-slate-200">
-                        <label className="text-xs font-bold text-slate-400 block mb-1">行程報名截止日</label>
-                        <input type="date" className="w-full p-2 text-sm border rounded" disabled={!mgmtSelectedAct || !mgmtSelectedOpt || !!currentActivityDates.dead} value={currentActivityDates.dead || currentOptionDates.dead} onChange={(e) => handleUpdateOptionDate('option_deadline', e.target.value)} />
-                    </div>
-                    <div className="mb-4 bg-slate-50 p-3 rounded-lg border border-slate-200">
-                        <label className="text-xs font-bold text-slate-400 block mb-1">行程結束日 (圓滿)</label>
-                        <input type="date" className="w-full p-2 text-sm border rounded" disabled={!mgmtSelectedAct || !mgmtSelectedOpt || !!currentActivityDates.end} value={currentActivityDates.end || currentOptionDates.end} onChange={(e) => handleUpdateOptionDate('option_end_date', e.target.value)} />
+                    {/* 行程日期設定 */}
+                    <div className="mb-4 bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-2">
+                        <div>
+                            <label className="text-xs font-bold text-slate-400 block mb-1">行程報名截止日</label>
+                            <input type="date" className="w-full p-2 text-sm border rounded" disabled={!mgmtSelectedAct || !mgmtSelectedOpt || !!currentActivityDates.dead} value={currentActivityDates.dead || currentOptionDates.dead} onChange={(e) => handleUpdateOptionDate('option_deadline', e.target.value)} />
+                        </div>
+                        <div>
+                            <label className="text-xs font-bold text-slate-400 block mb-1">行程結束日/圓滿日</label>
+                            <input type="date" className="w-full p-2 text-sm border rounded" disabled={!mgmtSelectedAct || !mgmtSelectedOpt || !!currentActivityDates.end} value={currentActivityDates.end || currentOptionDates.end} onChange={(e) => handleUpdateOptionDate('option_end_date', e.target.value)} />
+                        </div>
+                        {(currentActivityDates.end || currentActivityDates.dead) && <span className="text-[10px] text-red-400 block">* 已套用活動層級設定</span>}
+                        <div className="flex justify-end pt-2"><button onClick={handlePublishSettings} className="text-xs bg-[#7A2E40] text-white px-3 py-1 rounded-lg">發佈設定</button></div>
                     </div>
                     <div className="flex gap-2 shrink-0"><input className="flex-1 p-2 border rounded-none text-lg font-bold min-w-0" disabled={!mgmtSelectedAct} value={newOption} onChange={e=>setNewOption(e.target.value)} /><button onClick={addOption} className="bg-[#7A2E40] text-white p-2 rounded-none shrink-0" disabled={!mgmtSelectedAct}><Plus/></button></div>
                     <div className="max-h-96 overflow-y-auto space-y-2">{adminOptions.map(o => <div key={o} onClick={()=>setMgmtSelectedOpt(o)} className={`p-4 rounded-2xl text-xl font-bold cursor-pointer flex justify-between items-center ${mgmtSelectedOpt === o ? 'bg-[#7A2E40] text-white' : 'bg-slate-100'}`}><span>{o}</span><button onClick={(e)=>{e.stopPropagation(); handleDeleteOption(o)}} className={mgmtSelectedOpt === o ? "text-white/80 hover:text-white" : "text-slate-400 hover:text-red-500"}><Trash2 className="w-5 h-5"/></button></div>)}</div>
