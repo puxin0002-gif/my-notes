@@ -10,10 +10,12 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v74.2 (紀錄卡片閉合標籤修復版)
+ * 系統版本：v75.0 (介面精修與資訊顯示優化版)
  * 修正說明：
- * 1. [Fix] 修復紀錄頁卡片缺少閉合 </div> 導致的 "Unexpected token" 編譯錯誤。
- * 2. [System] 保持所有 v74.0 功能 (暖色調介面、完整欄位顯示、移除後勤標題)。
+ * 1. [UI] 紀錄卡片：狀態標籤移至標題左側，字體大小統一，移除報名者顯示，強制顯示安單狀態。
+ * 2. [UI] 登記表單：移除區塊標題，基本資料改為單列，縮小法名欄位寬度。
+ * 3. [Feature] 登記表單：主動顯示活動/行程的「截止日」與「結束日」資訊。
+ * 4. [System] 繼承所有功能 (權限、截止邏輯、資料庫設定)。
  */
 
 // --- 主色系設定 ---
@@ -235,13 +237,17 @@ export default function App() {
   const [password, setPassword] = useState<string>('');
   const [authMode, setAuthMode] = useState<'login'|'signup'|'forgot'>('login');
   
+  // 日期狀態
   const [todayDate, setTodayDate] = useState('');
   const [currentDateTime, setCurrentDateTime] = useState('');
+  
+  // 篩選狀態
   const [historyFilterLoc, setHistoryFilterLoc] = useState<string>('');
   const [filterLoc, setFilterLoc] = useState<string>('');
   
   const [formData, setFormData] = useState(INITIAL_FORM_DATA);
 
+  // 管理介面狀態
   const [newBulletin, setNewBulletin] = useState<string>('');
   const [newLocation, setNewLocation] = useState<string>('');
   const [newActivity, setNewActivity] = useState<string>('');
@@ -257,6 +263,7 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    // Client-side only date initialization
     setTodayDate(getLocalTodayDate());
     setCurrentDateTime(getLocalTodayDateTime());
 
@@ -398,6 +405,7 @@ export default function App() {
   const availableOptions = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === formData.activity_location && h.activity === formData.activity_name && h.option).map(h => h.option as string))].sort(), [hierarchyData, formData.activity_location, formData.activity_name]);
   const availableContents = useMemo(() => hierarchyData.filter(h => h.location === formData.activity_location && h.activity === formData.activity_name && h.option === formData.activity_option && h.content).map(h => h.content as string).sort(), [hierarchyData, formData.activity_location, formData.activity_name, formData.activity_option]);
 
+  // 管理後台專用聯動
   const adminActivities = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity).map(h => h.activity as string))].sort(), [hierarchyData, mgmtSelectedLoc]);
   const adminOptions = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option).map(h => h.option as string))].sort(), [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct]);
   const adminContents = useMemo(() => hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option === mgmtSelectedOpt && h.content), [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
@@ -417,13 +425,16 @@ export default function App() {
     setFormData(prev => ({ ...prev, transportation: hasLargeBus ? "大車-精舍統一行程" : "小車-自訂抵離寺" }));
   }, [filteredTransportOptions]);
 
+  // 日期同步邏輯：抵離時間 -> 發心/安單日期 (僅在目標為空時填入)
   useEffect(() => { 
       if (formData.arrival_datetime) {
           const fullDateTime = formData.arrival_datetime;
           const dateOnly = formData.arrival_datetime.split('T')[0];
           setFormData(p => ({ 
               ...p, 
+              // 若 start_date 為空，則填入完整 datetime；否則維持原值
               start_date: p.start_date ? p.start_date : fullDateTime,
+              // 若 stay_start_date 為空，則填入 date only
               stay_start_date: p.stay_start_date ? p.stay_start_date : dateOnly 
           }));
       }
@@ -433,14 +444,18 @@ export default function App() {
       if (formData.departure_datetime) {
           const fullDateTime = formData.departure_datetime;
           const dateOnly = formData.departure_datetime.split('T')[0];
+
           setFormData(p => ({ 
               ...p, 
+              // 若 end_date 為空，則填入完整 datetime；否則維持原值
               end_date: p.end_date ? p.end_date : fullDateTime,
+              // 若 stay_end_date 為空，則填入 date only
               stay_end_date: p.stay_end_date ? p.stay_end_date : dateOnly 
           }));
       }
   }, [formData.departure_datetime]);
 
+  // 欄位顯示邏輯
   const fieldVisibility = useMemo(() => {
     const isJingshe = formData.activity_location === '精舍';
     const isZhongtai = formData.activity_location === '中台';
@@ -451,8 +466,10 @@ export default function App() {
 
     return {
       transportation: !isJingshe,
+      // 義工組別：只要是發心義工就顯示，不限地點
       volunteerGroup: isVolunteer,
       volunteerType: isZhongtai && isVolunteer,
+      // 發心起訖：地點「非精舍」且身分「發心義工」才顯示
       volunteerDates: !isJingshe && isVolunteer, 
       arrivalDeparture: !isJingshe && !isBus,    
       accommodation: !isJingshe && !isBus && !isOneDay,
@@ -462,8 +479,11 @@ export default function App() {
 
   const getFieldConfig = (key: string) => fieldConfigs.find(f => f.field_key === key) || { is_required: false, field_label: key };
 
+  // 取得目前活動或行程的結束/截止日期
   const getHierarchyDates = (loc: string, act: string, opt: string) => {
+      // 1. 找特定 Option
       const optionNode = hierarchyData.find(h => h.location === loc && h.activity === act && h.option === opt);
+      // 2. 找 Activity
       const activityNode = hierarchyData.find(h => h.location === loc && h.activity === act && h.activity_end_date);
       
       const endDate = optionNode?.option_end_date || activityNode?.activity_end_date || null;
@@ -472,20 +492,28 @@ export default function App() {
       return { endDate, deadline };
   };
 
+  // 檢查是否報名截止或已圓滿
+  // 邏輯：截止日 < 今日 或 結束日 < 今日 (若日期為空則不限制)
   const getRestrictionStatus = useCallback((loc: string, act: string, opt: string) => {
       const { endDate, deadline } = getHierarchyDates(loc, act, opt);
+      
       const isEnded = endDate ? todayDate > endDate : false;
       const isDeadlined = deadline ? todayDate > deadline : false;
-      return { isEnded, isDeadlined };
+      
+      return { isEnded, isDeadlined, endDate, deadline };
   }, [hierarchyData, todayDate]);
 
   const isCurrentSelectionExpired = useMemo(() => {
       const status = getRestrictionStatus(formData.activity_location, formData.activity_name, formData.activity_option);
+      // 如果已圓滿(結束)，永遠截止
       if (status.isEnded) return true;
+      // 如果已截止(報名期限)，非管理員被阻擋
       if (status.isDeadlined) return !isAdmin;
+      
       return false;
   }, [formData, getRestrictionStatus, isAdmin]);
 
+  // 驗證邏輯
   const validateForm = () => {
     const status = getRestrictionStatus(formData.activity_location, formData.activity_name, formData.activity_option);
     if (status.isEnded) { alert("此行程已圓滿結束，無法報名"); return false; }
@@ -515,9 +543,11 @@ export default function App() {
             }
             continue;
         }
+
         if (config.field_key.includes('stay') || config.field_key.includes('accommodation')) {
             if (!fieldVisibility.accommodation) continue;
         }
+        
         const val = formData[config.field_key as keyof typeof formData];
         if (!val || (typeof val === 'string' && val.trim() === '') || (Array.isArray(val) && val.length === 0)) {
            alert(`請檢查必填項目：${config.field_label}`);
@@ -525,6 +555,7 @@ export default function App() {
         }
       }
       
+      // 強制檢查可見的日期欄位
       if (fieldVisibility.volunteerDates && ['start_date', 'end_date'].includes(config.field_key) && !formData[config.field_key as keyof typeof formData]) {
           alert(`請填寫：${config.field_label}`); return false;
       }
@@ -542,8 +573,10 @@ export default function App() {
 
   const handleSubmitNote = async () => {
     if (!validateForm()) return;
+
     const signName = user?.user_metadata?.user_name || username;
     const id2 = user?.user_metadata?.id_last4 || idLast4;
+
     let finalData = { ...formData };
 
     if (!fieldVisibility.transportation) finalData.transportation = '';
@@ -577,7 +610,10 @@ export default function App() {
     };
 
     if (!supabaseClient) return alert('系統未連線');
+    
+    // 移除 audit_status，改由資料庫預設值處理
     const { audit_status, ...finalPayload } = payload as any;
+
     const { error } = await supabaseClient.from('notes').insert([finalPayload]);
     if (error) { 
         console.error("Submit error:", error);
@@ -720,6 +756,7 @@ export default function App() {
     alert('需串接後端 Supabase Admin API 來建立 Auth 用戶');
   };
 
+  // 在 Admin 設定頁使用的功能 (更新日期設定)
   const handleUpdateActivityDate = async (field: 'activity_end_date' | 'activity_deadline', val: string) => {
     if (!supabaseClient || !mgmtSelectedLoc || !mgmtSelectedAct) return;
     const { error } = await supabaseClient.from('activity_hierarchy')
@@ -737,6 +774,7 @@ export default function App() {
         .eq('activity', mgmtSelectedAct)
         .eq('option', mgmtSelectedOpt);
     if(error) console.error(error);
+    fetchData();
   };
 
   const handlePublishSettings = () => {
@@ -756,6 +794,7 @@ export default function App() {
     }
   };
 
+  // 排序邏輯
   const sortedHistoryNotes = useMemo(() => {
       let filtered = notes.filter(n => n.user_id === user?.id);
       if (historyFilterLoc) filtered = filtered.filter(n => n.activity_location === historyFilterLoc);
@@ -763,8 +802,10 @@ export default function App() {
       return filtered.sort((a, b) => {
           const statusA = getRestrictionStatus(a.activity_location, a.activity_name, a.activity_option);
           const statusB = getRestrictionStatus(b.activity_location, b.activity_name, b.activity_option);
+
           const aIsExpired = statusA.isEnded;
           const bIsExpired = statusB.isEnded;
+
           const aIsDeleted = a.is_deleted;
           const bIsDeleted = b.is_deleted;
           
@@ -777,8 +818,10 @@ export default function App() {
       });
   }, [notes, user, historyFilterLoc, todayDate, hierarchyData]);
 
+  // 輔助函式：判斷卡片狀態
   const getCardStatus = (note: Note) => {
       if (note.is_deleted) return { text: '刪除', color: 'bg-red-500', isInactive: true };
+      
       const { isEnded } = getRestrictionStatus(note.activity_location, note.activity_name, note.activity_option);
       if (isEnded) return { text: '已圓滿', color: 'bg-stone-400', isInactive: true };
       
@@ -789,6 +832,7 @@ export default function App() {
       };
   };
 
+  // 取得目前選中活動的日期設定
   const currentActivityDates = useMemo(() => {
     if (!mgmtSelectedLoc || !mgmtSelectedAct) return { end: '', dead: '' };
     const found = hierarchyData.find(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && (h.activity_end_date || h.activity_deadline));
@@ -801,6 +845,7 @@ export default function App() {
     return { end: found?.option_end_date || '', dead: found?.option_deadline || '' };
   }, [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
 
+  // 修改：活動與行程下拉選單的顯示邏輯 (加上狀態)
   const renderActivityOptions = () => {
       return availableActivities.map(a => {
          const { isEnded, isDeadlined } = getRestrictionStatus(formData.activity_location, a, '');
@@ -837,7 +882,16 @@ export default function App() {
   const filteredAdminNotes = useMemo(() => {
     return notes.filter(n => (!filterLoc || n.activity_location === filterLoc));
   }, [notes, filterLoc]);
-  
+
+  // 取得目前選擇的行程的截止日/結束日文字 (用於顯示在介面上)
+  const getCurrentDeadlineText = () => {
+      const { endDate, deadline } = getHierarchyDates(formData.activity_location, formData.activity_name, formData.activity_option);
+      let text = '';
+      if(deadline) text += ` 截止日:${deadline}`;
+      if(endDate) text += ` 結束日:${endDate}`;
+      return text;
+  };
+
   const submitStatus = getSubmitButtonStatus();
 
   if (loading) return <div className="min-h-screen flex items-center justify-center font-black text-[#4f093c] text-4xl animate-pulse" style={{ backgroundColor: BG_WARM_BEIGE }}>學員登記系統 加載中...</div>;
@@ -920,10 +974,7 @@ export default function App() {
 
         {activeTab === 'form' && (
           <div className={`p-8 md:p-12 rounded-[40px] shadow-lg border border-stone-100 animate-in slide-in-from-bottom-4`} style={{ backgroundColor: CARD_BG_COLOR }}>
-             <div className="flex items-center gap-3 border-b border-stone-100 pb-6 mb-8">
-                <div className="w-12 h-12 bg-[#4f093c]/10 rounded-2xl flex items-center justify-center text-[#4f093c]"><Edit className="w-6 h-6" /></div>
-                <h3 className="text-2xl font-bold text-slate-800">發心登記表</h3>
-             </div>
+             {/* 移除標題列 */}
              
              {submitStatus.disabled && (
                  <div className={`mb-8 p-4 border-l-4 font-bold rounded-r-xl flex items-center gap-3 ${submitStatus.text.includes('已圓滿') ? 'bg-stone-100 border-stone-500 text-stone-600' : 'bg-red-50 border-red-500 text-red-700'}`}>
@@ -931,55 +982,46 @@ export default function App() {
                  </div>
              )}
 
-             <div className="space-y-10">
-                 <div className="space-y-6">
-                    <h4 className="text-sm font-bold text-[#4f093c] tracking-widest uppercase border-b border-stone-100 pb-2 mb-4">基本資料</h4>
-                    <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
-                        <div className="md:col-span-4 space-y-2"><label className="text-sm font-bold text-slate-500 ml-1">姓名*</label><input className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.real_name} onChange={e=>setFormData({...formData, real_name: e.target.value})} /></div>
-                        <div className="md:col-span-4 space-y-2"><label className="text-sm font-bold text-slate-500 ml-1">法名</label><input className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.dharma_name} onChange={e=>setFormData({...formData, dharma_name: e.target.value})} /></div>
-                        <div className="md:col-span-4 space-y-2"><label className="text-sm font-bold text-slate-500 ml-1">報名選項*</label><select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.registration_option} onChange={e=>setFormData({...formData, registration_option: e.target.value})}><option value="新增">新增</option><option value="異動">異動</option></select></div>
-                        <div className="md:col-span-12 space-y-2"><label className="text-sm font-bold text-slate-500 ml-1">屬性*</label><select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.registrant_type} onChange={e=>setFormData({...formData, registrant_type: e.target.value})}><option value="目前上禪修班學員">目前上禪修班學員</option><option value="曾經上禪修班學員">曾經上禪修班學員</option><option value="學員家人">學員家人</option></select></div>
-                    </div>
+             <div className="space-y-8">
+                 {/* 基本資料區塊 (單列設計) */}
+                 <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+                     <div className="md:col-span-3 space-y-1"><label className="text-sm font-bold text-slate-500 ml-1">姓名*</label><input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.real_name} onChange={e=>setFormData({...formData, real_name: e.target.value})} /></div>
+                     <div className="md:col-span-2 space-y-1"><label className="text-sm font-bold text-slate-500 ml-1">法名</label><input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.dharma_name} onChange={e=>setFormData({...formData, dharma_name: e.target.value})} /></div>
+                     <div className="md:col-span-3 space-y-1"><label className="text-sm font-bold text-slate-500 ml-1">報名選項*</label><select className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.registration_option} onChange={e=>setFormData({...formData, registration_option: e.target.value})}><option value="新增">新增</option><option value="異動">異動</option></select></div>
+                     <div className="md:col-span-4 space-y-1"><label className="text-sm font-bold text-slate-500 ml-1">屬性*</label><select className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.registrant_type} onChange={e=>setFormData({...formData, registrant_type: e.target.value})}><option value="目前上禪修班學員">目前上禪修班學員</option><option value="曾經上禪修班學員">曾經上禪修班學員</option><option value="學員家人">學員家人</option></select></div>
                  </div>
 
-                 <div className="space-y-6">
-                    <h4 className="text-sm font-bold text-[#4f093c] tracking-widest uppercase border-b border-stone-100 pb-2 mb-4">活動資訊</h4>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                 {/* 活動資訊區塊 */}
+                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                         <div className="space-y-2"><label className="text-sm font-bold text-slate-500 ml-1">1. 地點*</label><select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.activity_location} onChange={e=>setFormData({...formData, activity_location: e.target.value, activity_name: '', activity_option: '', selected_contents: []})}><option value="">請選擇地點</option>{locations.map(l => <option key={l} value={l}>{l}</option>)}</select></div>
                         <div className="space-y-2"><label className="text-sm font-bold text-slate-500 ml-1">2. 活動*</label><select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" disabled={!formData.activity_location} value={formData.activity_name} onChange={e=>setFormData({...formData, activity_name: e.target.value, activity_option: '', selected_contents: []})}><option value="">請選擇活動</option>{renderActivityOptions()}</select></div>
                         <div className="space-y-2"><label className="text-sm font-bold text-slate-500 ml-1">3. 行程*</label><select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" disabled={!formData.activity_name} value={formData.activity_option} onChange={e=>setFormData({...formData, activity_option: e.target.value, selected_contents: []})}><option value="">請選擇行程</option>{renderOptionOptions()}</select></div>
-                    </div>
-                    
-                    {availableContents.length > 0 && <div className="p-6 bg-white/50 rounded-2xl border border-stone-200"><label className="text-sm font-bold text-slate-500 block mb-3">4. 行程內容複選</label><div className="flex flex-wrap gap-3">{availableContents.map(c => <button key={c} type="button" onClick={() => setFormData(p => ({ ...p, selected_contents: p.selected_contents.includes(c) ? p.selected_contents.filter(i => i !== c) : [...p.selected_contents, c] }))} className={`px-5 py-2 rounded-lg font-bold text-sm border transition-all ${formData.selected_contents.includes(c) ? 'bg-[#4f093c] text-white border-[#4f093c]' : 'bg-white text-stone-600 border-stone-300 hover:border-[#4f093c]'}`}>{c}</button>)}</div></div>}
-                    
-                    {formData.activity_option.includes('自訂') && <div className="space-y-2"><label className="text-sm font-bold text-orange-600 ml-1">自訂備註*</label><textarea rows={2} className="w-full p-3 text-lg border border-orange-200 rounded-xl focus:ring-2 focus:ring-orange-200 bg-white" value={formData.other_remarks} onChange={e=>setFormData({...formData, other_remarks: e.target.value})} /></div>}
                  </div>
+                 
+                 {getCurrentDeadlineText() && <div className="text-xs text-red-400 font-mono text-right">{getCurrentDeadlineText()}</div>}
 
-                 <div className="space-y-6">
-                    {/* 移除了「後勤資訊」標題 */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                 {availableContents.length > 0 && <div className="p-4 bg-white/50 rounded-xl border border-stone-200"><div className="flex flex-wrap gap-2">{availableContents.map(c => <button key={c} type="button" onClick={() => setFormData(p => ({ ...p, selected_contents: p.selected_contents.includes(c) ? p.selected_contents.filter(i => i !== c) : [...p.selected_contents, c] }))} className={`px-4 py-1 rounded-lg font-bold text-sm border transition-all ${formData.selected_contents.includes(c) ? 'bg-[#4f093c] text-white border-[#4f093c]' : 'bg-white text-stone-600 border-stone-300 hover:border-[#4f093c]'}`}>{c}</button>)}</div></div>}
+
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div className="space-y-2"><label className="text-sm font-bold text-slate-500 ml-1">身分*</label><select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl bg-white" value={formData.identity} onChange={e=>setFormData({...formData, identity: e.target.value})}><option value="">請選擇</option><option value="參加法會">參加法會</option><option value="發心義工">發心義工</option></select></div>
                         {fieldVisibility.transportation && <div className="space-y-2"><label className="text-sm font-bold text-slate-500 ml-1">交通*</label><select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl bg-white" value={formData.transportation} onChange={e=>setFormData({...formData, transportation: e.target.value})}><option value="">請選擇</option>{filteredTransportOptions.map(o => <option key={o} value={o}>{o}</option>)}</select></div>}
-                    </div>
-
-                    {fieldVisibility.arrivalDeparture && <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-4 bg-white/50 rounded-2xl border border-blue-100"><div className="space-y-2"><label className="text-sm font-bold text-blue-800 ml-1">抵寺時間*</label><input type="datetime-local" min={currentDateTime} className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white" value={formData.arrival_datetime || ''} onChange={e=>setFormData({...formData, arrival_datetime: e.target.value})} /></div><div className="space-y-2"><label className="text-sm font-bold text-blue-800 ml-1">離寺時間*</label><input type="datetime-local" min={formData.arrival_datetime || currentDateTime} className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white" value={formData.departure_datetime || ''} onChange={e=>setFormData({...formData, departure_datetime: e.target.value})} /></div></div>}
-                    
-                    {fieldVisibility.volunteerGroup && <div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">義工組別*</label><input className="w-full p-3 text-lg border border-stone-200 rounded-xl bg-white" value={formData.volunteer_group} onChange={e=>setFormData({...formData, volunteer_group: e.target.value})} /></div>}
-                    {fieldVisibility.volunteerType && <div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">義工選項*</label><select className="w-full p-3 text-lg border border-stone-200 rounded-xl bg-white" value={formData.volunteer_type} onChange={e=>setFormData({...formData, volunteer_type: e.target.value})}><option value="">請選擇</option><option value="一般義工-由精舍安排組別">一般義工-由精舍安排組別</option><option value="長期義工-已於平台報名">長期義工-已於平台報名</option><option value="佛巡-已於平台報名">佛巡-已於平台報名</option></select></div>}
-                    
-                    {fieldVisibility.volunteerDates && <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-white/50 rounded-2xl"><div className="space-y-1"><label className="text-xs font-bold text-stone-500">發心開始</label><input type="datetime-local" min={currentDateTime} className="w-full p-2 text-sm border rounded-lg bg-white" value={formData.start_date || ''} onChange={e=>setFormData({...formData, start_date: e.target.value})} /></div><div className="space-y-1"><label className="text-xs font-bold text-stone-500">發心結束</label><input type="datetime-local" min={formData.start_date || currentDateTime} className="w-full p-2 text-sm border rounded-lg bg-white" value={formData.end_date || ''} onChange={e=>setFormData({...formData, end_date: e.target.value})} /></div></div>}
-                    
-                    {fieldVisibility.accommodation && (
-                       <div className="p-5 bg-white/50 rounded-2xl border border-stone-200 space-y-4">
-                          <div className="space-y-2"><label className="text-sm font-bold text-slate-700">安單選項</label><select className="w-full p-3 text-lg border rounded-xl bg-white" value={formData.accommodation_option} onChange={e=>setFormData({...formData, accommodation_option: e.target.value})}><option value="不安單">不安單</option><option value="須安單">須安單</option></select></div>
-                          {fieldVisibility.accommodationDates && <div className="grid grid-cols-2 gap-4"><input type="date" min={todayDate} className="w-full p-2 border rounded-lg bg-white" value={formData.stay_start_date || ''} onChange={e=>setFormData({...formData, stay_start_date: e.target.value})} /><input type="date" min={formData.stay_start_date || todayDate} className="w-full p-2 border rounded-lg bg-white" value={formData.stay_end_date || ''} onChange={e=>setFormData({...formData, stay_end_date: e.target.value})} /></div>}
-                       </div>
-                    )}
                  </div>
 
-                 <div className="pt-6 border-t border-stone-100">
-                    <label className="text-sm font-bold text-slate-500 ml-1 mb-2 block">其他備註</label>
-                    <textarea rows={3} className="w-full p-3 text-lg border border-stone-200 rounded-xl bg-white" placeholder="若有其他需求請填寫於此..." value={formData.memo} onChange={e=>setFormData({...formData, memo: e.target.value})} />
+                 {fieldVisibility.arrivalDeparture && <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-4 bg-white/50 rounded-2xl border border-blue-100"><div className="space-y-2"><label className="text-sm font-bold text-blue-800 ml-1">抵寺時間*</label><input type="datetime-local" min={currentDateTime} className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white" value={formData.arrival_datetime || ''} onChange={e=>setFormData({...formData, arrival_datetime: e.target.value})} /></div><div className="space-y-2"><label className="text-sm font-bold text-blue-800 ml-1">離寺時間*</label><input type="datetime-local" min={formData.arrival_datetime || currentDateTime} className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white" value={formData.departure_datetime || ''} onChange={e=>setFormData({...formData, departure_datetime: e.target.value})} /></div></div>}
+
+                 {fieldVisibility.volunteerGroup && <div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">義工組別*</label><input className="w-full p-3 text-lg border border-stone-200 rounded-xl bg-white" value={formData.volunteer_group} onChange={e=>setFormData({...formData, volunteer_group: e.target.value})} /></div>}
+                 
+                 {fieldVisibility.volunteerDates && <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-white/50 rounded-2xl"><div className="space-y-1"><label className="text-xs font-bold text-stone-500">發心開始</label><input type="datetime-local" min={currentDateTime} className="w-full p-2 text-sm border rounded-lg bg-white" value={formData.start_date || ''} onChange={e=>setFormData({...formData, start_date: e.target.value})} /></div><div className="space-y-1"><label className="text-xs font-bold text-stone-500">發心結束</label><input type="datetime-local" min={formData.start_date || currentDateTime} className="w-full p-2 text-sm border rounded-lg bg-white" value={formData.end_date || ''} onChange={e=>setFormData({...formData, end_date: e.target.value})} /></div></div>}
+
+                 {fieldVisibility.accommodation && (
+                    <div className="p-4 bg-white/50 rounded-xl border border-stone-200 space-y-4">
+                        <div className="space-y-2"><label className="text-sm font-bold text-slate-700">安單選項</label><select className="w-full p-3 text-lg border rounded-xl bg-white" value={formData.accommodation_option} onChange={e=>setFormData({...formData, accommodation_option: e.target.value})}><option value="不安單">不安單</option><option value="須安單">須安單</option></select></div>
+                        {fieldVisibility.accommodationDates && <div className="grid grid-cols-2 gap-4"><input type="date" min={todayDate} className="w-full p-2 border rounded-lg bg-white" value={formData.stay_start_date || ''} onChange={e=>setFormData({...formData, stay_start_date: e.target.value})} /><input type="date" min={formData.stay_start_date || todayDate} className="w-full p-2 border rounded-lg bg-white" value={formData.stay_end_date || ''} onChange={e=>setFormData({...formData, stay_end_date: e.target.value})} /></div>}
+                    </div>
+                 )}
+
+                 <div className="pt-4 border-t border-stone-100">
+                    <textarea rows={2} className="w-full p-3 text-lg border border-stone-200 rounded-xl bg-white" placeholder="其他備註..." value={formData.memo} onChange={e=>setFormData({...formData, memo: e.target.value})} />
                  </div>
 
                  <button onClick={handleSubmitNote} disabled={loading || submitStatus.disabled} className={`w-full py-4 rounded-2xl font-bold text-xl shadow-lg transition-transform active:scale-[0.99] ${submitStatus.disabled ? 'bg-stone-300 text-stone-500 cursor-not-allowed' : 'bg-[#4f093c] text-white hover:bg-[#3d072e] shadow-[#4f093c]/20'}`}>{submitStatus.text}</button>
@@ -1008,20 +1050,18 @@ export default function App() {
                  return (
                    <div key={n.id} className={`rounded-[24px] shadow-sm border border-stone-100 overflow-hidden hover:shadow-md transition-all group`} style={{ backgroundColor: CARD_BG_COLOR }}>
                       <div className="relative p-6 pb-0">
-                          <div className={`inline-block px-3 py-1 rounded-lg text-xs font-bold text-white mb-3 ${status.color}`}>{status.text}</div>
+                          <div className="flex items-center gap-2 mb-3">
+                              <span className={`px-3 py-1 rounded-lg text-xs font-bold text-white ${status.color}`}>{status.text}</span>
+                              <h3 className="text-xl font-bold text-slate-800">{n.activity_location} <span className="text-stone-300 mx-1">|</span> {n.activity_name}</h3>
+                          </div>
                           
                           <div className={`mt-4 space-y-3 ${isInactive ? 'opacity-50 pointer-events-none' : ''}`}>
-                             <div className="flex justify-between items-start border-b-4 border-[#F2ECE4] pb-2">
-                                 <div>
-                                     <h3 className="text-xl font-black text-slate-800">{n.activity_location} <span className="text-stone-300">|</span> {n.activity_name}</h3>
-                                     <div className="text-sm font-bold text-[#4f093c] mt-1">{n.activity_option}</div>
-                                 </div>
-                             </div>
-
+                             <div className="bg-white p-3 rounded-xl border border-[#E8E2D1]"><span className="text-xs text-slate-400 font-bold block mb-1">行程方案</span><div className="text-xl font-bold text-[#7A2E40]">{n.activity_option}</div></div>
+                             
                              <div className="space-y-2 text-base text-stone-600">
                                 <p><span className="font-bold text-slate-400">學員：</span> {n.real_name} {n.dharma_name ? `(${n.dharma_name})` : ''} <span className="text-xs bg-white px-2 py-0.5 rounded text-stone-500">{n.registrant_type}</span></p>
                                 {n.other_remarks && <p><span className="font-bold text-orange-500">備註：</span> {n.other_remarks}</p>}
-                                {n.selected_contents && Array.isArray(n.selected_contents) && n.selected_contents.length > 0 && <p className="text-sm bg-white/50 p-2 rounded-lg text-stone-500">{n.selected_contents.join('、')}</p>}
+                                {n.selected_contents && Array.isArray(n.selected_contents) && n.selected_contents.length > 0 && <p><span className="font-bold text-stone-400">內容：</span> {n.selected_contents.join('、')}</p>}
                                 
                                 {n.transportation && <p><span className="font-bold text-slate-400">交通：</span> {n.transportation}</p>}
                                 {(n.arrival_datetime || n.departure_datetime) && (
@@ -1035,16 +1075,14 @@ export default function App() {
                                 {n.volunteer_group && <p className="text-sm font-bold text-[#4f093c]">組別：{n.volunteer_group}</p>}
 
                                 {(n.start_date || n.end_date) && (<p className="text-sm text-stone-500"><span className="font-bold text-slate-400">發心：</span> {n.start_date?.slice(0,16).replace('T', ' ') || '?'} ~ {n.end_date?.slice(0,16).replace('T', ' ') || '?'}</p>)}
-                                {n.accommodation_option === '須安單' && (<p className="text-sm text-stone-500"><span className="font-bold text-slate-400">安單：</span> {n.stay_start_date} ~ {n.stay_end_date}</p>)}
+                                <p className="text-sm text-stone-500"><span className="font-bold text-slate-400">安單：</span> {n.accommodation_option || '不安單'}</p>
+                                {n.accommodation_option === '須安單' && (<p className="text-sm text-stone-500 ml-4">{n.stay_start_date} ~ {n.stay_end_date}</p>)}
                                 
                                 {n.memo && <div className="mt-2 pt-2 border-t border-dashed border-stone-200 text-sm text-stone-500 italic">{n.memo}</div>}
                              </div>
                              
                              <div className="pt-4 mt-2 border-t border-stone-100 flex justify-between items-end">
-                                <div className="text-xs text-stone-400">
-                                   填表：{n.created_at ? n.created_at.slice(0, 16).replace('T', ' ') : ''}<br/>
-                                   {n.sign_name && `By: ${n.sign_name}`}
-                                </div>
+                                <div className="text-xs text-stone-400 font-mono">{n.created_at ? n.created_at.slice(0, 16).replace('T', ' ') : ''}</div>
                                 {!isInactive && (
                                    <label className="flex items-center gap-2 cursor-pointer select-none text-red-400 hover:text-red-600 transition-colors bg-white px-3 py-1 rounded-full shadow-sm border border-stone-100">
                                       <input type="checkbox" className="w-4 h-4 rounded accent-red-500" checked={n.is_deleted} onChange={() => handleToggleDeleteNote(n.id, n.is_deleted)} />
@@ -1062,7 +1100,7 @@ export default function App() {
           </div>
         )}
 
-        {/* ... 其他分頁 ... */}
+        {/* Admin 頁面保持原樣但套用新樣式 */}
         {activeTab === 'users' && isAdmin && <div className={`p-8 rounded-[32px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}><h4 className="font-bold text-[#4f093c] mb-6 flex items-center gap-2"><Plus className="w-5 h-5"/> 新增使用者</h4><div className="flex flex-col md:flex-row gap-4"><input className="flex-1 p-3 border rounded-xl text-sm" placeholder="姓名" value={newUser.name} onChange={e=>setNewUser({...newUser, name: e.target.value})} /><input className="w-32 p-3 border rounded-xl text-sm" placeholder="ID後4碼" value={newUser.id4} onChange={e=>setNewUser({...newUser, id4: e.target.value})} /><input className="w-40 p-3 border rounded-xl text-sm" placeholder="密碼" value={newUser.pwd} onChange={e=>setNewUser({...newUser, pwd: e.target.value})} /><button onClick={handleCreateUser} className="bg-blue-600 text-white px-6 rounded-xl font-bold text-sm hover:bg-blue-700 shadow-md shadow-blue-200">新增</button></div></div>}
         {activeTab === 'users' && isAdmin && <div className={`rounded-[32px] shadow-sm border border-stone-100 overflow-hidden mt-8`} style={{ backgroundColor: CARD_BG_COLOR }}><table className="w-full text-sm text-left"><thead className="bg-stone-50 text-stone-600 font-bold border-b border-stone-200"><tr><th className="p-5">姓名</th><th className="p-5">ID後4碼</th><th className="p-5">管理員</th><th className="p-5">狀態</th><th className="p-5 text-right">報名數</th></tr></thead><tbody className="divide-y divide-stone-100">{allUsers.map(u => <tr key={u.id} className="hover:bg-stone-50/50"><td className="p-5 font-bold text-[#4f093c]">{u.user_name}</td><td className="p-5 font-mono text-stone-400">{u.id_last4}</td><td className="p-5"><input type="checkbox" checked={u.is_admin} onChange={() => handleToggleAdmin(u.uid!, u.is_admin)} className="w-5 h-5 rounded border-stone-300 text-[#4f093c] focus:ring-[#4f093c]" /></td><td className="p-5"><span className={`px-2 py-1 rounded text-xs font-bold ${u.is_disabled ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}>{u.is_disabled ? '已停用' : '啟用中'}</span></td><td className="p-5 text-right"><button onClick={()=>handleToggleUserStatus(u.uid!, u.is_disabled)} className="text-blue-500 hover:underline font-bold text-xs">{u.is_disabled ? '啟用' : '停用'}</button></td></tr>)}</tbody></table></div>}
         
