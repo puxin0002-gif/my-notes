@@ -10,11 +10,10 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v77.1 (介面微調版)
+ * 系統版本：v78.0 (標題樣式統一版)
  * 修正說明：
- * 1. [UI] 登記頁：截止日/結束日提示移至地點/活動選單下方，並靠左對齊。
- * 2. [UI] 紀錄卡片：發心時間改用 formatDateTime 顯示完整日期時間。
- * 3. [System] 保持所有 v77.0 的功能與邏輯。
+ * 1. [UI] 登記頁：將所有欄位標題 (Label) 的樣式統一為深紫紅色 (比照義工組別)。
+ * 2. [System] 保持所有 v77.1 的功能與邏輯 (截止提示位置、紀錄時間格式)。
  */
 
 // --- 主色系設定 ---
@@ -868,9 +867,9 @@ export default function App() {
           </div>
           
           <div className="space-y-4">
-             <div><label className="text-xs font-bold text-slate-400 ml-1">姓名</label><input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20" value={username} onChange={e=>setUsername(e.target.value)} /></div>
-             <div><label className="text-xs font-bold text-slate-400 ml-1">ID後四碼</label><input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20" placeholder="如：1234" maxLength={4} value={idLast4} onChange={e=>setIdLast4(e.target.value)} /></div>
-             {authMode !== 'forgot' && (<div><label className="text-xs font-bold text-slate-400 ml-1">密碼</label><input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20" type="password" value={password} onChange={e=>setPassword(e.target.value)} /></div>)}
+             <div><label className="text-xs font-bold text-[#4f093c] ml-1">姓名</label><input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20" value={username} onChange={e=>setUsername(e.target.value)} /></div>
+             <div><label className="text-xs font-bold text-[#4f093c] ml-1">ID後四碼</label><input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20" placeholder="如：1234" maxLength={4} value={idLast4} onChange={e=>setIdLast4(e.target.value)} /></div>
+             {authMode !== 'forgot' && (<div><label className="text-xs font-bold text-[#4f093c] ml-1">密碼</label><input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20" type="password" value={password} onChange={e=>setPassword(e.target.value)} /></div>)}
           </div>
 
           <button onClick={handleAuthAction} className="w-full bg-[#4f093c] hover:bg-[#3d072e] text-white py-3 rounded-xl font-bold shadow-md transition-all active:scale-95 flex justify-center items-center gap-2">
@@ -944,10 +943,10 @@ export default function App() {
              <div className="space-y-8">
                  {/* 基本資料區塊 (單列設計，法名縮小) */}
                  <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
-                     <div className="md:col-span-3 space-y-1"><label className="text-sm font-bold text-slate-500 ml-1">姓名*</label><input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.real_name} onChange={e=>setFormData({...formData, real_name: e.target.value})} /></div>
-                     <div className="md:col-span-2 space-y-1"><label className="text-sm font-bold text-slate-500 ml-1">法名</label><input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.dharma_name} onChange={e=>setFormData({...formData, dharma_name: e.target.value})} /></div>
-                     <div className="md:col-span-3 space-y-1"><label className="text-sm font-bold text-slate-500 ml-1">報名選項*</label><select className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.registration_option} onChange={e=>setFormData({...formData, registration_option: e.target.value})}><option value="新增">新增</option><option value="異動">異動</option></select></div>
-                     <div className="md:col-span-4 space-y-1"><label className="text-sm font-bold text-slate-500 ml-1">屬性*</label><select className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.registrant_type} onChange={e=>setFormData({...formData, registrant_type: e.target.value})}><option value="目前上禪修班學員">目前上禪修班學員</option><option value="曾經上禪修班學員">曾經上禪修班學員</option><option value="學員家人">學員家人</option></select></div>
+                     <div className="md:col-span-3 space-y-1"><label className="text-sm font-bold text-[#4f093c] ml-1">姓名*</label><input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.real_name} onChange={e=>setFormData({...formData, real_name: e.target.value})} /></div>
+                     <div className="md:col-span-2 space-y-1"><label className="text-sm font-bold text-[#4f093c] ml-1">法名</label><input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.dharma_name} onChange={e=>setFormData({...formData, dharma_name: e.target.value})} /></div>
+                     <div className="md:col-span-3 space-y-1"><label className="text-sm font-bold text-[#4f093c] ml-1">報名選項*</label><select className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.registration_option} onChange={e=>setFormData({...formData, registration_option: e.target.value})}><option value="新增">新增</option><option value="異動">異動</option></select></div>
+                     <div className="md:col-span-4 space-y-1"><label className="text-sm font-bold text-[#4f093c] ml-1">屬性*</label><select className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.registrant_type} onChange={e=>setFormData({...formData, registrant_type: e.target.value})}><option value="目前上禪修班學員">目前上禪修班學員</option><option value="曾經上禪修班學員">曾經上禪修班學員</option><option value="學員家人">學員家人</option></select></div>
                  </div>
                  
                  {formData.registrant_type === '學員家人' && <div className="p-3 bg-red-50 border border-red-200 text-red-600 text-sm font-bold rounded-xl flex items-center gap-2"><Info className="w-4 h-4"/> 請至知客室填寫親眷表</div>}
@@ -957,36 +956,37 @@ export default function App() {
 
                  {/* 活動資訊區塊 */}
                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <div className="space-y-2"><label className="text-sm font-bold text-slate-500 ml-1">1. 地點*</label><select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.activity_location} onChange={e=>setFormData({...formData, activity_location: e.target.value, activity_name: '', activity_option: '', selected_contents: []})}><option value="">請選擇地點</option>{locations.map(l => <option key={l} value={l}>{l}</option>)}</select></div>
-                        <div className="space-y-2"><label className="text-sm font-bold text-slate-500 ml-1">2. 活動*</label><select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" disabled={!formData.activity_location} value={formData.activity_name} onChange={e=>setFormData({...formData, activity_name: e.target.value, activity_option: '', selected_contents: []})}><option value="">請選擇活動</option>{renderActivityOptions()}</select></div>
-                        <div className="space-y-2"><label className="text-sm font-bold text-slate-500 ml-1">3. 行程</label><select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" disabled={!formData.activity_name} value={formData.activity_option} onChange={e=>setFormData({...formData, activity_option: e.target.value, selected_contents: []})}><option value="">請選擇行程</option>{renderOptionOptions()}</select></div>
+                        <div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">1. 地點*</label><select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.activity_location} onChange={e=>setFormData({...formData, activity_location: e.target.value, activity_name: '', activity_option: '', selected_contents: []})}><option value="">請選擇地點</option>{locations.map(l => <option key={l} value={l}>{l}</option>)}</select></div>
+                        <div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">2. 活動*</label><select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" disabled={!formData.activity_location} value={formData.activity_name} onChange={e=>setFormData({...formData, activity_name: e.target.value, activity_option: '', selected_contents: []})}><option value="">請選擇活動</option>{renderActivityOptions()}</select></div>
+                        <div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">3. 行程</label><select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" disabled={!formData.activity_name} value={formData.activity_option} onChange={e=>setFormData({...formData, activity_option: e.target.value, selected_contents: []})}><option value="">請選擇行程</option>{renderOptionOptions()}</select></div>
                  </div>
 
                  {availableContents.length > 0 && <div className="p-4 bg-white/50 rounded-xl border border-stone-200"><div className="flex flex-wrap gap-2">{availableContents.map(c => <button key={c} type="button" onClick={() => setFormData(p => ({ ...p, selected_contents: p.selected_contents.includes(c) ? p.selected_contents.filter(i => i !== c) : [...p.selected_contents, c] }))} className={`px-4 py-1 rounded-lg font-bold text-sm border transition-all ${formData.selected_contents.includes(c) ? 'bg-[#4f093c] text-white border-[#4f093c]' : 'bg-white text-stone-600 border-stone-300 hover:border-[#4f093c]'}`}>{c}</button>)}</div></div>}
                  
-                 {formData.activity_option.includes('自訂') && <div className="space-y-2"><label className="text-sm font-bold text-orange-600 ml-1">自訂備註*</label><textarea rows={2} className="w-full p-3 text-lg border border-orange-200 rounded-xl focus:ring-2 focus:ring-orange-200 bg-white" value={formData.other_remarks} onChange={e=>setFormData({...formData, other_remarks: e.target.value})} /></div>}
+                 {formData.activity_option.includes('自訂') && <div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">自訂備註*</label><textarea rows={2} className="w-full p-3 text-lg border border-orange-200 rounded-xl focus:ring-2 focus:ring-orange-200 bg-white" value={formData.other_remarks} onChange={e=>setFormData({...formData, other_remarks: e.target.value})} /></div>}
 
                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="space-y-2"><label className="text-sm font-bold text-slate-500 ml-1">身分*</label><select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl bg-white" value={formData.identity} onChange={e=>setFormData({...formData, identity: e.target.value})}><option value="">請選擇</option><option value="參加法會">參加法會</option><option value="發心義工">發心義工</option></select></div>
-                        {fieldVisibility.transportation && <div className="space-y-2"><label className="text-sm font-bold text-slate-500 ml-1">交通*</label><select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl bg-white" value={formData.transportation} onChange={e=>setFormData({...formData, transportation: e.target.value})}><option value="">請選擇</option>{filteredTransportOptions.map(o => <option key={o} value={o}>{o}</option>)}</select></div>}
+                        <div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">身分*</label><select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl bg-white" value={formData.identity} onChange={e=>setFormData({...formData, identity: e.target.value})}><option value="">請選擇</option><option value="參加法會">參加法會</option><option value="發心義工">發心義工</option></select></div>
+                        {fieldVisibility.transportation && <div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">交通*</label><select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl bg-white" value={formData.transportation} onChange={e=>setFormData({...formData, transportation: e.target.value})}><option value="">請選擇</option>{filteredTransportOptions.map(o => <option key={o} value={o}>{o}</option>)}</select></div>}
                  </div>
 
-                 {fieldVisibility.arrivalDeparture && <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-4 bg-white/50 rounded-2xl border border-blue-100"><div className="space-y-2"><label className="text-sm font-bold text-blue-800 ml-1">抵寺時間*</label><input type="datetime-local" min={currentDateTime} className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white" value={formData.arrival_datetime || ''} onChange={e=>setFormData({...formData, arrival_datetime: e.target.value})} /></div><div className="space-y-2"><label className="text-sm font-bold text-blue-800 ml-1">離寺時間*</label><input type="datetime-local" min={formData.arrival_datetime || currentDateTime} className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white" value={formData.departure_datetime || ''} onChange={e=>setFormData({...formData, departure_datetime: e.target.value})} /></div></div>}
+                 {fieldVisibility.arrivalDeparture && <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-4 bg-white/50 rounded-2xl border border-blue-100"><div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">抵寺時間*</label><input type="datetime-local" min={currentDateTime} className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white" value={formData.arrival_datetime || ''} onChange={e=>setFormData({...formData, arrival_datetime: e.target.value})} /></div><div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">離寺時間*</label><input type="datetime-local" min={formData.arrival_datetime || currentDateTime} className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white" value={formData.departure_datetime || ''} onChange={e=>setFormData({...formData, departure_datetime: e.target.value})} /></div></div>}
                  
                  {fieldVisibility.volunteerGroup && <div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">義工組別*</label><input className="w-full p-3 text-lg border border-stone-200 rounded-xl bg-white" value={formData.volunteer_group} onChange={e=>setFormData({...formData, volunteer_group: e.target.value})} /></div>}
                  
                  {fieldVisibility.volunteerType && <div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">義工選項*</label><select className="w-full p-3 text-lg border border-stone-200 rounded-xl bg-white" value={formData.volunteer_type} onChange={e=>setFormData({...formData, volunteer_type: e.target.value})}><option value="">請選擇</option><option value="一般義工-由精舍安排組別">一般義工-由精舍安排組別</option><option value="長期義工-已於平台報名">長期義工-已於平台報名</option><option value="佛巡-已於平台報名">佛巡-已於平台報名</option></select></div>}
                  
-                 {fieldVisibility.volunteerDates && <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-white/50 rounded-2xl"><div className="space-y-1"><label className="text-xs font-bold text-stone-500">發心開始</label><input type="datetime-local" min={currentDateTime} className="w-full p-2 text-sm border rounded-lg bg-white" value={formData.start_date || ''} onChange={e=>setFormData({...formData, start_date: e.target.value})} /></div><div className="space-y-1"><label className="text-xs font-bold text-stone-500">發心結束</label><input type="datetime-local" min={formData.start_date || currentDateTime} className="w-full p-2 text-sm border rounded-lg bg-white" value={formData.end_date || ''} onChange={e=>setFormData({...formData, end_date: e.target.value})} /></div></div>}
+                 {fieldVisibility.volunteerDates && <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-white/50 rounded-2xl"><div className="space-y-1"><label className="text-xs font-bold text-[#4f093c]">發心開始</label><input type="datetime-local" min={currentDateTime} className="w-full p-2 text-sm border rounded-lg bg-white" value={formData.start_date || ''} onChange={e=>setFormData({...formData, start_date: e.target.value})} /></div><div className="space-y-1"><label className="text-xs font-bold text-[#4f093c]">發心結束</label><input type="datetime-local" min={formData.start_date || currentDateTime} className="w-full p-2 text-sm border rounded-lg bg-white" value={formData.end_date || ''} onChange={e=>setFormData({...formData, end_date: e.target.value})} /></div></div>}
 
                  {fieldVisibility.accommodation && (
                     <div className="p-4 bg-white/50 rounded-xl border border-stone-200 space-y-4">
-                        <div className="space-y-2"><label className="text-sm font-bold text-slate-700">安單選項</label><select className="w-full p-3 text-lg border rounded-xl bg-white" value={formData.accommodation_option} onChange={e=>setFormData({...formData, accommodation_option: e.target.value})}><option value="不安單">不安單</option><option value="須安單">須安單</option></select></div>
+                        <div className="space-y-2"><label className="text-sm font-bold text-[#4f093c]">安單選項</label><select className="w-full p-3 text-lg border rounded-xl bg-white" value={formData.accommodation_option} onChange={e=>setFormData({...formData, accommodation_option: e.target.value})}><option value="不安單">不安單</option><option value="須安單">須安單</option></select></div>
                         {fieldVisibility.accommodationDates && <div className="grid grid-cols-2 gap-4"><input type="date" min={todayDate} className="w-full p-2 border rounded-lg bg-white" value={formData.stay_start_date || ''} onChange={e=>setFormData({...formData, stay_start_date: e.target.value})} /><input type="date" min={formData.stay_start_date || todayDate} className="w-full p-2 border rounded-lg bg-white" value={formData.stay_end_date || ''} onChange={e=>setFormData({...formData, stay_end_date: e.target.value})} /></div>}
                     </div>
                  )}
                  
                  <div className="pt-4 border-t border-stone-100">
+                    <label className="text-sm font-bold text-[#4f093c] ml-1 mb-2 block">其他備註</label>
                     <textarea rows={2} className="w-full p-3 text-lg border border-stone-200 rounded-xl bg-white" placeholder="其他備註..." value={formData.memo} onChange={e=>setFormData({...formData, memo: e.target.value})} />
                  </div>
 
@@ -1022,9 +1022,8 @@ export default function App() {
                           </div>
                           
                           <div className={`mt-4 space-y-3 ${isInactive ? 'opacity-50 pointer-events-none' : ''}`}>
-                             <div className="flex items-center gap-2 mb-2 text-sm text-stone-600">
-                                 <span className="font-bold">行程：</span>
-                                 <span className="font-bold text-[#7A2E40]">{n.activity_option}</span>
+                             <div className="text-sm text-stone-600 font-bold mb-2">
+                                 {n.activity_option}
                              </div>
                              
                              <div className="space-y-2 text-sm text-stone-600">
