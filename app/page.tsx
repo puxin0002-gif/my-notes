@@ -10,13 +10,12 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v81.0 (真實用戶建立與權限同步版)
+ * 系統版本：v81.1 (新增使用者錯誤修復版)
  * 修正說明：
- * 1. [Feature] 用戶管理：恢復「密碼」輸入欄位。
- * 2. [Logic] 用戶新增：使用臨時 Supabase Client (persistSession: false) 執行 signUp。
- * - 這允許管理員在不登出的情況下，直接在後端 Auth 建立新帳號。
- * - 建立成功後，自動同步寫入 user_permissions 表格。
- * 3. [System] 保持所有 v80.0 的功能與介面 (暖色調、欄位順序、日期截止)。
+ * 1. [Fix] 用戶管理：在新增使用者前，先檢查列表是否已存在該 Email，避免重複操作。
+ * 2. [Fix] 用戶管理：將寫入 user_permissions 的操作由 insert 改為 upsert，解決 duplicate key 錯誤。
+ * - 若使用者已存在 (Auth 建立成功但資料庫有舊資料)，upsert 會更新該紀錄的 UID，確保資料同步。
+ * 3. [System] 保持所有 v81.0 的功能與介面。
  */
 
 // --- 主色系設定 ---
@@ -238,6 +237,7 @@ export default function App() {
   const [password, setPassword] = useState<string>('');
   const [authMode, setAuthMode] = useState<'login'|'signup'|'forgot'>('login');
   
+  // 日期狀態
   const [todayDate, setTodayDate] = useState('');
   const [currentDateTime, setCurrentDateTime] = useState('');
   const [historyFilterLoc, setHistoryFilterLoc] = useState<string>('');
@@ -245,6 +245,7 @@ export default function App() {
   
   const [formData, setFormData] = useState(INITIAL_FORM_DATA);
 
+  // 管理介面狀態
   const [newBulletin, setNewBulletin] = useState<string>('');
   const [newLocation, setNewLocation] = useState<string>('');
   const [newActivity, setNewActivity] = useState<string>('');
@@ -725,12 +726,18 @@ export default function App() {
     if (!newUser.name || !newUser.id4 || !newUser.pwd) { alert('請輸入完整資料 (姓名、ID、密碼)'); return; }
     
     const email = encodeName(newUser.name + newUser.id4) + FAKE_DOMAIN;
+    
+    // 檢查列表是否已存在
+    if (allUsers.some(u => u.email === email)) {
+        alert('此使用者已存在於列表中');
+        return;
+    }
+
     const url = typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_SUPABASE_URL : '';
     const key = typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY : '';
 
     if (!url || !key) { alert('環境變數遺失'); return; }
 
-    // 使用暫時的客戶端進行註冊，避免影響當前 session
     const tempClient = window.supabase.createClient(url, key, {
         auth: {
             persistSession: false, 
@@ -751,8 +758,7 @@ export default function App() {
         if (error) throw error;
 
         if (data.user) {
-            // 同步寫入 user_permissions (使用主要的 supabaseClient，因為它有管理者權限/RLS)
-            const { error: permError } = await supabaseClient.from('user_permissions').insert([{
+            const { error: permError } = await supabaseClient.from('user_permissions').upsert([{
                 uid: data.user.id,
                 email: email, 
                 user_name: newUser.name,
@@ -760,7 +766,7 @@ export default function App() {
                 is_admin: false,
                 is_disabled: false,
                 created_at: new Date().toISOString()
-            }]);
+            }], { onConflict: 'email' });
 
             if (permError) {
                 console.error("Permissions sync error:", permError);
@@ -793,6 +799,7 @@ export default function App() {
         .eq('activity', mgmtSelectedAct)
         .eq('option', mgmtSelectedOpt);
     if(error) console.error(error);
+    fetchData();
   };
 
   const handlePublishSettings = () => {
@@ -1069,12 +1076,12 @@ export default function App() {
                               <h3 className="text-xl font-bold text-slate-800">{n.activity_location} <span className="text-stone-300 mx-1">|</span> {n.activity_name}</h3>
                           </div>
                           
-                          <div className={`mt-4 space-y-3 ${isInactive ? 'opacity-50 pointer-events-none' : ''}`}>
-                             <div className="text-sm text-[#7A2E40] font-bold mb-2 pl-1">
+                          <div className={`mt-4 space-y-2 ${isInactive ? 'opacity-50 pointer-events-none' : ''}`}>
+                             <div className="text-sm font-bold text-[#4f093c] mb-2 pl-1">
                                  {n.activity_option}
                              </div>
                              
-                             <div className="space-y-2 text-sm text-stone-600">
+                             <div className="space-y-1 text-sm text-stone-600">
                                 <p><span className="font-bold text-stone-400">姓名：</span> {n.real_name} {n.dharma_name ? `(${n.dharma_name})` : ''} <span className="text-xs bg-white px-2 py-0.5 rounded text-stone-500">{n.registrant_type}</span></p>
                                 {n.other_remarks && <p><span className="font-bold text-orange-500">備註：</span> {n.other_remarks}</p>}
                                 {n.selected_contents && Array.isArray(n.selected_contents) && n.selected_contents.length > 0 && <p><span className="font-bold text-stone-400">內容：</span> {n.selected_contents.join('、')}</p>}
