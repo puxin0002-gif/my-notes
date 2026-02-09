@@ -10,10 +10,14 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v69.1 (編譯錯誤修復版)
+ * 系統版本：v70.0 (日期邏輯與介面完整重製版)
  * 修正說明：
- * 1. [Fix] 移除重複宣告的 isCurrentSelectionExpired，解決編譯失敗問題。
- * 2. [System] 確保所有功能 (日期截止、紀錄狀態、發佈按鈕) 邏輯正確且無衝突。
+ * 1. [Logic] 截止報名：若結束日 < 今日，則鎖定報名。若結束日為空，則永久開放。
+ * 2. [Logic] 紀錄狀態：若結束日 < 今日，顯示「已圓滿」。若為空則不顯示。
+ * 3. [UI] 紀錄卡片：過期/刪除時，下方內容反灰鎖定，但左上角色塊保持原色。
+ * 4. [UI] 登記表單：義工組別位於抵離時間下方。
+ * 5. [Feature] 紀錄頁：地點篩選、時間排序。
+ * 6. [Feature] 設定頁：日期設定與發佈按鈕。
  */
 
 // --- 主色系設定 ---
@@ -1013,6 +1017,7 @@ export default function App() {
           <div className="space-y-6">
              <div className="flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm">
                  <h3 className="font-bold text-[#7A2E40]">歷史紀錄</h3>
+                 {/* 地點篩選器 */}
                  <select className="p-2 border rounded-lg text-sm bg-slate-50" value={historyFilterLoc} onChange={e=>setHistoryFilterLoc(e.target.value)}>
                     <option value="">全部地點</option>
                     {locations.map(l => <option key={l} value={l}>{l}</option>)}
@@ -1049,6 +1054,7 @@ export default function App() {
                          </div>
                          <div className="mt-6 pt-4 border-t border-slate-100 flex justify-between items-end">
                             <div className="text-xs text-slate-300">填表：{n.created_at ? n.created_at.slice(0, 10) : ''} {n.created_at ? n.created_at.slice(11, 16) : ''}<br/>{n.sign_name && `By: ${n.sign_name}`}</div>
+                            {/* 只有在非失效狀態下才顯示刪除按鈕 */}
                             {!isInactive && (<label className="flex items-center gap-2 cursor-pointer select-none text-red-400 hover:text-red-600 transition-colors bg-white px-3 py-1 rounded-full shadow-sm border border-slate-100"><input type="checkbox" className="w-5 h-5 rounded accent-red-500" checked={n.is_deleted} onChange={() => handleToggleDeleteNote(n.id, n.is_deleted)} /><span className="font-bold text-sm">刪除此單</span></label>)}
                          </div>
                       </div>
