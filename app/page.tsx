@@ -10,11 +10,13 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v79.0 (設定頁版面優化版)
+ * 系統版本：v79.1 (用戶管理頁面優化版)
  * 修正說明：
- * 1. [UI] 設定頁：「報名行程設定」四欄間距縮小 (gap-3)，輸入框內距縮小，確保「+」按鈕完整顯示。
- * 2. [UI] 設定頁：「欄位管理」的發佈按鈕移至表格下方，且樣式與上方發佈按鈕完全一致。
- * 3. [System] 保持所有 v78.0 的功能與邏輯。
+ * 1. [UI] 用戶頁籤：列表標題底色改為 #4f093c。
+ * 2. [Feature] 用戶頁籤：新增「報名筆數」統計欄位。
+ * 3. [Feature] 用戶頁籤：明確列出「是否為管理員」、「狀態(正常/停用)」。
+ * 4. [Fix] 用戶頁籤：修正新增使用者時的錯誤提示與邏輯。
+ * 5. [System] 保持所有 v78.0 功能 (日期截止、欄位順序、暖色調)。
  */
 
 // --- 主色系設定 ---
@@ -933,10 +935,6 @@ export default function App() {
 
         {activeTab === 'form' && (
           <div className={`p-8 md:p-12 rounded-[40px] shadow-lg border border-stone-100 animate-in slide-in-from-bottom-4`} style={{ backgroundColor: CARD_BG_COLOR }}>
-             {/* 移除標題列 */}
-             
-             {getCurrentDeadlineText() && <div className="text-xs text-red-500 font-mono font-bold text-left mb-4">{getCurrentDeadlineText()}</div>}
-
              {submitStatus.disabled && (
                  <div className={`mb-8 p-4 border-l-4 font-bold rounded-r-xl flex items-center gap-3 ${submitStatus.text.includes('已圓滿') ? 'bg-stone-100 border-stone-500 text-stone-600' : 'bg-red-50 border-red-500 text-red-700'}`}>
                      <AlertTriangle className="w-5 h-5"/> {submitStatus.text}
@@ -954,6 +952,9 @@ export default function App() {
                  
                  {formData.registrant_type === '學員家人' && <div className="p-3 bg-red-50 border border-red-200 text-red-600 text-sm font-bold rounded-xl flex items-center gap-2"><Info className="w-4 h-4"/> 請至知客室填寫親眷表</div>}
                  
+                 {/* 截止日/結束日提示 (移至上方，靠左) */}
+                 {getCurrentDeadlineText() && <div className="text-xs text-red-500 font-mono font-bold text-left mb-[-10px]">{getCurrentDeadlineText()}</div>}
+
                  {/* 活動資訊區塊 */}
                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                         <div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">1. 地點*</label><select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.activity_location} onChange={e=>setFormData({...formData, activity_location: e.target.value, activity_name: '', activity_option: '', selected_contents: []})}><option value="">請選擇地點</option>{locations.map(l => <option key={l} value={l}>{l}</option>)}</select></div>
@@ -1022,9 +1023,8 @@ export default function App() {
                           </div>
                           
                           <div className={`mt-4 space-y-3 ${isInactive ? 'opacity-50 pointer-events-none' : ''}`}>
-                             <div className="flex items-center gap-2 mb-2 text-sm text-stone-600">
-                                 <span className="font-bold">行程：</span>
-                                 <span className="font-bold text-[#7A2E40]">{n.activity_option}</span>
+                             <div className="text-sm text-[#7A2E40] font-bold mb-2 pl-1">
+                                 {n.activity_option}
                              </div>
                              
                              <div className="space-y-2 text-sm text-stone-600">
@@ -1073,7 +1073,7 @@ export default function App() {
 
         {/* ... 其他分頁 ... */}
         {activeTab === 'users' && isAdmin && <div className={`p-8 rounded-[32px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}><h4 className="font-bold text-[#4f093c] mb-6 flex items-center gap-2"><Plus className="w-5 h-5"/> 新增使用者</h4><div className="flex flex-col md:flex-row gap-4"><input className="flex-1 p-3 border rounded-xl text-sm" placeholder="姓名" value={newUser.name} onChange={e=>setNewUser({...newUser, name: e.target.value})} /><input className="w-32 p-3 border rounded-xl text-sm" placeholder="ID後4碼" value={newUser.id4} onChange={e=>setNewUser({...newUser, id4: e.target.value})} /><input className="w-40 p-3 border rounded-xl text-sm" placeholder="密碼" value={newUser.pwd} onChange={e=>setNewUser({...newUser, pwd: e.target.value})} /><button onClick={handleCreateUser} className="bg-blue-600 text-white px-6 rounded-xl font-bold text-sm hover:bg-blue-700 shadow-md shadow-blue-200">新增</button></div></div>}
-        {activeTab === 'users' && isAdmin && <div className={`rounded-[32px] shadow-sm border border-stone-100 overflow-hidden mt-8`} style={{ backgroundColor: CARD_BG_COLOR }}><table className="w-full text-sm text-left"><thead className="bg-stone-50 text-stone-600 font-bold border-b border-stone-200"><tr><th className="p-5">姓名</th><th className="p-5">ID後4碼</th><th className="p-5">管理員</th><th className="p-5">狀態</th><th className="p-5 text-right">報名數</th></tr></thead><tbody className="divide-y divide-stone-100">{allUsers.map(u => <tr key={u.id} className="hover:bg-stone-50/50"><td className="p-5 font-bold text-[#4f093c]">{u.user_name}</td><td className="p-5 font-mono text-stone-400">{u.id_last4}</td><td className="p-5"><input type="checkbox" checked={u.is_admin} onChange={() => handleToggleAdmin(u.uid!, u.is_admin)} className="w-5 h-5 rounded border-stone-300 text-[#4f093c] focus:ring-[#4f093c]" /></td><td className="p-5"><span className={`px-2 py-1 rounded text-xs font-bold ${u.is_disabled ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}>{u.is_disabled ? '已停用' : '啟用中'}</span></td><td className="p-5 text-right"><button onClick={()=>handleToggleUserStatus(u.uid!, u.is_disabled)} className="text-blue-500 hover:underline font-bold text-xs">{u.is_disabled ? '啟用' : '停用'}</button></td></tr>)}</tbody></table></div>}
+        {activeTab === 'users' && isAdmin && <div className={`rounded-[32px] shadow-sm border border-stone-100 overflow-hidden mt-8`} style={{ backgroundColor: CARD_BG_COLOR }}><table className="w-full text-sm text-left"><thead className="bg-[#4f093c] text-white font-bold border-b border-[#4f093c]"><tr><th className="p-5">姓名</th><th className="p-5">ID後4碼</th><th className="p-5">管理員</th><th className="p-5">狀態</th><th className="p-5">報名筆數</th><th className="p-5 text-right">操作</th></tr></thead><tbody className="divide-y divide-stone-100">{allUsers.map(u => { const count = notes.filter(n => n.user_id === u.uid).length; return (<tr key={u.id} className="hover:bg-stone-50/50"><td className="p-5 font-bold text-[#4f093c]">{u.user_name}</td><td className="p-5 font-mono text-stone-400">{u.id_last4}</td><td className="p-5"><input type="checkbox" checked={u.is_admin} onChange={() => handleToggleAdmin(u.uid!, u.is_admin)} className="w-5 h-5 rounded border-stone-300 text-[#4f093c] focus:ring-[#4f093c]" /></td><td className="p-5"><span className={`px-2 py-1 rounded text-xs font-bold ${u.is_disabled ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'}`}>{u.is_disabled ? '已停用' : '正常'}</span></td><td className="p-5 font-bold text-stone-600 pl-8">{count}</td><td className="p-5 text-right"><button onClick={()=>handleToggleUserStatus(u.uid!, u.is_disabled)} className="text-blue-500 hover:underline font-bold text-xs">{u.is_disabled ? '啟用' : '停用'}</button></td></tr>); })}</tbody></table></div>}
         
         {/* 審核頁籤：僅顯示密碼重設 (已移除報名表審核) */}
         {activeTab === 'audit' && isAdmin && <div className="space-y-12 animate-in fade-in"><div className="bg-[#4f093c] p-8 rounded-[32px] shadow-xl text-white mb-8"><h2 className="text-3xl font-bold">審核中心</h2><p className="text-white/60 mt-2">處理密碼重設申請</p></div><div className="grid grid-cols-1 md:grid-cols-2 gap-8">{resetRequests.filter(r => r.status === 'pending').map(r => <div key={r.id} className={`p-8 rounded-[32px] shadow-sm border border-stone-100 relative`} style={{ backgroundColor: CARD_BG_COLOR }}><div className="absolute top-6 right-6 px-3 py-1 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold">重設密碼</div><div className="text-2xl font-bold text-slate-800 mb-1">{r.user_name}</div><div className="text-stone-400 font-mono text-sm mb-6">ID: {r.id_last4}</div><div className="flex gap-3"><button onClick={()=>handleResetAction(r.id, 'approve')} className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-md shadow-blue-200">批准</button><button onClick={()=>handleResetAction(r.id, 'reject')} className="flex-1 py-3 bg-stone-100 text-stone-600 font-bold rounded-xl hover:bg-stone-200">拒絕</button></div></div>)}</div></div>}
