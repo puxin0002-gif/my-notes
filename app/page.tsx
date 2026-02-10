@@ -5,17 +5,15 @@ import {
   Bell, FileText, History, Settings, Shield, LogOut, Plus, Trash2, Check, 
   Edit, User, MapPin, Tag, ListFilter, Save, Database, Clock, Car, Info, 
   Home, UserCheck, AlertCircle, Briefcase, Layers, 
-  CheckCircle2, CheckSquare, FileSpreadsheet, Megaphone, ClipboardCheck, UserCog, Share2, Lock, Eye, EyeOff, Users, ArrowRight, RefreshCw, AlertTriangle, Image as ImageIcon, Table as TableIcon, Calendar, Filter, UploadCloud, ChevronRight
+  CheckCircle2, CheckSquare, FileSpreadsheet, Megaphone, ClipboardCheck, UserCog, Share2, Lock, Eye, EyeOff, Users, ArrowRight, RefreshCw, AlertTriangle, Image as ImageIcon, Table as TableIcon, Calendar, Filter, UploadCloud, ChevronRight, Search
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v81.1 (新增使用者錯誤修復版)
+ * 系統版本：v83.12 (重複宣告修復版)
  * 修正說明：
- * 1. [Fix] 用戶管理：在新增使用者前，先檢查列表是否已存在該 Email，避免重複操作。
- * 2. [Fix] 用戶管理：將寫入 user_permissions 的操作由 insert 改為 upsert，解決 duplicate key 錯誤。
- * - 若使用者已存在 (Auth 建立成功但資料庫有舊資料)，upsert 會更新該紀錄的 UID，確保資料同步。
- * 3. [System] 保持所有 v81.0 的功能與介面。
+ * 1. [Fix] 移除重複宣告的 adminFilterActivities，解決 Build Error。
+ * 2. [System] 完整整合所有功能。
  */
 
 // --- 主色系設定 ---
@@ -170,6 +168,7 @@ const formatDateTime = (isoString: string | undefined | null): string => {
   try {
     const d = new Date(isoString);
     if (isNaN(d.getTime())) return '-';
+    // Format: YYYY/MM/DD HH:mm
     return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   } catch { return isoString || '-'; }
 };
@@ -241,7 +240,11 @@ export default function App() {
   const [todayDate, setTodayDate] = useState('');
   const [currentDateTime, setCurrentDateTime] = useState('');
   const [historyFilterLoc, setHistoryFilterLoc] = useState<string>('');
+  
+  // 資料頁籤的篩選器
   const [filterLoc, setFilterLoc] = useState<string>('');
+  const [filterAct, setFilterAct] = useState<string>('');
+  const [searchText, setSearchText] = useState<string>('');
   
   const [formData, setFormData] = useState(INITIAL_FORM_DATA);
 
@@ -406,6 +409,12 @@ export default function App() {
   const adminActivities = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity).map(h => h.activity as string))].sort(), [hierarchyData, mgmtSelectedLoc]);
   const adminOptions = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option).map(h => h.option as string))].sort(), [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct]);
   const adminContents = useMemo(() => hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option === mgmtSelectedOpt && h.content), [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
+
+  // 資料頁面篩選用：活動清單
+  const adminFilterActivities = useMemo(() => {
+      const filtered = notes.filter(n => !filterLoc || n.activity_location === filterLoc);
+      return [...new Set(filtered.map(n => n.activity_name).filter(Boolean))].sort();
+  }, [notes, filterLoc]);
 
   const filteredTransportOptions = useMemo(() => {
     const all = ["大車-精舍統一行程", "小車-自訂抵離寺", "自行前往-自訂抵離寺"];
@@ -726,60 +735,33 @@ export default function App() {
     if (!newUser.name || !newUser.id4 || !newUser.pwd) { alert('請輸入完整資料 (姓名、ID、密碼)'); return; }
     
     const email = encodeName(newUser.name + newUser.id4) + FAKE_DOMAIN;
-    
-    // 檢查列表是否已存在
-    if (allUsers.some(u => u.email === email)) {
-        alert('此使用者已存在於列表中');
-        return;
-    }
-
     const url = typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_SUPABASE_URL : '';
     const key = typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY : '';
 
     if (!url || !key) { alert('環境變數遺失'); return; }
 
     const tempClient = window.supabase.createClient(url, key, {
-        auth: {
-            persistSession: false, 
-            autoRefreshToken: false,
-            detectSessionInUrl: false
-        }
+        auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
     });
 
     try {
         const { data, error } = await tempClient.auth.signUp({
-            email,
-            password: newUser.pwd,
-            options: {
-                data: { user_name: newUser.name, id_last4: newUser.id4 }
-            }
+            email, password: newUser.pwd,
+            options: { data: { user_name: newUser.name, id_last4: newUser.id4 } }
         });
 
         if (error) throw error;
 
         if (data.user) {
             const { error: permError } = await supabaseClient.from('user_permissions').upsert([{
-                uid: data.user.id,
-                email: email, 
-                user_name: newUser.name,
-                id_last4: newUser.id4,
-                is_admin: false,
-                is_disabled: false,
-                created_at: new Date().toISOString()
+                uid: data.user.id, email: email, user_name: newUser.name, id_last4: newUser.id4,
+                is_admin: false, is_disabled: false, created_at: new Date().toISOString()
             }], { onConflict: 'email' });
 
-            if (permError) {
-                console.error("Permissions sync error:", permError);
-                alert(`Auth 建立成功，但權限表寫入失敗: ${permError.message}`);
-            } else {
-                alert('使用者建立成功！');
-                setNewUser({name:'', id4:'', pwd:''});
-                fetchData();
-            }
+            if (permError) { console.error("Permissions sync error:", permError); alert(`Auth 建立成功，但權限表寫入失敗: ${permError.message}`); } 
+            else { alert('使用者建立成功！'); setNewUser({name:'', id4:'', pwd:''}); fetchData(); }
         }
-    } catch (err: any) {
-        alert('建立失敗: ' + err.message);
-    }
+    } catch (err: any) { alert('建立失敗: ' + err.message); }
   };
 
   const handleUpdateActivityDate = async (field: 'activity_end_date' | 'activity_deadline', val: string) => {
@@ -898,8 +880,36 @@ export default function App() {
   };
 
   const filteredAdminNotes = useMemo(() => {
-    return notes.filter(n => (!filterLoc || n.activity_location === filterLoc));
-  }, [notes, filterLoc]);
+    return notes.filter(n => {
+        if (filterLoc && n.activity_location !== filterLoc) return false;
+        if (filterAct && n.activity_name !== filterAct) return false;
+        if (searchText) {
+            const search = searchText.toLowerCase();
+            return (
+                String(n.real_name || '').toLowerCase().includes(search) ||
+                String(n.dharma_name || '').toLowerCase().includes(search) ||
+                String(n.other_remarks || '').toLowerCase().includes(search)
+            );
+        }
+        return true;
+    }).sort((a, b) => {
+        const getVal = (note: Note) => {
+            if (note.is_deleted) return 2;
+            const { isEnded } = getRestrictionStatus(note.activity_location, note.activity_name, note.activity_option);
+            if (isEnded) return 1;
+            return 0;
+        };
+        const statusA = getVal(a);
+        const statusB = getVal(b);
+        if(statusA !== statusB) return statusA - statusB;
+
+        if (a.activity_location !== b.activity_location) return String(a.activity_location || '').localeCompare(String(b.activity_location || ''));
+        if (a.activity_name !== b.activity_name) return String(a.activity_name || '').localeCompare(String(b.activity_name || ''));
+        if (a.activity_option !== b.activity_option) return String(a.activity_option || '').localeCompare(String(b.activity_option || ''));
+        if (a.transportation !== b.transportation) return String(a.transportation || '').localeCompare(String(b.transportation || ''));
+        return String(a.identity || '').localeCompare(String(b.identity || ''));
+    });
+  }, [notes, filterLoc, filterAct, searchText, getRestrictionStatus]);
 
   const getCurrentDeadlineText = () => {
       const { endDate, deadline } = getHierarchyDates(formData.activity_location, formData.activity_name, formData.activity_option);
@@ -1077,7 +1087,7 @@ export default function App() {
                           </div>
                           
                           <div className={`mt-4 space-y-2 ${isInactive ? 'opacity-50 pointer-events-none' : ''}`}>
-                             <div className="text-sm font-bold text-[#4f093c] mb-2 pl-1">
+                             <div className="text-sm font-bold text-[#7A2E40] mb-2 pl-1">
                                  {n.activity_option}
                              </div>
                              
@@ -1127,12 +1137,12 @@ export default function App() {
 
         {/* ... 其他分頁 ... */}
         {activeTab === 'users' && isAdmin && <div className={`p-8 rounded-[32px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}><h4 className="font-bold text-[#4f093c] mb-6 flex items-center gap-2"><Plus className="w-5 h-5"/> 新增使用者</h4><div className="flex flex-col md:flex-row gap-4"><input className="flex-1 p-3 border rounded-xl text-sm" placeholder="姓名" value={newUser.name} onChange={e=>setNewUser({...newUser, name: e.target.value})} /><input className="w-32 p-3 border rounded-xl text-sm" placeholder="ID後4碼" value={newUser.id4} onChange={e=>setNewUser({...newUser, id4: e.target.value})} /><input className="w-40 p-3 border rounded-xl text-sm" placeholder="密碼" value={newUser.pwd} onChange={e=>setNewUser({...newUser, pwd: e.target.value})} /><button onClick={handleCreateUser} className="bg-blue-600 text-white px-6 rounded-xl font-bold text-sm hover:bg-blue-700 shadow-md shadow-blue-200">新增</button></div></div>}
-        {activeTab === 'users' && isAdmin && <div className={`rounded-[32px] shadow-sm border border-stone-100 overflow-hidden mt-8`} style={{ backgroundColor: CARD_BG_COLOR }}><table className="w-full text-sm text-left"><thead className="bg-[#4f093c] text-white font-bold border-b border-[#4f093c]"><tr><th className="p-5">姓名</th><th className="p-5">ID後4碼</th><th className="p-5">管理員</th><th className="p-5">狀態</th><th className="p-5">報名筆數</th><th className="p-5 text-right">操作</th></tr></thead><tbody className="divide-y divide-stone-100">{allUsers.map(u => { const count = notes.filter(n => n.user_id === u.uid).length; return (<tr key={u.id} className="hover:bg-stone-50/50"><td className="p-5 font-bold text-[#4f093c]">{u.user_name}</td><td className="p-5 font-mono text-stone-400">{u.id_last4}</td><td className="p-5"><input type="checkbox" checked={u.is_admin} onChange={() => handleToggleAdmin(u.uid!, u.is_admin)} className="w-5 h-5 rounded border-stone-300 text-[#4f093c] focus:ring-[#4f093c]" /></td><td className="p-5"><span className={`px-2 py-1 rounded text-xs font-bold ${u.is_disabled ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'}`}>{u.is_disabled ? '已停用' : '正常'}</span></td><td className="p-5 font-bold text-stone-600 pl-8">{count}</td><td className="p-5 text-right"><button onClick={()=>handleToggleUserStatus(u.uid!, u.is_disabled)} className="text-blue-500 hover:underline font-bold text-xs">{u.is_disabled ? '啟用' : '停用'}</button></td></tr>); })}</tbody></table></div>}
+        {activeTab === 'users' && isAdmin && <div className={`rounded-[32px] shadow-sm border border-stone-100 overflow-hidden mt-8`} style={{ backgroundColor: CARD_BG_COLOR }}><table className="w-full text-lg text-left"><thead className="bg-[#4f093c] text-white font-bold border-b border-[#4f093c]"><tr><th className="p-5">姓名</th><th className="p-5">ID後4碼</th><th className="p-5">管理員</th><th className="p-5">狀態</th><th className="p-5">報名筆數</th><th className="p-5 text-right">是否停用</th></tr></thead><tbody className="divide-y divide-stone-100">{allUsers.map(u => { const count = notes.filter(n => n.user_id === u.uid).length; return (<tr key={u.id} className="hover:bg-stone-50/50"><td className="p-5 font-bold text-[#4f093c]">{u.user_name}</td><td className="p-5 font-mono text-stone-400">{u.id_last4}</td><td className="p-5"><input type="checkbox" checked={u.is_admin} onChange={() => handleToggleAdmin(u.uid!, u.is_admin)} className="w-5 h-5 rounded border-stone-300 text-[#4f093c] focus:ring-[#4f093c]" /></td><td className="p-5"><span className={`px-2 py-1 rounded text-xs font-bold ${u.is_disabled ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'}`}>{u.is_disabled ? '已停用' : '正常'}</span></td><td className="p-5 font-bold text-stone-600 pl-8">{count}</td><td className="p-5 text-right"><input type="checkbox" checked={u.is_disabled} onChange={() => handleToggleUserStatus(u.uid!, u.is_disabled)} className="w-5 h-5 rounded border-stone-300 text-red-600 focus:ring-red-600" /></td></tr>); })}</tbody></table></div>}
         
         {/* 審核頁籤：僅顯示密碼重設 (已移除報名表審核) */}
         {activeTab === 'audit' && isAdmin && <div className="space-y-12 animate-in fade-in"><div className="bg-[#4f093c] p-8 rounded-[32px] shadow-xl text-white mb-8"><h2 className="text-3xl font-bold">審核中心</h2><p className="text-white/60 mt-2">處理密碼重設申請</p></div><div className="grid grid-cols-1 md:grid-cols-2 gap-8">{resetRequests.filter(r => r.status === 'pending').map(r => <div key={r.id} className={`p-8 rounded-[32px] shadow-sm border border-stone-100 relative`} style={{ backgroundColor: CARD_BG_COLOR }}><div className="absolute top-6 right-6 px-3 py-1 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold">重設密碼</div><div className="text-2xl font-bold text-slate-800 mb-1">{r.user_name}</div><div className="text-stone-400 font-mono text-sm mb-6">ID: {r.id_last4}</div><div className="flex gap-3"><button onClick={()=>handleResetAction(r.id, 'approve')} className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-md shadow-blue-200">批准</button><button onClick={()=>handleResetAction(r.id, 'reject')} className="flex-1 py-3 bg-stone-100 text-stone-600 font-bold rounded-xl hover:bg-stone-200">拒絕</button></div></div>)}</div></div>}
         
-        {activeTab === 'admin_data' && isAdmin && <div className={`p-8 rounded-[32px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}><div className="flex justify-between items-center mb-8"><h3 className="text-xl font-bold text-[#4f093c]">資料總覽</h3><div className="flex gap-3"><select className="p-2 bg-white border-none rounded-xl text-xs font-bold text-stone-600 outline-none" value={filterLoc} onChange={e=>setFilterLoc(e.target.value)}><option value="">所有地點</option>{locations.map(l => <option key={l} value={l}>{l}</option>)}</select><button onClick={handleExport} className="bg-emerald-600 text-white px-5 py-2 rounded-xl flex items-center gap-2 text-xs font-bold hover:bg-emerald-700 shadow-md shadow-emerald-200">匯出 CSV</button></div></div><div className="overflow-x-auto rounded-2xl border border-stone-100"><table className="w-full text-left text-sm"><thead><tr className="bg-stone-50 text-stone-600 font-bold border-b border-stone-200"><th>姓名</th><th>地點</th><th>活動</th><th>行程</th><th>備註</th></tr></thead><tbody>{filteredAdminNotes.map(n => <tr key={n.id} className="hover:bg-stone-50/50"><td className="p-4 font-bold text-slate-700">{n.real_name}</td><td className="p-4 text-stone-500">{n.activity_location}</td><td className="p-4 text-stone-500">{n.activity_name}</td><td className="p-4 text-stone-500">{n.activity_option}</td><td className="p-4 text-stone-400 text-xs">{n.memo || '-'}</td></tr>)}</tbody></table></div></div>}
+        {activeTab === 'admin_data' && isAdmin && <div className={`p-8 rounded-[32px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}><div className="flex justify-between items-center mb-8"><h3 className="text-xl font-bold text-[#4f093c]">資料總覽</h3><div className="flex gap-3"><select className="p-2 bg-white border-none rounded-xl text-xs font-bold text-stone-600 outline-none" value={filterLoc} onChange={e=>setFilterLoc(e.target.value)}><option value="">所有地點</option>{locations.map(l => <option key={l} value={l}>{l}</option>)}</select><select className="p-2 bg-white border-none rounded-xl text-xs font-bold text-stone-600 outline-none" value={filterAct} onChange={e=>setFilterAct(e.target.value)}><option value="">所有活動</option>{adminFilterActivities.map(a => <option key={a} value={a}>{a}</option>)}</select><div className="relative"><input type="text" placeholder="搜尋..." className="p-2 pl-8 border-none rounded-xl text-xs font-bold text-stone-600 outline-none" value={searchText} onChange={e=>setSearchText(e.target.value)} /><Search className="w-4 h-4 absolute left-2 top-1/2 -translate-y-1/2 text-stone-400"/></div><button onClick={handleExport} className="bg-emerald-600 text-white px-5 py-2 rounded-xl flex items-center gap-2 text-xs font-bold hover:bg-emerald-700 shadow-md shadow-emerald-200">匯出 CSV</button></div></div><div className="overflow-x-auto rounded-2xl border border-stone-100"><table className="w-full text-left text-lg whitespace-nowrap"><thead className="bg-[#4f093c] text-white font-bold border-b border-stone-200"><tr><th className="p-4">地點</th><th className="p-4">活動</th><th className="p-4">行程</th><th className="p-4">交通</th><th className="p-4">身分</th><th className="p-4">姓名</th><th className="p-4">法名</th><th className="p-4">屬性</th><th className="p-4">選項</th><th className="p-4">內容</th><th className="p-4">備註</th><th className="p-4">義工</th><th className="p-4">組別</th><th className="p-4">抵達</th><th className="p-4">離開</th><th className="p-4">發心始</th><th className="p-4">發心終</th><th className="p-4">安單</th><th className="p-4">其他</th><th className="p-4">填表</th><th className="p-4">用戶</th></tr></thead><tbody className="divide-y divide-stone-100">{filteredAdminNotes.map(n => { const status = n.registration_option === '新增' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'; return (<tr key={n.id} className="hover:bg-stone-50/50"><td className="p-4 font-bold text-slate-700">{n.activity_location}</td><td className="p-4 text-stone-500">{n.activity_name}</td><td className="p-4 text-stone-500">{n.activity_option}</td><td className="p-4 text-stone-500">{n.transportation}</td><td className="p-4">{n.identity}</td><td className="p-4 font-bold text-slate-700">{n.real_name}</td><td className="p-4">{n.dharma_name}</td><td className="p-4">{n.registrant_type}</td><td className="p-4"><span className={`px-2 py-1 rounded text-xs font-bold ${status}`}>{n.registration_option}</span></td><td className="p-4">{Array.isArray(n.selected_contents) ? n.selected_contents.join(', ') : ''}</td><td className="p-4">{n.other_remarks}</td><td className="p-4">{n.volunteer_type}</td><td className="p-4">{n.volunteer_group}</td><td className="p-4">{n.arrival_datetime?.replace('T', ' ')}</td><td className="p-4">{n.departure_datetime?.replace('T', ' ')}</td><td className="p-4">{n.start_date?.replace('T', ' ')}</td><td className="p-4">{n.end_date?.replace('T', ' ')}</td><td className="p-4">{n.accommodation_option} {n.stay_start_date}</td><td className="p-4">{n.memo}</td><td className="p-4">{n.created_at?.slice(0, 16).replace('T', ' ')}</td><td className="p-4">{n.sign_name}</td></tr>); })}</tbody></table></div></div>}
         {activeTab === 'admin_settings' && isAdmin && (
            <div className={`p-10 rounded-[40px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}>
               <h3 className="text-2xl font-bold text-[#4f093c] mb-2">1、報名行程設定</h3>
