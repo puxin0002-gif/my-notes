@@ -10,10 +10,10 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v85.5 (變數重複宣告最終修復版)
+ * 系統版本：v86.1 (變數重複宣告修復版)
  * 修正說明：
  * 1. [Fix] 移除重複宣告的 adminFilterActivities，解決 Build Error。
- * 2. [System] 完整整合 v85.3 所有功能。
+ * 2. [System] 完整整合 v86.0 所有功能 (資料總覽重構、欄位順序、狀態邏輯)。
  */
 
 // --- 主色系設定 ---
@@ -228,24 +228,24 @@ export default function App() {
   const [hierarchyData, setHierarchyData] = useState<ActivityHierarchy[]>([]);
   const [allUsers, setAllUsers] = useState<UserPermission[]>([]);
   const [resetRequests, setResetRequests] = useState<ResetRequest[]>([]);
-   
+  
   const [fieldConfigs, setFieldConfigs] = useState<FieldDefinition[]>(DEFAULT_FIELD_DEFINITIONS);
 
   const [username, setUsername] = useState<string>('');
   const [idLast4, setIdLast4] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [authMode, setAuthMode] = useState<'login'|'signup'|'forgot'>('login');
-   
+  
   // 日期狀態
   const [todayDate, setTodayDate] = useState('');
   const [currentDateTime, setCurrentDateTime] = useState('');
   const [historyFilterLoc, setHistoryFilterLoc] = useState<string>('');
-   
+  
   // 資料頁籤的篩選器
   const [filterLoc, setFilterLoc] = useState<string>('');
   const [filterAct, setFilterAct] = useState<string>('');
   const [searchText, setSearchText] = useState<string>('');
-   
+  
   const [formData, setFormData] = useState(INITIAL_FORM_DATA);
 
   // 管理介面狀態
@@ -254,11 +254,11 @@ export default function App() {
   const [newActivity, setNewActivity] = useState<string>('');
   const [newOption, setNewOption] = useState<string>('');
   const [newContent, setNewContent] = useState<string>('');
-   
+  
   const [mgmtSelectedLoc, setMgmtSelectedLoc] = useState<string>('');
   const [mgmtSelectedAct, setMgmtSelectedAct] = useState<string>('');
   const [mgmtSelectedOpt, setMgmtSelectedOpt] = useState<string>('');
-   
+  
   const [newUser, setNewUser] = useState({ name: '', id4: '', pwd: '' });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -330,7 +330,7 @@ export default function App() {
       fetchData();
       supabaseClient.from('user_permissions').select('is_admin').eq('uid', user.id).maybeSingle()
       .then(({ data }: any) => { if (data) setIsAdmin(data.is_admin === true); });
-       
+      
       const metaName = user.user_metadata?.user_name;
       const metaId4 = user.user_metadata?.id_last4;
       if (metaName && metaId4) {
@@ -442,7 +442,7 @@ export default function App() {
           }));
       }
   }, [formData.arrival_datetime]);
-   
+  
   useEffect(() => { 
       if (formData.departure_datetime) {
           const fullDateTime = formData.departure_datetime;
@@ -694,7 +694,7 @@ export default function App() {
        fetchData();
     }
   };
-   
+  
   // v84.0 CSV Export Fix
   const handleExport = () => {
     // 依據新表格順序定義 CSV 表頭與資料
@@ -907,7 +907,7 @@ export default function App() {
          return <option key={o} value={o} disabled={isDisabled}>{o} {label}</option>;
       });
   };
-   
+  
   const getSubmitButtonStatus = () => {
       const { isEnded, isDeadlined } = getRestrictionStatus(formData.activity_location, formData.activity_name, formData.activity_option);
       if (isEnded) return { disabled: true, text: '已圓滿 (無法報名)' };
@@ -974,19 +974,19 @@ export default function App() {
              <h2 className="text-xl font-bold text-[#4f093c] mb-2">學員登記系統</h2>
              <p className="text-sm text-slate-400 font-bold">{authMode === 'login' ? '會員登入' : authMode === 'signup' ? '註冊新帳號' : '密碼重設申請'}</p>
           </div>
-           
+          
           <div className="space-y-4">
-              <div><label className="text-sm font-bold text-[#4f093c] ml-1">姓名</label><input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20" value={username} onChange={e=>setUsername(e.target.value)} /></div>
-              <div><label className="text-sm font-bold text-[#4f093c] ml-1">ID後四碼</label><input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20" placeholder="如：1234" maxLength={4} value={idLast4} onChange={e=>setIdLast4(e.target.value)} /></div>
-              {authMode !== 'forgot' && (<div><label className="text-sm font-bold text-[#4f093c] ml-1">密碼</label><input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20" type="password" value={password} onChange={e=>setPassword(e.target.value)} /></div>)}
+             <div><label className="text-sm font-bold text-[#4f093c] ml-1">姓名</label><input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20" value={username} onChange={e=>setUsername(e.target.value)} /></div>
+             <div><label className="text-sm font-bold text-[#4f093c] ml-1">ID後四碼</label><input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20" placeholder="如：1234" maxLength={4} value={idLast4} onChange={e=>setIdLast4(e.target.value)} /></div>
+             {authMode !== 'forgot' && (<div><label className="text-sm font-bold text-[#4f093c] ml-1">密碼</label><input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20" type="password" value={password} onChange={e=>setPassword(e.target.value)} /></div>)}
           </div>
 
           <button onClick={handleAuthAction} className="w-full bg-[#4f093c] hover:bg-[#3d072e] text-white py-3 rounded-xl font-bold shadow-md transition-all active:scale-95 flex justify-center items-center gap-2">
-              {authMode === 'login' ? '登入系統' : authMode === 'signup' ? '立即註冊' : '送出申請'} <ArrowRight className="w-4 h-4" />
+             {authMode === 'login' ? '登入系統' : authMode === 'signup' ? '立即註冊' : '送出申請'} <ArrowRight className="w-4 h-4" />
           </button>
-           
+          
           <div className="flex justify-between text-xs text-slate-400 font-bold px-1 pt-2 border-t border-slate-100">
-              {authMode === 'login' ? (<><button onClick={()=>setAuthMode('signup')} className="hover:text-[#4f093c]">沒有帳號？註冊</button><button onClick={()=>setAuthMode('forgot')} className="hover:text-[#4f093c]">忘記密碼？</button></>) : (<button onClick={()=>setAuthMode('login')} className="w-full text-center hover:text-[#4f093c]">返回登入</button>)}
+             {authMode === 'login' ? (<><button onClick={()=>setAuthMode('signup')} className="hover:text-[#4f093c]">沒有帳號？註冊</button><button onClick={()=>setAuthMode('forgot')} className="hover:text-[#4f093c]">忘記密碼？</button></>) : (<button onClick={()=>setAuthMode('login')} className="w-full text-center hover:text-[#4f093c]">返回登入</button>)}
           </div>
         </div>
       </div>
@@ -1015,163 +1015,163 @@ export default function App() {
       <div className="max-w-6xl mx-auto p-6 md:p-10">
         {activeTab === 'bulletin' && (
           <div className="space-y-8 animate-in fade-in">
-              {isAdmin && (
-                <div className={`p-6 rounded-3xl shadow-sm border border-stone-100 mb-8`} style={{ backgroundColor: CARD_BG_COLOR }}>
-                   <h4 className="font-bold text-[#4f093c] mb-4 flex items-center gap-2 text-3xl"><Megaphone className="w-8 h-8"/> 公告發布</h4>
-                   <div className="flex gap-3 items-start">
-                      <textarea className="flex-1 p-3 border border-stone-200 rounded-xl text-lg bg-white outline-none focus:ring-2 focus:ring-[#4f093c]/20" rows={2} placeholder="輸入公告內容..." value={newBulletin} onChange={e=>setNewBulletin(e.target.value)} />
-                      <div className="flex flex-col gap-2">
-                         <input type="file" ref={fileInputRef} accept="image/jpeg,image/png" className="hidden" onChange={handleFileChange} />
-                         <button onClick={handleSelectImage} className="bg-stone-100 text-stone-600 px-4 py-2 rounded-xl font-bold text-sm hover:bg-stone-200 flex items-center justify-center gap-1"><ImageIcon className="w-4 h-4"/> 圖片</button>
-                         <button onClick={handleAddBulletin} className="bg-[#4f093c] text-white px-6 py-2 rounded-xl font-bold text-sm hover:bg-[#3d072e] flex items-center justify-center gap-1 shadow-md shadow-[#4f093c]/20">發布</button>
-                      </div>
-                   </div>
-                </div>
-              )}
-              {bulletins.map(b => (
+             {isAdmin && (
+               <div className={`p-6 rounded-3xl shadow-sm border border-stone-100 mb-8`} style={{ backgroundColor: CARD_BG_COLOR }}>
+                  <h4 className="font-bold text-[#4f093c] mb-4 flex items-center gap-2 text-3xl"><Megaphone className="w-8 h-8"/> 公告發布</h4>
+                  <div className="flex gap-3 items-start">
+                     <textarea className="flex-1 p-3 border border-stone-200 rounded-xl text-lg bg-white outline-none focus:ring-2 focus:ring-[#4f093c]/20" rows={2} placeholder="輸入公告內容..." value={newBulletin} onChange={e=>setNewBulletin(e.target.value)} />
+                     <div className="flex flex-col gap-2">
+                        <input type="file" ref={fileInputRef} accept="image/jpeg,image/png" className="hidden" onChange={handleFileChange} />
+                        <button onClick={handleSelectImage} className="bg-stone-100 text-stone-600 px-4 py-2 rounded-xl font-bold text-sm hover:bg-stone-200 flex items-center justify-center gap-1"><ImageIcon className="w-4 h-4"/> 圖片</button>
+                        <button onClick={handleAddBulletin} className="bg-[#4f093c] text-white px-6 py-2 rounded-xl font-bold text-sm hover:bg-[#3d072e] flex items-center justify-center gap-1 shadow-md shadow-[#4f093c]/20">發布</button>
+                     </div>
+                  </div>
+               </div>
+             )}
+             {bulletins.map(b => (
                 <div key={b.id} className={`p-8 rounded-[32px] shadow-sm border border-stone-100 hover:shadow-md transition-shadow relative overflow-hidden group`} style={{ backgroundColor: CARD_BG_COLOR }}>
                    <div className="absolute top-0 left-0 w-2 h-full bg-[#4f093c]"></div>
                    <div className="text-2xl font-bold text-slate-800 leading-relaxed pl-4">{renderBulletinContent(b.content)}</div>
                    <div className="mt-6 text-sm text-stone-400 font-mono flex items-center gap-2 pl-4"><Clock className="w-4 h-4"/> {formatDateTime(b.created_at)}</div>
                    {isAdmin && <button onClick={()=>handleDeleteBulletin(b.id)} className="absolute top-6 right-6 text-stone-300 hover:text-red-400 p-2 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 className="w-5 h-5"/></button>}
                 </div>
-              ))}
+             ))}
           </div>
         )}
 
         {activeTab === 'form' && (
           <div className={`p-8 md:p-12 rounded-[40px] shadow-lg border border-stone-100 animate-in slide-in-from-bottom-4`} style={{ backgroundColor: CARD_BG_COLOR }}>
-              
-              {submitStatus.disabled && (
-                  <div className={`mb-8 p-4 border-l-4 font-bold rounded-r-xl flex items-center gap-3 ${submitStatus.text.includes('已圓滿') ? 'bg-stone-100 border-stone-500 text-stone-600' : 'bg-red-50 border-red-500 text-red-700'}`}>
-                      <AlertTriangle className="w-5 h-5"/> {submitStatus.text}
-                  </div>
-              )}
+             
+             {submitStatus.disabled && (
+                 <div className={`mb-8 p-4 border-l-4 font-bold rounded-r-xl flex items-center gap-3 ${submitStatus.text.includes('已圓滿') ? 'bg-stone-100 border-stone-500 text-stone-600' : 'bg-red-50 border-red-500 text-red-700'}`}>
+                     <AlertTriangle className="w-5 h-5"/> {submitStatus.text}
+                 </div>
+             )}
 
-              <div className="space-y-8">
-                  <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
-                      <div className="md:col-span-3 space-y-1"><label className="text-sm font-bold text-[#4f093c] ml-1">姓名*</label><input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.real_name} onChange={e=>setFormData({...formData, real_name: e.target.value})} /></div>
-                      <div className="md:col-span-2 space-y-1"><label className="text-sm font-bold text-[#4f093c] ml-1">法名</label><input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.dharma_name} onChange={e=>setFormData({...formData, dharma_name: e.target.value})} /></div>
-                      <div className="md:col-span-3 space-y-1"><label className="text-sm font-bold text-[#4f093c] ml-1">報名選項*</label><select className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.registration_option} onChange={e=>setFormData({...formData, registration_option: e.target.value})}><option value="新增">新增</option><option value="異動">異動</option></select></div>
-                      <div className="md:col-span-4 space-y-1"><label className="text-sm font-bold text-[#4f093c] ml-1">屬性*</label><select className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.registrant_type} onChange={e=>setFormData({...formData, registrant_type: e.target.value})}><option value="目前上禪修班學員">目前上禪修班學員</option><option value="曾經上禪修班學員">曾經上禪修班學員</option><option value="學員家人">學員家人</option></select></div>
-                  </div>
-                  
-                  {formData.registrant_type === '學員家人' && <div className="p-3 bg-red-50 border border-red-200 text-red-600 text-sm font-bold rounded-xl flex items-center gap-2"><Info className="w-4 h-4"/> 請至知客室填寫親眷表</div>}
-                  
-                  {getCurrentDeadlineText() && <div className="text-xs text-red-500 font-mono font-bold text-left mb-[-10px]">{getCurrentDeadlineText()}</div>}
+             <div className="space-y-8">
+                 <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+                     <div className="md:col-span-3 space-y-1"><label className="text-sm font-bold text-[#4f093c] ml-1">姓名*</label><input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.real_name} onChange={e=>setFormData({...formData, real_name: e.target.value})} /></div>
+                     <div className="md:col-span-2 space-y-1"><label className="text-sm font-bold text-[#4f093c] ml-1">法名</label><input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.dharma_name} onChange={e=>setFormData({...formData, dharma_name: e.target.value})} /></div>
+                     <div className="md:col-span-3 space-y-1"><label className="text-sm font-bold text-[#4f093c] ml-1">報名選項*</label><select className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.registration_option} onChange={e=>setFormData({...formData, registration_option: e.target.value})}><option value="新增">新增</option><option value="異動">異動</option></select></div>
+                     <div className="md:col-span-4 space-y-1"><label className="text-sm font-bold text-[#4f093c] ml-1">屬性*</label><select className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.registrant_type} onChange={e=>setFormData({...formData, registrant_type: e.target.value})}><option value="目前上禪修班學員">目前上禪修班學員</option><option value="曾經上禪修班學員">曾經上禪修班學員</option><option value="學員家人">學員家人</option></select></div>
+                 </div>
+                 
+                 {formData.registrant_type === '學員家人' && <div className="p-3 bg-red-50 border border-red-200 text-red-600 text-sm font-bold rounded-xl flex items-center gap-2"><Info className="w-4 h-4"/> 請至知客室填寫親眷表</div>}
+                 
+                 {getCurrentDeadlineText() && <div className="text-xs text-red-500 font-mono font-bold text-left mb-[-10px]">{getCurrentDeadlineText()}</div>}
 
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                         <div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">1. 地點*</label><select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.activity_location} onChange={e=>setFormData({...formData, activity_location: e.target.value, activity_name: '', activity_option: '', selected_contents: []})}><option value="">請選擇地點</option>{locations.map(l => <option key={l} value={l}>{l}</option>)}</select></div>
-                         <div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">2. 活動*</label><select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" disabled={!formData.activity_location} value={formData.activity_name} onChange={e=>setFormData({...formData, activity_name: e.target.value, activity_option: '', selected_contents: []})}><option value="">請選擇活動</option>{renderActivityOptions()}</select></div>
-                         <div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">3. 行程</label><select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" disabled={!formData.activity_name} value={formData.activity_option} onChange={e=>setFormData({...formData, activity_option: e.target.value, selected_contents: []})}><option value="">請選擇行程</option>{renderOptionOptions()}</select></div>
-                  </div>
-                  
-                  {formData.activity_option.includes('自訂') && <div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">自訂備註*</label><textarea rows={2} className="w-full p-3 text-lg border border-orange-200 rounded-xl focus:ring-2 focus:ring-orange-200 bg-white" value={formData.other_remarks} onChange={e=>setFormData({...formData, other_remarks: e.target.value})} /></div>}
+                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">1. 地點*</label><select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.activity_location} onChange={e=>setFormData({...formData, activity_location: e.target.value, activity_name: '', activity_option: '', selected_contents: []})}><option value="">請選擇地點</option>{locations.map(l => <option key={l} value={l}>{l}</option>)}</select></div>
+                        <div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">2. 活動*</label><select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" disabled={!formData.activity_location} value={formData.activity_name} onChange={e=>setFormData({...formData, activity_name: e.target.value, activity_option: '', selected_contents: []})}><option value="">請選擇活動</option>{renderActivityOptions()}</select></div>
+                        <div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">3. 行程</label><select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" disabled={!formData.activity_name} value={formData.activity_option} onChange={e=>setFormData({...formData, activity_option: e.target.value, selected_contents: []})}><option value="">請選擇行程</option>{renderOptionOptions()}</select></div>
+                 </div>
+                 
+                 {formData.activity_option.includes('自訂') && <div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">自訂備註*</label><textarea rows={2} className="w-full p-3 text-lg border border-orange-200 rounded-xl focus:ring-2 focus:ring-orange-200 bg-white" value={formData.other_remarks} onChange={e=>setFormData({...formData, other_remarks: e.target.value})} /></div>}
 
-                  {availableContents.length > 0 && <div className="p-4 bg-white/50 rounded-xl border border-stone-200"><div className="flex flex-wrap gap-2">{availableContents.map(c => <button key={c} type="button" onClick={() => setFormData(p => ({ ...p, selected_contents: p.selected_contents.includes(c) ? p.selected_contents.filter(i => i !== c) : [...p.selected_contents, c] }))} className={`px-4 py-1 rounded-lg font-bold text-sm border transition-all ${formData.selected_contents.includes(c) ? 'bg-[#4f093c] text-white border-[#4f093c]' : 'bg-white text-stone-600 border-stone-300 hover:border-[#4f093c]'}`}>{c}</button>)}</div></div>}
+                 {availableContents.length > 0 && <div className="p-4 bg-white/50 rounded-xl border border-stone-200"><div className="flex flex-wrap gap-2">{availableContents.map(c => <button key={c} type="button" onClick={() => setFormData(p => ({ ...p, selected_contents: p.selected_contents.includes(c) ? p.selected_contents.filter(i => i !== c) : [...p.selected_contents, c] }))} className={`px-4 py-1 rounded-lg font-bold text-sm border transition-all ${formData.selected_contents.includes(c) ? 'bg-[#4f093c] text-white border-[#4f093c]' : 'bg-white text-stone-600 border-stone-300 hover:border-[#4f093c]'}`}>{c}</button>)}</div></div>}
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                         <div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">身分*</label><select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl bg-white" value={formData.identity} onChange={e=>setFormData({...formData, identity: e.target.value})}><option value="">請選擇</option><option value="參加法會">參加法會</option><option value="發心義工">發心義工</option></select></div>
-                         {fieldVisibility.transportation && <div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">交通*</label><select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl bg-white" value={formData.transportation} onChange={e=>setFormData({...formData, transportation: e.target.value})}><option value="">請選擇</option>{filteredTransportOptions.map(o => <option key={o} value={o}>{o}</option>)}</select></div>}
-                  </div>
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">身分*</label><select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl bg-white" value={formData.identity} onChange={e=>setFormData({...formData, identity: e.target.value})}><option value="">請選擇</option><option value="參加法會">參加法會</option><option value="發心義工">發心義工</option></select></div>
+                        {fieldVisibility.transportation && <div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">交通*</label><select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl bg-white" value={formData.transportation} onChange={e=>setFormData({...formData, transportation: e.target.value})}><option value="">請選擇</option>{filteredTransportOptions.map(o => <option key={o} value={o}>{o}</option>)}</select></div>}
+                 </div>
 
-                  {fieldVisibility.arrivalDeparture && <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-4 bg-white/50 rounded-2xl border border-blue-100"><div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">抵寺時間*</label><input type="datetime-local" min={currentDateTime} className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white" value={formData.arrival_datetime || ''} onChange={e=>setFormData({...formData, arrival_datetime: e.target.value})} /></div><div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">離寺時間*</label><input type="datetime-local" min={formData.arrival_datetime || currentDateTime} className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white" value={formData.departure_datetime || ''} onChange={e=>setFormData({...formData, departure_datetime: e.target.value})} /></div></div>}
-                  
-                  {fieldVisibility.volunteerGroup && <div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">義工組別*</label><input className="w-full p-3 text-lg border border-stone-200 rounded-xl bg-white" value={formData.volunteer_group} onChange={e=>setFormData({...formData, volunteer_group: e.target.value})} /></div>}
-                  
-                  {fieldVisibility.volunteerType && <div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">義工選項*</label><select className="w-full p-3 text-lg border border-stone-200 rounded-xl bg-white" value={formData.volunteer_type} onChange={e=>setFormData({...formData, volunteer_type: e.target.value})}><option value="">請選擇</option><option value="一般義工-由精舍安排組別">一般義工-由精舍安排組別</option><option value="長期義工-已於平台報名">長期義工-已於平台報名</option><option value="佛巡-已於平台報名">佛巡-已於平台報名</option></select></div>}
-                  
-                  {fieldVisibility.volunteerDates && <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-white/50 rounded-2xl"><div className="space-y-1"><label className="text-xs font-bold text-[#4f093c]">發心開始</label><input type="datetime-local" min={currentDateTime} className="w-full p-2 text-sm border rounded-lg bg-white" value={formData.start_date || ''} onChange={e=>setFormData({...formData, start_date: e.target.value})} /></div><div className="space-y-1"><label className="text-xs font-bold text-[#4f093c]">發心結束</label><input type="datetime-local" min={formData.start_date || currentDateTime} className="w-full p-2 text-sm border rounded-lg bg-white" value={formData.end_date || ''} onChange={e=>setFormData({...formData, end_date: e.target.value})} /></div></div>}
+                 {fieldVisibility.arrivalDeparture && <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-4 bg-white/50 rounded-2xl border border-blue-100"><div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">抵寺時間*</label><input type="datetime-local" min={currentDateTime} className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white" value={formData.arrival_datetime || ''} onChange={e=>setFormData({...formData, arrival_datetime: e.target.value})} /></div><div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">離寺時間*</label><input type="datetime-local" min={formData.arrival_datetime || currentDateTime} className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white" value={formData.departure_datetime || ''} onChange={e=>setFormData({...formData, departure_datetime: e.target.value})} /></div></div>}
+                 
+                 {fieldVisibility.volunteerGroup && <div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">義工組別*</label><input className="w-full p-3 text-lg border border-stone-200 rounded-xl bg-white" value={formData.volunteer_group} onChange={e=>setFormData({...formData, volunteer_group: e.target.value})} /></div>}
+                 
+                 {fieldVisibility.volunteerType && <div className="space-y-2"><label className="text-sm font-bold text-[#4f093c] ml-1">義工選項*</label><select className="w-full p-3 text-lg border border-stone-200 rounded-xl bg-white" value={formData.volunteer_type} onChange={e=>setFormData({...formData, volunteer_type: e.target.value})}><option value="">請選擇</option><option value="一般義工-由精舍安排組別">一般義工-由精舍安排組別</option><option value="長期義工-已於平台報名">長期義工-已於平台報名</option><option value="佛巡-已於平台報名">佛巡-已於平台報名</option></select></div>}
+                 
+                 {fieldVisibility.volunteerDates && <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-white/50 rounded-2xl"><div className="space-y-1"><label className="text-xs font-bold text-[#4f093c]">發心開始</label><input type="datetime-local" min={currentDateTime} className="w-full p-2 text-sm border rounded-lg bg-white" value={formData.start_date || ''} onChange={e=>setFormData({...formData, start_date: e.target.value})} /></div><div className="space-y-1"><label className="text-xs font-bold text-[#4f093c]">發心結束</label><input type="datetime-local" min={formData.start_date || currentDateTime} className="w-full p-2 text-sm border rounded-lg bg-white" value={formData.end_date || ''} onChange={e=>setFormData({...formData, end_date: e.target.value})} /></div></div>}
 
-                  {fieldVisibility.accommodation && (
-                     <div className="p-4 bg-white/50 rounded-xl border border-stone-200 space-y-4">
-                         <div className="space-y-2"><label className="text-sm font-bold text-[#4f093c]">安單選項</label><select className="w-full p-3 text-lg border rounded-xl bg-white" value={formData.accommodation_option} onChange={e=>setFormData({...formData, accommodation_option: e.target.value})}><option value="不安單">不安單</option><option value="須安單">須安單</option></select></div>
-                         {fieldVisibility.accommodationDates && <div className="grid grid-cols-2 gap-4"><input type="date" min={todayDate} className="w-full p-2 border rounded-lg bg-white" value={formData.stay_start_date || ''} onChange={e=>setFormData({...formData, stay_start_date: e.target.value})} /><input type="date" min={formData.stay_start_date || todayDate} className="w-full p-2 border rounded-lg bg-white" value={formData.stay_end_date || ''} onChange={e=>setFormData({...formData, stay_end_date: e.target.value})} /></div>}
-                     </div>
-                  )}
-                  
-                  <div className="pt-4 border-t border-stone-100">
-                     <label className="text-sm font-bold text-[#4f093c] ml-1 mb-2 block">其他備註</label>
-                     <textarea rows={2} className="w-full p-3 text-lg border border-stone-200 rounded-xl bg-white" placeholder="其他備註..." value={formData.memo} onChange={e=>setFormData({...formData, memo: e.target.value})} />
-                  </div>
+                 {fieldVisibility.accommodation && (
+                    <div className="p-4 bg-white/50 rounded-xl border border-stone-200 space-y-4">
+                        <div className="space-y-2"><label className="text-sm font-bold text-[#4f093c]">安單選項</label><select className="w-full p-3 text-lg border rounded-xl bg-white" value={formData.accommodation_option} onChange={e=>setFormData({...formData, accommodation_option: e.target.value})}><option value="不安單">不安單</option><option value="須安單">須安單</option></select></div>
+                        {fieldVisibility.accommodationDates && <div className="grid grid-cols-2 gap-4"><input type="date" min={todayDate} className="w-full p-2 border rounded-lg bg-white" value={formData.stay_start_date || ''} onChange={e=>setFormData({...formData, stay_start_date: e.target.value})} /><input type="date" min={formData.stay_start_date || todayDate} className="w-full p-2 border rounded-lg bg-white" value={formData.stay_end_date || ''} onChange={e=>setFormData({...formData, stay_end_date: e.target.value})} /></div>}
+                    </div>
+                 )}
+                 
+                 <div className="pt-4 border-t border-stone-100">
+                    <label className="text-sm font-bold text-[#4f093c] ml-1 mb-2 block">其他備註</label>
+                    <textarea rows={2} className="w-full p-3 text-lg border border-stone-200 rounded-xl bg-white" placeholder="其他備註..." value={formData.memo} onChange={e=>setFormData({...formData, memo: e.target.value})} />
+                 </div>
 
-                  <button onClick={handleSubmitNote} disabled={loading || submitStatus.disabled} className={`w-full py-4 rounded-2xl font-bold text-xl shadow-lg transition-transform active:scale-[0.99] ${submitStatus.disabled ? 'bg-stone-300 text-stone-500 cursor-not-allowed' : 'bg-[#4f093c] text-white hover:bg-[#3d072e] shadow-[#4f093c]/20'}`}>{submitStatus.text}</button>
-              </div>
+                 <button onClick={handleSubmitNote} disabled={loading || submitStatus.disabled} className={`w-full py-4 rounded-2xl font-bold text-xl shadow-lg transition-transform active:scale-[0.99] ${submitStatus.disabled ? 'bg-stone-300 text-stone-500 cursor-not-allowed' : 'bg-[#4f093c] text-white hover:bg-[#3d072e] shadow-[#4f093c]/20'}`}>{submitStatus.text}</button>
+             </div>
           </div>
         )}
 
         {/* 紀錄頁籤 */}
         {activeTab === 'history' && (
           <div className="space-y-8">
-              <div className={`flex justify-between items-center px-6 py-4 rounded-2xl shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}>
-                  <h3 className="font-bold text-[#4f093c] text-lg flex items-center gap-2"><History className="w-5 h-5"/> 歷史紀錄</h3>
-                  <div className="flex items-center gap-2">
-                     <Filter className="w-4 h-4 text-stone-400"/>
-                     <select className="p-2 pl-4 pr-8 border-none bg-white/50 rounded-xl text-base font-bold text-stone-600 outline-none cursor-pointer hover:bg-white transition-colors" value={historyFilterLoc} onChange={e=>setHistoryFilterLoc(e.target.value)}>
-                        <option value="">全部地點</option>
-                        {locations.map(l => <option key={l} value={l}>{l}</option>)}
-                     </select>
-                  </div>
-              </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {sortedHistoryNotes.map(n => {
-                  const status = getCardStatus(n);
-                  const isInactive = status.isInactive;
-                  return (
-                    <div key={n.id} className={`rounded-[24px] shadow-sm border border-stone-100 overflow-hidden hover:shadow-md transition-all group`} style={{ backgroundColor: CARD_BG_COLOR }}>
-                       <div className="relative p-6 pb-0">
-                           <div className="flex items-center gap-2 mb-3">
-                               <span className={`px-3 py-1 rounded-lg text-xs font-bold text-white ${status.color}`}>{status.text}</span>
-                               <h3 className="text-xl font-bold text-slate-800">{n.activity_location} <span className="text-stone-300 mx-1">|</span> {n.activity_name}</h3>
-                           </div>
-                           
-                           <div className={`mt-4 space-y-2 ${isInactive ? 'opacity-50 pointer-events-none' : ''}`}>
-                              <div className="text-sm font-bold text-[#7A2E40] mb-2 pl-1">
-                                  {n.activity_option}
-                              </div>
-                              
-                              <div className="space-y-1 text-sm text-stone-600">
-                                 <p><span className="font-bold text-stone-400">姓名：</span> {n.real_name} {n.dharma_name ? `(${n.dharma_name})` : ''} <span className="text-xs bg-white px-2 py-0.5 rounded text-stone-500">{n.registrant_type}</span></p>
-                                 {n.other_remarks && <p><span className="font-bold text-orange-500">自訂備註：</span> {n.other_remarks}</p>}
-                                 {n.selected_contents && Array.isArray(n.selected_contents) && n.selected_contents.length > 0 && <p><span className="font-bold text-stone-400">內容：</span> {n.selected_contents.join('、')}</p>}
-                                 
-                                 {n.transportation && <p><span className="font-bold text-stone-400">交通：</span> {n.transportation}</p>}
-                                 {(n.arrival_datetime || n.departure_datetime) && (
-                                     <div className="text-sm bg-blue-50/50 p-2 rounded-lg text-blue-800 font-mono">
-                                         <div>抵：{n.arrival_datetime ? formatDateTime(n.arrival_datetime) : '-'}</div>
-                                         <div>離：{n.departure_datetime ? formatDateTime(n.departure_datetime) : '-'}</div>
-                                     </div>
-                                 )}
+             <div className={`flex justify-between items-center px-6 py-4 rounded-2xl shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}>
+                 <h3 className="font-bold text-[#4f093c] text-lg flex items-center gap-2"><History className="w-5 h-5"/> 歷史紀錄</h3>
+                 <div className="flex items-center gap-2">
+                    <Filter className="w-4 h-4 text-stone-400"/>
+                    <select className="p-2 pl-4 pr-8 border-none bg-white/50 rounded-xl text-base font-bold text-stone-600 outline-none cursor-pointer hover:bg-white transition-colors" value={historyFilterLoc} onChange={e=>setHistoryFilterLoc(e.target.value)}>
+                       <option value="">全部地點</option>
+                       {locations.map(l => <option key={l} value={l}>{l}</option>)}
+                    </select>
+                 </div>
+             </div>
+             
+             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+               {sortedHistoryNotes.map(n => {
+                 const status = getCardStatus(n);
+                 const isInactive = status.isInactive;
+                 return (
+                   <div key={n.id} className={`rounded-[24px] shadow-sm border border-stone-100 overflow-hidden hover:shadow-md transition-all group`} style={{ backgroundColor: CARD_BG_COLOR }}>
+                      <div className="relative p-6 pb-0">
+                          <div className="flex items-center gap-2 mb-3">
+                              <span className={`px-3 py-1 rounded-lg text-xs font-bold text-white ${status.color}`}>{status.text}</span>
+                              <h3 className="text-xl font-bold text-slate-800">{n.activity_location} <span className="text-stone-300 mx-1">|</span> {n.activity_name}</h3>
+                          </div>
+                          
+                          <div className={`mt-4 space-y-2 ${isInactive ? 'opacity-50 pointer-events-none' : ''}`}>
+                             <div className="text-sm font-bold text-[#7A2E40] mb-2 pl-1">
+                                 {n.activity_option}
+                             </div>
+                             
+                             <div className="space-y-1 text-sm text-stone-600">
+                                <p><span className="font-bold text-stone-400">姓名：</span> {n.real_name} {n.dharma_name ? `(${n.dharma_name})` : ''} <span className="text-xs bg-white px-2 py-0.5 rounded text-stone-500">{n.registrant_type}</span></p>
+                                {n.other_remarks && <p><span className="font-bold text-orange-500">自訂備註：</span> {n.other_remarks}</p>}
+                                {n.selected_contents && Array.isArray(n.selected_contents) && n.selected_contents.length > 0 && <p><span className="font-bold text-stone-400">內容：</span> {n.selected_contents.join('、')}</p>}
+                                
+                                {n.transportation && <p><span className="font-bold text-stone-400">交通：</span> {n.transportation}</p>}
+                                {(n.arrival_datetime || n.departure_datetime) && (
+                                    <div className="text-sm bg-blue-50/50 p-2 rounded-lg text-blue-800 font-mono">
+                                        <div>抵：{n.arrival_datetime ? formatDateTime(n.arrival_datetime) : '-'}</div>
+                                        <div>離：{n.departure_datetime ? formatDateTime(n.departure_datetime) : '-'}</div>
+                                    </div>
+                                )}
 
-                                 <p><span className="font-bold text-stone-400">身分：</span> {n.identity} {n.volunteer_type ? ` - ${n.volunteer_type}` : ''}</p>
-                                 {n.volunteer_group && <p><span className="font-bold text-[#4f093c]">組別：</span> {n.volunteer_group}</p>}
+                                <p><span className="font-bold text-stone-400">身分：</span> {n.identity} {n.volunteer_type ? ` - ${n.volunteer_type}` : ''}</p>
+                                {n.volunteer_group && <p><span className="font-bold text-[#4f093c]">組別：</span> {n.volunteer_group}</p>}
 
-                                 {(n.start_date || n.end_date) && (
-                                     <div className="text-sm bg-blue-50/50 p-2 rounded-lg text-blue-800 font-mono mt-2">
-                                         <div className="font-bold text-stone-500 mb-1">發心時間：</div>
-                                         <div>始：{n.start_date ? formatDateTime(n.start_date) : '-'}</div>
-                                         <div>終：{n.end_date ? formatDateTime(n.end_date) : '-'}</div>
-                                     </div>
-                                 )}
-                                 <p className="text-sm text-stone-500 mt-2"><span className="font-bold text-stone-400">安單：</span> {n.accommodation_option || '不安單'} {n.accommodation_option === '須安單' ? `(${n.stay_start_date} ~ ${n.stay_end_date})` : ''}</p>
-                                 
-                                 {n.memo && <div className="mt-2 pt-2 border-t border-dashed border-stone-200 text-sm text-stone-500 italic">備註: {n.memo}</div>}
-                              </div>
-                              
-                              <div className="pt-4 mt-2 border-t border-stone-100 flex justify-between items-end">
-                                 <div className="text-xs text-stone-400 font-mono">{n.created_at ? n.created_at.slice(0, 16).replace('T', ' ') : ''}</div>
-                                 {!isInactive && (
-                                    <label className="flex items-center gap-2 cursor-pointer select-none text-red-400 hover:text-red-600 transition-colors bg-white px-3 py-1 rounded-full shadow-sm border border-stone-100"><input type="checkbox" className="w-4 h-4 rounded accent-red-500" checked={n.is_deleted} onChange={() => handleToggleDeleteNote(n.id, n.is_deleted)} /><span className="font-bold text-xs">刪除</span></label>
-                                 )}
-                              </div>
-                           </div>
-                       </div>
-                    </div>
-                  );
-                })}
-                {sortedHistoryNotes.length === 0 && <div className={`col-span-full py-20 text-center text-stone-400 rounded-[32px] border border-stone-100 flex flex-col items-center gap-4`} style={{ backgroundColor: CARD_BG_COLOR }}><FileSpreadsheet className="w-12 h-12 opacity-20"/>暫無紀錄</div>}
-              </div>
+                                {(n.start_date || n.end_date) && (
+                                    <div className="text-sm bg-blue-50/50 p-2 rounded-lg text-blue-800 font-mono mt-2">
+                                        <div className="font-bold text-stone-500 mb-1">發心時間：</div>
+                                        <div>始：{n.start_date ? formatDateTime(n.start_date) : '-'}</div>
+                                        <div>終：{n.end_date ? formatDateTime(n.end_date) : '-'}</div>
+                                    </div>
+                                )}
+                                <p className="text-sm text-stone-500 mt-2"><span className="font-bold text-stone-400">安單：</span> {n.accommodation_option || '不安單'} {n.accommodation_option === '須安單' ? `(${n.stay_start_date} ~ ${n.stay_end_date})` : ''}</p>
+                                
+                                {n.memo && <div className="mt-2 pt-2 border-t border-dashed border-stone-200 text-sm text-stone-500 italic">備註: {n.memo}</div>}
+                             </div>
+                             
+                             <div className="pt-4 mt-2 border-t border-stone-100 flex justify-between items-end">
+                                <div className="text-xs text-stone-400 font-mono">{n.created_at ? n.created_at.slice(0, 16).replace('T', ' ') : ''}</div>
+                                {!isInactive && (
+                                   <label className="flex items-center gap-2 cursor-pointer select-none text-red-400 hover:text-red-600 transition-colors bg-white px-3 py-1 rounded-full shadow-sm border border-stone-100"><input type="checkbox" className="w-4 h-4 rounded accent-red-500" checked={n.is_deleted} onChange={() => handleToggleDeleteNote(n.id, n.is_deleted)} /><span className="font-bold text-xs">刪除</span></label>
+                                )}
+                             </div>
+                          </div>
+                      </div>
+                   </div>
+                 );
+               })}
+               {sortedHistoryNotes.length === 0 && <div className={`col-span-full py-20 text-center text-stone-400 rounded-[32px] border border-stone-100 flex flex-col items-center gap-4`} style={{ backgroundColor: CARD_BG_COLOR }}><FileSpreadsheet className="w-12 h-12 opacity-20"/>暫無紀錄</div>}
+             </div>
           </div>
         )}
 
@@ -1182,7 +1182,7 @@ export default function App() {
         {/* 審核頁籤：僅顯示密碼重設 (已移除報名表審核) */}
         {activeTab === 'audit' && isAdmin && <div className="space-y-12 animate-in fade-in"><div className="bg-[#4f093c] p-8 rounded-[32px] shadow-xl text-white mb-8"><h2 className="text-3xl font-bold">審核中心</h2><p className="text-white/60 mt-2">處理密碼重設申請</p></div><div className="grid grid-cols-1 md:grid-cols-2 gap-8">{resetRequests.filter(r => r.status === 'pending').map(r => <div key={r.id} className={`p-8 rounded-[32px] shadow-sm border border-stone-100 relative`} style={{ backgroundColor: CARD_BG_COLOR }}><div className="absolute top-6 right-6 px-3 py-1 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold">重設密碼</div><div className="text-2xl font-bold text-slate-800 mb-1">{r.user_name}</div><div className="text-stone-400 font-mono text-sm mb-6">ID: {r.id_last4}</div><div className="flex gap-3"><button onClick={()=>handleResetAction(r.id, 'approve')} className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-md shadow-blue-200">批准</button><button onClick={()=>handleResetAction(r.id, 'reject')} className="flex-1 py-3 bg-stone-100 text-stone-600 font-bold rounded-xl hover:bg-stone-200">拒絕</button></div></div>)}</div></div>}
         
-        {activeTab === 'admin_data' && isAdmin && <div className={`p-8 rounded-[32px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}><div className="flex justify-between items-center mb-8"><h3 className="text-3xl font-bold text-[#4f093c]">資料總覽-所有報名資料</h3><div className="flex gap-3"><select className="p-2 bg-white border-none rounded-xl text-base font-bold text-stone-600 outline-none" value={filterLoc} onChange={e=>setFilterLoc(e.target.value)}><option value="">所有地點</option>{locations.map(l => <option key={l} value={l}>{l}</option>)}</select><select className="p-2 bg-white border-none rounded-xl text-base font-bold text-stone-600 outline-none" value={filterAct} onChange={e=>setFilterAct(e.target.value)}><option value="">所有活動</option>{adminFilterActivities.map(a => <option key={a} value={a}>{a}</option>)}</select><div className="relative"><input type="text" placeholder="搜尋..." className="p-2 pl-8 border-none rounded-xl text-base font-bold text-stone-600 outline-none" value={searchText} onChange={e=>setSearchText(e.target.value)} /><Search className="w-4 h-4 absolute left-2 top-1/2 -translate-y-1/2 text-stone-400"/></div><button onClick={handleExport} className="bg-emerald-600 text-white px-5 py-2 rounded-xl flex items-center gap-2 text-base font-bold hover:bg-emerald-700 shadow-md shadow-emerald-200">匯出 CSV</button></div></div><div className="overflow-x-auto rounded-2xl border border-stone-100"><table className="w-full text-left text-sm"><thead className="bg-[#4f093c] text-white font-bold"><tr><th className="p-4">基本資料</th><th className="p-4">活動行程</th><th className="p-4">交通/住宿</th><th className="p-4">義工資訊</th><th className="p-4">備註</th><th className="p-4">狀態</th></tr></thead><tbody className="divide-y divide-stone-200">{filteredAdminNotes.map(n => (<tr key={n.id} className="hover:bg-stone-50"><td className="p-4 align-top"><div className="font-bold text-lg">{n.real_name} <span className="text-sm font-normal text-stone-500">{n.dharma_name}</span></div><div className="text-stone-500">{n.registrant_type}</div><div className="text-[#4f093c] font-bold">{n.identity}</div></td><td className="p-4 align-top"><div className="font-bold">{n.activity_location} | {n.activity_name}</div><div className="text-stone-600">{n.activity_option}</div>{n.selected_contents && <div className="text-xs text-stone-400 mt-1">{Array.isArray(n.selected_contents) ? n.selected_contents.join('、') : ''}</div>}</td><td className="p-4 align-top text-stone-600"><div>{n.transportation}</div>{(n.arrival_datetime || n.departure_datetime) && <div className="text-xs mt-1"><div>抵: {n.arrival_datetime?.replace('T', ' ')}</div><div>離: {n.departure_datetime?.replace('T', ' ')}</div></div>}<div className="mt-2 border-t pt-1"><div>{n.accommodation_option}</div>{n.accommodation_option === '須安單' && <div className="text-xs">{n.stay_start_date}~{n.stay_end_date}</div>}</div></td><td className="p-4 align-top text-stone-600">{n.identity === '發心義工' ? (<><div>{n.volunteer_type}</div>{n.volunteer_group && <div>組別: {n.volunteer_group}</div>}{n.start_date && <div className="text-xs mt-1">{n.start_date.replace('T',' ')} ~ <br/>{n.end_date?.replace('T',' ')}</div>}</>) : <span className="text-stone-300">-</span>}</td><td className="p-4 align-top">{n.other_remarks && <div className="mb-2"><span className="text-orange-600 font-bold text-xs">自訂:</span> {n.other_remarks}</div>}{n.memo && <div><span className="text-stone-400 font-bold text-xs">其他:</span> {n.memo}</div>}</td><td className="p-4 align-top"><div className="flex flex-col gap-1"><span className={`px-2 py-0.5 rounded text-xs font-bold w-fit ${n.registration_option === '新增' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{n.registration_option}</span>{n.is_deleted && <span className="px-2 py-0.5 rounded text-xs font-bold w-fit bg-red-100 text-red-700">已刪除</span>}<div className="text-xs text-stone-400 mt-1"><div>{n.sign_name}</div><div>{n.created_at?.slice(0, 10)}</div></div></div></td></tr>))}</tbody></table></div></div>}
+        {activeTab === 'admin_data' && isAdmin && <div className={`p-8 rounded-[32px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}><div className="flex justify-between items-center mb-8"><h3 className="text-3xl font-bold text-[#4f093c]">資料總覽-所有報名資料</h3><div className="flex gap-3"><select className="p-2 bg-white border-none rounded-xl text-base font-bold text-stone-600 outline-none" value={filterLoc} onChange={e=>setFilterLoc(e.target.value)}><option value="">所有地點</option>{locations.map(l => <option key={l} value={l}>{l}</option>)}</select><select className="p-2 bg-white border-none rounded-xl text-base font-bold text-stone-600 outline-none" value={filterAct} onChange={e=>setFilterAct(e.target.value)}><option value="">所有活動</option>{adminFilterActivities.map(a => <option key={a} value={a}>{a}</option>)}</select><div className="relative"><input type="text" placeholder="搜尋..." className="p-2 pl-8 border-none rounded-xl text-base font-bold text-stone-600 outline-none" value={searchText} onChange={e=>setSearchText(e.target.value)} /><Search className="w-4 h-4 absolute left-2 top-1/2 -translate-y-1/2 text-stone-400"/></div><button onClick={handleExport} className="bg-emerald-600 text-white px-5 py-2 rounded-xl flex items-center gap-2 text-base font-bold hover:bg-emerald-700 shadow-md shadow-emerald-200">匯出 CSV</button></div></div><div className="overflow-x-auto rounded-2xl border border-stone-100"><table className="w-full text-left text-sm"><thead className="bg-[#4f093c] text-white font-bold"><tr><th className="p-4">活動行程</th><th className="p-4">基本資料</th><th className="p-4">交通/住宿</th><th className="p-4">義工資訊</th><th className="p-4">備註</th><th className="p-4">狀態</th></tr></thead><tbody className="divide-y divide-stone-200">{filteredAdminNotes.map(n => { const { isEnded } = getRestrictionStatus(n.activity_location, n.activity_name, n.activity_option); let statusBadge; if(n.is_deleted) statusBadge = <span className="px-2 py-0.5 rounded text-xs font-bold w-fit bg-red-100 text-red-700">已刪除</span>; else if(isEnded) statusBadge = <span className="px-2 py-0.5 rounded text-xs font-bold w-fit bg-stone-200 text-stone-600">已圓滿</span>; else statusBadge = <span className={`px-2 py-0.5 rounded text-xs font-bold w-fit ${n.registration_option === '新增' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{n.registration_option}</span>; return (<tr key={n.id} className="hover:bg-stone-50"><td className="p-4 align-top"><div className="font-bold">{n.activity_location} | {n.activity_name}</div><div className="text-stone-600">{n.activity_option}</div>{n.selected_contents && <div className="text-xs text-stone-400 mt-1">{Array.isArray(n.selected_contents) ? n.selected_contents.join('、') : ''}</div>}</td><td className="p-4 align-top"><div className="font-bold text-lg">{n.real_name} <span className="text-sm font-normal text-stone-500">{n.dharma_name}</span></div><div className="text-stone-500">{n.registrant_type}</div><div className="text-[#4f093c] font-bold">{n.identity}</div></td><td className="p-4 align-top text-stone-600"><div>{n.transportation}</div>{(n.arrival_datetime || n.departure_datetime) && <div className="text-xs mt-1"><div>抵: {n.arrival_datetime?.replace('T', ' ')}</div><div>離: {n.departure_datetime?.replace('T', ' ')}</div></div>}<div className="mt-2 border-t pt-1"><div>{n.accommodation_option}</div>{n.accommodation_option === '須安單' && <div className="text-xs">{n.stay_start_date}~{n.stay_end_date}</div>}</div></td><td className="p-4 align-top text-stone-600">{n.identity === '發心義工' ? (<><div>{n.volunteer_type}</div>{n.volunteer_group && <div>組別: {n.volunteer_group}</div>}{n.start_date && <div className="text-xs mt-1">{n.start_date.replace('T',' ')} ~ <br/>{n.end_date?.replace('T',' ')}</div>}</>) : <span className="text-stone-300">-</span>}</td><td className="p-4 align-top">{n.other_remarks && <div className="mb-2"><span className="text-orange-600 font-bold text-xs">自訂:</span> {n.other_remarks}</div>}{n.memo && <div><span className="text-stone-400 font-bold text-xs">其他:</span> {n.memo}</div>}</td><td className="p-4 align-top"><div className="flex flex-col gap-1">{statusBadge}<div className="text-xs text-stone-400 mt-1"><div>{n.sign_name}</div><div>{formatDateTime(n.created_at)}</div></div></div></td></tr>); })}</tbody></table></div></div>}
         {activeTab === 'admin_settings' && isAdmin && (
            <div className={`p-10 rounded-[40px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}>
               <h3 className="text-3xl font-bold text-[#4f093c] mb-2">1、報名行程設定</h3>
