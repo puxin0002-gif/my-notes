@@ -10,13 +10,11 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v87.18 (匯出Excel優化版)
+ * 系統版本：v87.19 (匯出Excel優化版 - 抵離寺欄位拆分與時間修復)
  * 修正說明：
- * 1. [Feature] 將「匯出 CSV」改為「匯出資料」，並改為產出 .xlsx 檔案 (動態載入 SheetJS)。
- * 2. [Feature] 匯出欄位調整：「內容」改為「勾選內容」(並過濾 [] 為 null)、「義工選項」、「義工組別」。
- * 3. [Feature] 匯出欄位拆分：「發心始/終」拆分為日期與時間欄位；「安單」拆分為選項、起日、迄日。
- * 4. [Feature] 匯出狀態欄位追加「已圓滿」的判定邏輯。
- * 5. [System] 完整保留 v87.17 所有的視覺與介面優化設定。
+ * 1. [Fix] 強化時間字串拆分邏輯，相容包含 'T' 與包含 ' ' (空格) 的時間格式，確保時間欄位不為空。
+ * 2. [Feature] 匯出欄位拆分：「抵達」拆為「抵達日期」、「抵達時間」；「離開」拆為「離開日期」、「離開時間」。
+ * 3. [System] 完整保留 v87.18 所有的視覺與介面優化設定。
  */
 
 // --- 主色系設定 ---
@@ -737,8 +735,18 @@ export default function App() {
         const finalContentStr = safeContents.length > 0 ? safeContents.join('、') : null;
 
         // 處理時間拆分
-        const getFormatDate = (datetime: string | null | undefined) => datetime ? datetime.split('T')[0] : '';
-        const getFormatTime = (datetime: string | null | undefined) => datetime && datetime.includes('T') ? datetime.split('T')[1].substring(0, 5) : '';
+        const getFormatDate = (datetime: string | null | undefined) => {
+            if (!datetime) return '';
+            if (datetime.includes('T')) return datetime.split('T')[0];
+            if (datetime.includes(' ')) return datetime.split(' ')[0];
+            return datetime;
+        };
+        const getFormatTime = (datetime: string | null | undefined) => {
+            if (!datetime) return '';
+            if (datetime.includes('T')) return datetime.split('T')[1].substring(0, 5);
+            if (datetime.includes(' ')) return datetime.split(' ')[1].substring(0, 5);
+            return '';
+        };
 
         return {
             "地點": n.activity_location || '',
@@ -750,8 +758,10 @@ export default function App() {
             "屬性": n.registrant_type || '',
             "身分": n.identity || '',
             "交通": n.transportation || '',
-            "抵達": n.arrival_datetime?.replace('T', ' ') || '',
-            "離開": n.departure_datetime?.replace('T', ' ') || '',
+            "抵達日期": getFormatDate(n.arrival_datetime),
+            "抵達時間": getFormatTime(n.arrival_datetime),
+            "離開日期": getFormatDate(n.departure_datetime),
+            "離開時間": getFormatTime(n.departure_datetime),
             "義工選項": simplifyVolunteerType(n.volunteer_type),
             "義工組別": n.volunteer_group || '',
             "發心始日期": getFormatDate(n.start_date),
@@ -1378,11 +1388,13 @@ export default function App() {
                                 <div className={`rounded-lg p-3 space-y-1 ${isInactive ? 'bg-stone-100/50 border border-stone-200' : 'bg-orange-50 border border-orange-100'}`}>
                                     {hasContents && (
                                         <div className={`text-sm font-bold flex items-start gap-1 ${isInactive ? 'text-stone-400' : 'text-orange-800'}`}>
+                                            <span className={`px-1.5 py-0.5 rounded text-[11px] shrink-0 mt-0.5 ${isInactive ? 'bg-stone-200 text-stone-500' : 'bg-white/60 text-orange-600'}`}>內容</span> 
                                             <span>{safeContents.join('、')}</span>
                                         </div>
                                     )}
                                     {hasRemarks && (
                                         <div className={`text-sm font-bold flex items-start gap-1 ${isInactive ? 'text-stone-400' : 'text-orange-800'}`}>
+                                            <span className={`px-1.5 py-0.5 rounded text-[11px] shrink-0 mt-0.5 ${isInactive ? 'bg-stone-200 text-stone-500' : 'bg-white/60 text-orange-600'}`}>備註</span>
                                             <span>{n.other_remarks}</span>
                                         </div>
                                     )}
@@ -1561,7 +1573,11 @@ export default function App() {
                     safeContents = safeContents.filter(s => s && s !== '[]');
                     const hasContents = safeContents.length > 0;
                     const hasRemarks = typeof n.other_remarks === 'string' && n.other_remarks.trim().length > 0 && n.other_remarks !== 'null';
-                    const hasMemo = typeof n.memo === 'string' && n.memo.trim().length > 0 && n.memo !== 'null';
+                    
+                    // 內容與備註合併，無前綴文字
+                    const mergedRemarks = [];
+                    if (hasContents) mergedRemarks.push(safeContents.join('、'));
+                    if (hasRemarks) mergedRemarks.push(n.other_remarks);
 
                     let statusBadge; 
                     let rowStyle = "transition-colors"; 
@@ -1629,9 +1645,7 @@ export default function App() {
                         </td>
                         <td className="p-4 align-top">
                           <div className="flex flex-col gap-1">
-                            {hasContents && <div className={subTextStyle}>{safeContents.join('、')}</div>}
-                            {hasRemarks && <div className={subTextStyle}>{n.other_remarks}</div>}
-                            {hasMemo && <div className={subTextStyle}>{n.memo}</div>}
+                            {mergedRemarks.length > 0 && <div className={subTextStyle}>{mergedRemarks.join(' / ')}</div>}
                           </div>
                         </td>
                         <td className="p-4 align-top">
