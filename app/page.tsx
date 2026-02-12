@@ -10,13 +10,11 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v87.22 (功能擴展與排版最佳化版)
+ * 系統版本：v87.23 (欄寬微調與時間匯出最終修復版)
  * 修正說明：
- * 1. [Feature] 新增「修改密碼」按鈕與專屬彈出視窗功能。
- * 2. [UI] 忘記密碼審核：點擊批准後，會隨機產生一組新密碼顯示在警告視窗中供管理員抄錄。
- * 3. [UI] 資料總覽：正常狀態的資料列背景改為「內容區塊底色」(#f0e6d5)。
- * 4. [UI] 資料總覽：義工發心時間比照「抵離」格式，分行並加上「起：」「迄：」前綴。
- * 5. [Fix] Excel 匯出：升級時間字串解析引擎，徹底解決發心始終時間匯出為空的問題。
+ * 1. [UI] 資料總覽：縮小「活動行程」欄寬，加寬「交通/住宿」及「義工資訊」並加上 whitespace-nowrap 防折行。
+ * 2. [Fix] Excel 匯出：使用與 UI 相同的 formatDateTime 解析結果來做字串切割，確保發心時間匯出絕對有值。
+ * 3. [System] 完整保留 v87.22 所有的視覺與介面優化設定、忘記密碼修復等。
  */
 
 // --- 主色系設定 ---
@@ -399,7 +397,6 @@ export default function App() {
                 } else { alert('請檢查信箱並點擊驗證連結。'); }
             }
         } else if (authMode === 'forgot') {
-            // 先嘗試從資料庫取得使用者的 uid，避免 not-null constraint 錯誤
             const { data: uData, error: fetchErr } = await supabaseClient
                 .from('user_permissions')
                 .select('uid')
@@ -418,7 +415,7 @@ export default function App() {
             const { error } = await supabaseClient.from('reset_requests').insert([{
                 user_name: finalUsername, 
                 id_last4: finalIdLast4, 
-                uid: uData.uid, // 補上正確的 uid
+                uid: uData.uid, 
                 status: 'pending', 
                 created_at: new Date().toISOString()
             }]);
@@ -455,7 +452,6 @@ export default function App() {
   const availableOptions = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === formData.activity_location && h.activity === formData.activity_name && h.option).map(h => h.option as string))].sort(), [hierarchyData, formData.activity_location, formData.activity_name]);
   const availableContents = useMemo(() => hierarchyData.filter(h => h.location === formData.activity_location && h.activity === formData.activity_name && h.option === formData.activity_option && h.content).map(h => h.content as string).sort(), [hierarchyData, formData.activity_location, formData.activity_name, formData.activity_option]);
 
-  // 管理後台專用聯動
   const adminActivities = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity).map(h => h.activity as string))].sort(), [hierarchyData, mgmtSelectedLoc]);
   const adminOptions = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option).map(h => h.option as string))].sort(), [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct]);
   const adminContents = useMemo(() => hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option === mgmtSelectedOpt && h.content), [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
@@ -740,7 +736,6 @@ export default function App() {
   };
   
   const handleExport = async () => {
-    // 確保 XLSX 函式庫已載入
     if (!window.XLSX) {
         try {
             await new Promise((resolve, reject) => {
@@ -759,7 +754,6 @@ export default function App() {
     const exportData = filteredAdminNotes.map(n => {
         const { isEnded } = getRestrictionStatus(n.activity_location, n.activity_name, n.activity_option);
         
-        // 處理勾選內容
         const rawContents: any = n.selected_contents;
         let safeContents: string[] = [];
         if (Array.isArray(rawContents)) {
@@ -772,29 +766,25 @@ export default function App() {
             }
         }
         safeContents = safeContents.filter(s => s && s !== '[]');
-        
         const finalContentStr = safeContents.length > 0 ? safeContents.join('、') : null;
 
-        // 處理時間拆分 (升級解析邏輯)
-        const extractDateStr = (val: string | null | undefined) => {
-            if (!val) return '';
-            try {
-                const d = new Date(val);
-                if (!isNaN(d.getTime())) return `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
-            } catch (e) {}
-            return val.split(/[T ]/)[0].replace(/-/g, '/');
+        // 升級版：精準擷取格式為 YYYY/MM/DD 的日期，以及 HH:mm 的時間
+        const formatExportDate = (val: string | null | undefined) => {
+            if (!val) return { date: '', time: '' };
+            const formatted = formatDateTime(val);
+            if (formatted !== '-' && formatted.includes(' ')) {
+                const parts = formatted.split(' ');
+                return { date: parts[0], time: parts[1] };
+            }
+            if (val.includes('T')) return { date: val.split('T')[0].replace(/-/g, '/'), time: val.split('T')[1].substring(0, 5) };
+            if (val.includes(' ')) return { date: val.split(' ')[0].replace(/-/g, '/'), time: val.split(' ')[1].substring(0, 5) };
+            return { date: val.replace(/-/g, '/'), time: '' };
         };
 
-        const extractTimeStr = (val: string | null | undefined) => {
-            if (!val) return '';
-            if (val.length <= 10 && !val.includes('T') && !val.includes(' ')) return '';
-            try {
-                const d = new Date(val);
-                if (!isNaN(d.getTime())) return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-            } catch(e) {}
-            const parts = val.split(/[T ]/);
-            return parts.length > 1 ? parts[1].substring(0, 5) : '';
-        };
+        const arrival = formatExportDate(n.arrival_datetime);
+        const departure = formatExportDate(n.departure_datetime);
+        const start = formatExportDate(n.start_date);
+        const end = formatExportDate(n.end_date);
 
         return {
             "地點": n.activity_location || '',
@@ -806,16 +796,16 @@ export default function App() {
             "屬性": n.registrant_type || '',
             "身分": n.identity || '',
             "交通": n.transportation || '',
-            "抵達日期": extractDateStr(n.arrival_datetime),
-            "抵達時間": extractTimeStr(n.arrival_datetime),
-            "離開日期": extractDateStr(n.departure_datetime),
-            "離開時間": extractTimeStr(n.departure_datetime),
+            "抵達日期": arrival.date,
+            "抵達時間": arrival.time,
+            "離開日期": departure.date,
+            "離開時間": departure.time,
             "義工選項": simplifyVolunteerType(n.volunteer_type),
             "義工組別": n.volunteer_group || '',
-            "發心始日期": extractDateStr(n.start_date),
-            "發心始時間": extractTimeStr(n.start_date),
-            "發心終日期": extractDateStr(n.end_date),
-            "發心終時間": extractTimeStr(n.end_date),
+            "發心始日期": start.date,
+            "發心始時間": start.time,
+            "發心終日期": end.date,
+            "發心終時間": end.time,
             "安單選項": n.accommodation_option || '',
             "安單起日": n.stay_start_date || '',
             "安單迄日": n.stay_end_date || '',
@@ -1622,11 +1612,11 @@ export default function App() {
               <table className="w-full text-left text-sm bg-white">
                 <thead className="bg-[#4f093c] text-white font-bold">
                   <tr>
-                    <th className="p-4 w-64 min-w-[16rem]">活動行程</th>
+                    <th className="p-4 w-48 min-w-[12rem]">活動行程</th>
                     <th className="p-4">基本資料</th>
-                    <th className="p-4">交通/住宿</th>
-                    <th className="p-4">義工資訊</th>
-                    <th className="p-4 w-40 max-w-[12rem]">備註</th>
+                    <th className="p-4 w-56 min-w-[14rem]">交通/住宿</th>
+                    <th className="p-4 w-56 min-w-[14rem]">義工資訊</th>
+                    <th className="p-4 w-40 max-w-[10rem]">備註</th>
                     <th className="p-4">狀態</th>
                   </tr>
                 </thead>
@@ -1683,7 +1673,7 @@ export default function App() {
                     
                     return (
                       <tr key={n.id} className={rowStyle} style={rowStyleObj}>
-                        <td className="p-4 align-top w-64 min-w-[16rem]">
+                        <td className="p-4 align-top w-48 min-w-[12rem]">
                           <div className={boldStyle}>{n.activity_location}</div>
                           <div className={boldStyle}>{n.activity_name}</div>
                           <div className={`mt-1 text-sm font-bold ${n.is_deleted || isEnded ? 'text-stone-400' : 'text-blue-600'}`}>{n.activity_option}</div>
@@ -1693,10 +1683,10 @@ export default function App() {
                           <div className={subTextStyle}>{n.registrant_type}</div>
                           <div className={`${n.is_deleted || isEnded ? 'text-stone-400' : 'text-[#4f093c]'} font-bold`}>{n.identity === '參加法會' ? '法會' : (n.identity === '發心義工' ? '義工' : n.identity)}</div>
                         </td>
-                        <td className="p-4 align-top text-stone-600">
+                        <td className="p-4 align-top text-stone-600 w-56 min-w-[14rem]">
                           <div className={`${n.is_deleted || isEnded ? 'text-stone-400' : 'text-slate-700'} font-bold`}>{n.transportation}</div>
                           {(n.arrival_datetime || n.departure_datetime) && (
-                            <div className={`text-xs mt-1 ${subTextStyle}`}>
+                            <div className={`text-xs mt-1 ${subTextStyle} whitespace-nowrap`}>
                               <div>抵: {n.arrival_datetime ? formatDateTime(n.arrival_datetime) : '-'}</div>
                               <div>離: {n.departure_datetime ? formatDateTime(n.departure_datetime) : '-'}</div>
                             </div>
@@ -1706,14 +1696,14 @@ export default function App() {
                             {n.accommodation_option === '須安單' && <div className="text-xs">{n.stay_start_date}~{n.stay_end_date}</div>}
                           </div>
                         </td>
-                        <td className={`p-4 align-top ${subTextStyle}`}>
+                        <td className={`p-4 align-top ${subTextStyle} w-56 min-w-[14rem]`}>
                           {n.identity === '發心義工' ? (
                             <>
                               <div className={`${n.is_deleted || isEnded ? 'text-stone-400' : 'text-slate-700'} font-bold`}>
                                 {simplifyVolunteerType(n.volunteer_type)}{n.volunteer_group ? ` - ${n.volunteer_group}` : ''}
                               </div>
                               {(n.start_date || n.end_date) && (
-                                <div className="text-xs mt-1">
+                                <div className="text-xs mt-1 whitespace-nowrap">
                                   <div>起: {n.start_date ? formatDateTime(n.start_date) : '-'}</div>
                                   <div>迄: {n.end_date ? formatDateTime(n.end_date) : '-'}</div>
                                 </div>
@@ -1723,7 +1713,7 @@ export default function App() {
                             <span className="opacity-50">-</span>
                           )}
                         </td>
-                        <td className="p-4 align-top w-40 max-w-[12rem]">
+                        <td className="p-4 align-top w-40 max-w-[10rem]">
                           <div className="flex flex-col gap-1 break-words whitespace-normal leading-tight">
                             {mergedRemarks.length > 0 && <div className={subTextStyle}>{mergedRemarks.join(' / ')}</div>}
                             {hasMemo && <div className={`${subTextStyle} mt-2 pt-2 border-t border-stone-200/50 border-dashed`}>{n.memo}</div>}
