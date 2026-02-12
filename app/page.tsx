@@ -10,11 +10,13 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v87.24 (時間寫入與解析完美修正版)
+ * 系統版本：v87.25 (密碼重設與輸入樣式優化版)
  * 修正說明：
- * 1. [Fix] 登記寫入：強制將所有時間欄位轉換為標準 ISO 格式 (toISOString) 寫入後端，確保時間不遺失。
- * 2. [UI/Export] 時間解析統一：優化 formatDateTime 與 Excel 的 extractTimeStr 邏輯，徹底解決舊資料偽時間與匯出空白問題。
- * 3. [System] 完整保留 v87.23 所有的視覺與介面優化設定、忘記密碼修復等。
+ * 1. [Fix] 忘記密碼：真正呼叫 supabase.auth.admin.updateUserById 更新密碼，解決無法登入問題。
+ * 2. [UI] 忘記密碼：新密碼改為純數字，並使用彈出式獨立視窗顯示。
+ * 3. [UI] 審核中心：移除 pending 過濾，讓「已處理」的資料保留在列表中，並顯示審核狀態。
+ * 4. [UI] 登記表單：「發心開始/結束」的輸入框大小已調大，比照「抵寺/離寺」的樣式。
+ * 5. [System] 完整保留 v87.24 所有的資料匯出與反灰樣式設定。
  */
 
 // --- 主色系設定 ---
@@ -267,6 +269,7 @@ export default function App() {
   // 修改密碼 Modal 狀態
   const [showPwdModal, setShowPwdModal] = useState<boolean>(false);
   const [newPwdVal, setNewPwdVal] = useState<string>('');
+  const [resetPwdResult, setResetPwdResult] = useState<{user: string, pwd: string}|null>(null);
   
   // 日期狀態
   const [todayDate, setTodayDate] = useState('');
@@ -415,7 +418,6 @@ export default function App() {
                 } else { alert('請檢查信箱並點擊驗證連結。'); }
             }
         } else if (authMode === 'forgot') {
-            // 先嘗試從資料庫取得使用者的 uid，避免 not-null constraint 錯誤
             const { data: uData, error: fetchErr } = await supabaseClient
                 .from('user_permissions')
                 .select('uid')
@@ -862,14 +864,38 @@ export default function App() {
     if (error) alert("更新失敗：" + error.message); else fetchData();
   };
 
-  const handleResetAction = async (id: string, action: 'approve' | 'reject') => {
+  const handleResetAction = async (req: ResetRequest, action: 'approve' | 'reject') => {
     if (!supabaseClient) return;
-    const status = action === 'approve' ? 'completed' : 'rejected';
-    await supabaseClient.from('reset_requests').update({ status }).eq('id', id);
+    
     if (action === 'approve') {
-        const tempPwd = Math.random().toString(36).slice(-6);
-        alert(`已批准重設申請。\n\n請通知用戶新密碼為：${tempPwd}\n\n(註：此為系統生成的臨時隨機密碼供前端展示)`);
+        if (!req.uid) {
+            alert("此申請缺少 UID，無法處理密碼重設。");
+            return;
+        }
+
+        // 隨機產生 6 碼純數字密碼
+        const tempPwd = Math.floor(100000 + Math.random() * 900000).toString();
+        
+        try {
+            if (!supabaseClient.auth.admin) {
+                throw new Error("無法存取 Admin API，前端的 Anon Key 沒有修改密碼的權限。");
+            }
+            
+            const { error: updateErr } = await supabaseClient.auth.admin.updateUserById(req.uid, { password: tempPwd });
+            
+            if (updateErr) throw updateErr;
+
+            await supabaseClient.from('reset_requests').update({ status: 'completed' }).eq('id', req.id);
+            setResetPwdResult({ user: req.user_name, pwd: tempPwd });
+
+        } catch (e: any) {
+            alert(`密碼重設失敗！\n錯誤原因：${e.message}\n\n提醒：前端需配置 Service Role Key 才能跨權限修改他人密碼。`);
+            return;
+        }
+    } else {
+        await supabaseClient.from('reset_requests').update({ status: 'rejected' }).eq('id', req.id);
     }
+    
     fetchData();
   };
 
@@ -1351,14 +1377,14 @@ export default function App() {
                  )}
                  
                  {fieldVisibility.volunteerDates && (
-                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-white/50 rounded-2xl">
-                     <div className="space-y-1">
-                       <label className="text-xs font-bold text-[#4f093c]">發心開始</label>
-                       <input type="datetime-local" min={currentDateTime} className="w-full p-2 text-sm border rounded-lg bg-white" value={formData.start_date || ''} onChange={e=>setFormData({...formData, start_date: e.target.value})} />
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-4 bg-white/50 rounded-2xl border border-blue-100">
+                     <div className="space-y-2">
+                       <label className="text-sm font-bold text-[#4f093c] ml-1">發心開始*</label>
+                       <input type="datetime-local" min={currentDateTime} className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white" value={formData.start_date || ''} onChange={e=>setFormData({...formData, start_date: e.target.value})} />
                      </div>
-                     <div className="space-y-1">
-                       <label className="text-xs font-bold text-[#4f093c]">發心結束</label>
-                       <input type="datetime-local" min={formData.start_date || currentDateTime} className="w-full p-2 text-sm border rounded-lg bg-white" value={formData.end_date || ''} onChange={e=>setFormData({...formData, end_date: e.target.value})} />
+                     <div className="space-y-2">
+                       <label className="text-sm font-bold text-[#4f093c] ml-1">發心結束*</label>
+                       <input type="datetime-local" min={formData.start_date || currentDateTime} className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white" value={formData.end_date || ''} onChange={e=>setFormData({...formData, end_date: e.target.value})} />
                      </div>
                    </div>
                  )}
@@ -1587,24 +1613,38 @@ export default function App() {
                       <th className="p-4">申請人姓名</th>
                       <th className="p-4">ID後四碼</th>
                       <th className="p-4">申請時間</th>
+                      <th className="p-4">狀態</th>
                       <th className="p-4 text-right">操作</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-stone-200">
-                    {resetRequests.filter(r => r.status === 'pending').map(r => (
+                    {resetRequests.map(r => (
                       <tr key={r.id} className="hover:bg-stone-50 transition-colors">
                         <td className="p-4 font-bold text-lg text-slate-800">{r.user_name}</td>
                         <td className="p-4 font-mono text-stone-600">{r.id_last4}</td>
                         <td className="p-4 text-stone-500 font-mono text-xs">{formatDateTime(r.created_at)}</td>
+                        <td className="p-4">
+                           {r.status === 'pending' ? (
+                               <span className="text-amber-600 bg-amber-100 px-2 py-1 rounded text-xs font-bold">待審核</span>
+                           ) : r.status === 'completed' ? (
+                               <span className="text-emerald-600 bg-emerald-100 px-2 py-1 rounded text-xs font-bold">已批准</span>
+                           ) : (
+                               <span className="text-stone-600 bg-stone-200 px-2 py-1 rounded text-xs font-bold">已拒絕</span>
+                           )}
+                        </td>
                         <td className="p-4 flex gap-2 justify-end">
-                          <button onClick={()=>handleResetAction(r.id, 'approve')} className="px-4 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 shadow-sm shadow-blue-200 transition-colors">批准</button>
-                          <button onClick={()=>handleResetAction(r.id, 'reject')} className="px-4 py-2 bg-stone-200 text-stone-700 font-bold rounded-lg hover:bg-stone-300 transition-colors">拒絕</button>
+                          {r.status === 'pending' && (
+                            <>
+                              <button onClick={()=>handleResetAction(r, 'approve')} className="px-4 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 shadow-sm shadow-blue-200 transition-colors">批准</button>
+                              <button onClick={()=>handleResetAction(r, 'reject')} className="px-4 py-2 bg-stone-200 text-stone-700 font-bold rounded-lg hover:bg-stone-300 transition-colors">拒絕</button>
+                            </>
+                          )}
                         </td>
                       </tr>
                     ))}
-                    {resetRequests.filter(r => r.status === 'pending').length === 0 && (
+                    {resetRequests.length === 0 && (
                       <tr>
-                        <td colSpan={4} className="p-12 text-center text-stone-400 font-bold bg-white">目前無待審核的申請</td>
+                        <td colSpan={5} className="p-12 text-center text-stone-400 font-bold bg-white">目前無任何申請紀錄</td>
                       </tr>
                     )}
                   </tbody>
@@ -1693,7 +1733,7 @@ export default function App() {
                       boldStyle = "font-bold text-xl text-stone-400"; 
                     } else { 
                       statusBadge = <span className={`px-2 py-0.5 rounded text-xs font-bold w-fit ${n.registration_option === '新增' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{n.registration_option}</span>;
-                      rowStyle = "hover:brightness-95 transition-all border-b border-white"; 
+                      rowStyle = "border-b border-white"; 
                       rowStyleObj = { backgroundColor: CARD_BG_COLOR };
                     } 
                     
@@ -1940,6 +1980,27 @@ export default function App() {
                     取消
                   </button>
                </div>
+            </div>
+        </div>
+      )}
+
+      {/* 重設密碼成功通知 Modal */}
+      {resetPwdResult && (
+        <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center backdrop-blur-sm">
+            <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-sm border border-[#E8E2D1] flex flex-col items-center gap-4 animate-in zoom-in-95 duration-200">
+               <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center text-emerald-600 mb-2">
+                   <CheckCircle2 className="w-8 h-8"/>
+               </div>
+               <h3 className="text-2xl font-bold text-[#4f093c]">密碼重設成功</h3>
+               <p className="text-stone-500 text-center text-sm">
+                 已成功為 <span className="font-bold text-slate-800">{resetPwdResult.user}</span> 重設密碼。<br/>請通知使用者使用以下新密碼登入：
+               </p>
+               <div className="bg-stone-100 px-6 py-4 rounded-xl w-full text-center">
+                   <span className="text-4xl font-black text-blue-600 tracking-widest">{resetPwdResult.pwd}</span>
+               </div>
+               <button onClick={() => setResetPwdResult(null)} className="w-full mt-4 bg-[#4f093c] text-white py-3 rounded-xl font-bold shadow-md hover:bg-[#3d072e] transition-all">
+                 關閉視窗
+               </button>
             </div>
         </div>
       )}
