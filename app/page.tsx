@@ -10,13 +10,12 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v87.28 (介面優化與新增性別欄位版)
+ * 系統版本：v87.29 (介面微調與深色模式優化版)
  * 修正說明：
- * 1. [Feature] 新增「性別」欄位 (gender)，為必填，選項：男/女，位於法名後方。
- * 2. [UI] 登入畫面：卡片底色改為 CARD_BG_COLOR，底部按鈕加大並改色。
- * 3. [UI] 設定頁籤：「截止報名」與「圓滿結束」標籤加大變紅，更顯眼。
- * 4. [UI] 公告頁籤：刪除按鈕常駐顯示 (移除隱藏邏輯)，樣式改為明顯的紅色按鈕。
- * 5. [System] 同步更新匯出、紀錄卡片、資料表格以支援性別顯示。
+ * 1. [UI] 登入畫面：卡片底色改為 CARD_BG_COLOR (#f0e6d5)，下方按鈕加大並改色(藍/橘)。
+ * 2. [UI] 設定頁面：「截止報名」與「圓滿結束」標籤加大並改為紅色，增強警示效果。
+ * 3. [Fix] 手機深色模式：在根容器加入 color-scheme: light，強制表單元件(如日期選擇器)呈現淺色，避免文字與背景同色。
+ * 4. [System] 完整保留 v87.28 的所有功能 (性別欄位、匯出優化、反灰樣式)。
  */
 
 // --- 主色系設定 ---
@@ -473,6 +472,7 @@ export default function App() {
   const availableOptions = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === formData.activity_location && h.activity === formData.activity_name && h.option).map(h => h.option as string))].sort(), [hierarchyData, formData.activity_location, formData.activity_name]);
   const availableContents = useMemo(() => hierarchyData.filter(h => h.location === formData.activity_location && h.activity === formData.activity_name && h.option === formData.activity_option && h.content).map(h => h.content as string).sort(), [hierarchyData, formData.activity_location, formData.activity_name, formData.activity_option]);
 
+  // 管理後台專用聯動
   const adminActivities = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity).map(h => h.activity as string))].sort(), [hierarchyData, mgmtSelectedLoc]);
   const adminOptions = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option).map(h => h.option as string))].sort(), [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct]);
   const adminContents = useMemo(() => hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option === mgmtSelectedOpt && h.content), [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
@@ -875,7 +875,6 @@ export default function App() {
             return;
         }
 
-        // 隨機產生 6 碼純數字密碼
         const tempPwd = Math.floor(100000 + Math.random() * 900000).toString();
         
         try {
@@ -886,7 +885,6 @@ export default function App() {
                 throw new Error("前端未配置 NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY，無法跨權限修改。");
             }
 
-            // 建立具有 Service Role 權限的 Admin Client
             const adminClient = window.supabase.createClient(url, serviceKey, {
                 auth: { autoRefreshToken: false, persistSession: false }
             });
@@ -1106,7 +1104,7 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center font-black text-[#4f093c] text-4xl animate-pulse" style={{ backgroundColor: BG_WARM_BEIGE }}>
+      <div className="min-h-screen flex items-center justify-center font-black text-[#4f093c] text-4xl animate-pulse" style={{ backgroundColor: BG_WARM_BEIGE, colorScheme: 'light' }}>
         學員登記系統 加載中...
       </div>
     );
@@ -1114,8 +1112,8 @@ export default function App() {
 
   if (!user) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4 font-sans text-slate-900" style={{ backgroundColor: BG_WARM_BEIGE }}>
-        <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-sm border border-[#E8E2D1] flex flex-col gap-6">
+      <div className="min-h-screen flex items-center justify-center p-4 font-sans text-slate-900" style={{ backgroundColor: BG_WARM_BEIGE, colorScheme: 'light' }}>
+        <div className="p-8 rounded-3xl shadow-xl w-full max-w-sm border border-[#E8E2D1] flex flex-col gap-6" style={{ backgroundColor: CARD_BG_COLOR }}>
           <div className="text-center">
              <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center mx-auto mb-4 shadow-inner overflow-hidden border-4 border-[#F2ECE4]">
                 <CustomLogo className="w-16 h-16" />
@@ -1127,16 +1125,16 @@ export default function App() {
           <div className="space-y-4">
              <div>
                <label className="text-sm font-bold text-[#4f093c] ml-1">姓名</label>
-               <input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20" value={username} onChange={e=>setUsername(e.target.value)} />
+               <input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white text-slate-800" value={username} onChange={e=>setUsername(e.target.value)} />
              </div>
              <div>
                <label className="text-sm font-bold text-[#4f093c] ml-1">ID後四碼</label>
-               <input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20" placeholder="如：1234" maxLength={4} value={idLast4} onChange={e=>setIdLast4(e.target.value)} />
+               <input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white text-slate-800" placeholder="如：1234" maxLength={4} value={idLast4} onChange={e=>setIdLast4(e.target.value)} />
              </div>
              {authMode !== 'forgot' && (
                <div>
                  <label className="text-sm font-bold text-[#4f093c] ml-1">密碼</label>
-                 <input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20" type="password" value={password} onChange={e=>setPassword(e.target.value)} />
+                 <input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white text-slate-800" type="password" value={password} onChange={e=>setPassword(e.target.value)} />
                </div>
              )}
           </div>
@@ -1145,14 +1143,14 @@ export default function App() {
              {authMode === 'login' ? '登入系統' : authMode === 'signup' ? '立即註冊' : '送出申請'} <ArrowRight className="w-4 h-4" />
           </button>
           
-          <div className="flex justify-between text-xs text-slate-400 font-bold px-1 pt-2 border-t border-slate-100">
+          <div className="flex justify-between items-center px-1 pt-2 border-t border-slate-200/50 mt-2">
              {authMode === 'login' ? (
                <>
-                 <button onClick={()=>setAuthMode('signup')} className="hover:text-[#4f093c]">沒有帳號？註冊</button>
-                 <button onClick={()=>setAuthMode('forgot')} className="hover:text-[#4f093c]">忘記密碼？</button>
+                 <button onClick={()=>setAuthMode('signup')} className="text-sm font-bold text-blue-600 hover:text-blue-800 transition-colors">沒有帳號？註冊</button>
+                 <button onClick={()=>setAuthMode('forgot')} className="text-sm font-bold text-orange-600 hover:text-orange-800 transition-colors">忘記密碼？</button>
                </>
              ) : (
-               <button onClick={()=>setAuthMode('login')} className="w-full text-center hover:text-[#4f093c]">返回登入</button>
+               <button onClick={()=>setAuthMode('login')} className="w-full text-center text-sm font-bold text-blue-600 hover:text-blue-800">返回登入</button>
              )}
           </div>
         </div>
@@ -1161,7 +1159,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen text-slate-800 font-sans text-xl" style={{ backgroundColor: BG_WARM_BEIGE }}>
+    <div className="min-h-screen text-slate-800 font-sans text-xl" style={{ backgroundColor: BG_WARM_BEIGE, colorScheme: 'light' }}>
       
       {/* Top Header */}
       <div className="bg-[#4f093c] sticky top-0 z-50 shadow-md border-b border-white/10 px-8 py-3 flex justify-between items-center">
@@ -1629,7 +1627,7 @@ export default function App() {
                   <thead className="bg-[#4f093c] text-white font-bold">
                     <tr>
                       <th className="p-4">申請人姓名</th>
-                      <th className="p-4">ID後四碼</th>
+                      <th className="p-4">ID後4碼</th>
                       <th className="p-4">申請時間</th>
                       <th className="p-4">狀態</th>
                       <th className="p-4 text-right">操作</th>
@@ -1862,11 +1860,11 @@ export default function App() {
                     {/* Date Settings for Activity - slightly reduced padding */}
                     <div className="px-3 pt-3 pb-2 space-y-3 bg-white border-b border-stone-100">
                         <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-stone-400 uppercase tracking-wider">截止報名</label>
+                            <label className="text-sm font-bold text-red-600 uppercase tracking-wider">截止報名</label>
                             <input type="date" className="w-full p-2 text-xs border border-stone-200 rounded-lg bg-stone-50" disabled={!mgmtSelectedAct} value={currentActivityDates.dead} onChange={(e) => handleUpdateActivityDate('activity_deadline', e.target.value)} />
                         </div>
                         <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-stone-400 uppercase tracking-wider">圓滿結束</label>
+                            <label className="text-sm font-bold text-red-600 uppercase tracking-wider">圓滿結束</label>
                             <input type="date" className="w-full p-2 text-xs border border-stone-200 rounded-lg bg-stone-50" disabled={!mgmtSelectedAct} value={currentActivityDates.end} onChange={(e) => handleUpdateActivityDate('activity_end_date', e.target.value)} />
                         </div>
                     </div>
@@ -1891,15 +1889,14 @@ export default function App() {
                     {/* Date Settings for Option */}
                     <div className="px-3 pt-3 pb-2 space-y-3 bg-white border-b border-stone-100">
                         <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-stone-400 uppercase tracking-wider">截止報名</label>
+                            <label className="text-sm font-bold text-red-600 uppercase tracking-wider">截止報名</label>
                             <input type="date" className="w-full p-2 text-xs border border-stone-200 rounded-lg bg-stone-50" disabled={!mgmtSelectedOpt || !!currentActivityDates.dead} value={currentActivityDates.dead || currentOptionDates.dead} onChange={(e) => handleUpdateOptionDate('option_deadline', e.target.value)} />
                         </div>
                         <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-stone-400 uppercase tracking-wider">圓滿結束</label>
+                            <label className="text-sm font-bold text-red-600 uppercase tracking-wider">圓滿結束</label>
                             <input type="date" className="w-full p-2 text-xs border border-stone-200 rounded-lg bg-stone-50" disabled={!mgmtSelectedOpt || !!currentActivityDates.end} value={currentActivityDates.end || currentOptionDates.end} onChange={(e) => handleUpdateOptionDate('option_end_date', e.target.value)} />
                         </div>
                     </div>
-
                     <div className="flex-1 overflow-y-auto p-2 space-y-1">
                         {adminOptions.map(o => (
                             <div key={o} onClick={()=>setMgmtSelectedOpt(o)} className={`p-3 rounded-xl cursor-pointer flex justify-between items-center transition-all ${mgmtSelectedOpt === o ? 'bg-[#4f093c] text-white shadow-md' : 'hover:bg-stone-100 text-stone-600'}`}>
@@ -1929,22 +1926,42 @@ export default function App() {
               </div>
 
               <div className="mt-20">
-                 <div className="flex justify-between items-end mb-6">
+                 <div className="flex justify-between items-center mb-6">
                     <h3 className="text-3xl font-bold text-[#4f093c]">2、欄位管理</h3>
-                    <button onClick={handlePublishSettings} className="bg-[#4f093c] text-white px-6 py-2 rounded-xl font-bold text-sm shadow hover:bg-[#3d072e]"><UploadCloud className="w-4 h-4 inline-block mr-2" />發佈設定</button>
+                    <button onClick={handlePublishSettings} className="bg-[#4f093c] text-white px-6 py-3 rounded-xl font-bold text-base shadow-md hover:bg-[#3d072e] flex items-center gap-2 transition-all shrink-0">
+                      <UploadCloud className="w-5 h-5" /> 發佈設定
+                    </button>
                  </div>
                  <div className="overflow-x-auto rounded-[40px] border border-stone-100 shadow-sm">
                     <table className="w-full text-left text-sm bg-white">
                        <thead className="bg-stone-50 text-stone-600 font-bold border-b border-stone-200">
-                          <tr><th className="p-6">欄位名稱 (Key)</th><th className="p-6">顯示標籤 (Label)</th><th className="p-6">類型 (Type)</th><th className="p-6">必填設定</th><th className="p-6">備註說明</th></tr>
+                          <tr>
+                            <th className="p-6">欄位名稱 (Key)</th>
+                            <th className="p-6">顯示標籤 (Label)</th>
+                            <th className="p-6">類型 (Type)</th>
+                            <th className="p-6">必填設定</th>
+                            <th className="p-6">備註說明</th>
+                          </tr>
                        </thead>
                        <tbody className="divide-y divide-[#F2ECE4] text-slate-600 font-bold text-base">
-                          {fieldConfigs.map((col) => <tr key={col.field_key} className="hover:bg-[#FAF9F6] transition-colors"><td className="p-6 font-mono text-[#4f093c]">{col.field_key}</td><td className="p-6">{col.field_label}</td><td className="p-6 font-mono text-slate-400">{col.field_type}</td><td className="p-6"><label className="flex items-center cursor-pointer"><input type="checkbox" checked={col.is_required} onChange={(e) => handleUpdateFieldConfig(col.field_key, 'is_required', e.target.checked)} className="w-5 h-5 rounded border-slate-300 text-[#4f093c] focus:ring-[#4f093c]" /><span className="ml-2 text-sm">{col.is_required ? '必填' : '選填'}</span></label></td><td className="p-6"><input type="text" value={col.description || ''} onChange={(e) => handleUpdateFieldConfig(col.field_key, 'description', e.target.value)} className="w-full p-2 border rounded-lg text-sm" placeholder="備註..." /></td></tr>)}
+                          {fieldConfigs.map((col) => (
+                            <tr key={col.field_key} className="hover:bg-[#FAF9F6] transition-colors">
+                              <td className="p-6 font-mono text-[#4f093c]">{col.field_key}</td>
+                              <td className="p-6">{col.field_label}</td>
+                              <td className="p-6 font-mono text-slate-400">{col.field_type}</td>
+                              <td className="p-6">
+                                <label className="flex items-center cursor-pointer">
+                                  <input type="checkbox" checked={col.is_required} onChange={(e) => handleUpdateFieldConfig(col.field_key, 'is_required', e.target.checked)} className="w-5 h-5 rounded border-slate-300 text-[#4f093c] focus:ring-[#4f093c]" />
+                                  <span className="ml-2 text-sm">{col.is_required ? '必填' : '選填'}</span>
+                                </label>
+                              </td>
+                              <td className="p-6">
+                                <input type="text" value={col.description || ''} onChange={(e) => handleUpdateFieldConfig(col.field_key, 'description', e.target.value)} className="w-full p-2 border rounded-lg text-sm" placeholder="備註..." />
+                              </td>
+                            </tr>
+                          ))}
                        </tbody>
                     </table>
-                 </div>
-                 <div className="mt-6 flex justify-end">
-                    <button onClick={handlePublishSettings} className="bg-[#4f093c] text-white px-6 py-2 rounded-xl font-bold shadow-lg hover:bg-[#3d072e] flex items-center gap-2 transition-all"><UploadCloud className="w-4 h-4" /> 發佈設定</button>
                  </div>
               </div>
            </div>
