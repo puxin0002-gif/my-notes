@@ -10,11 +10,11 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v87.32 (顯示格式優化版)
+ * 系統版本：v87.33 (法名顯示格式調整版)
  * 修正說明：
- * 1. [UI] 紀錄卡片：調整姓名列顯示，性別與法名同字級，移除性別括號，改為「(法名) / 性別」。
- * 2. [UI] 資料總覽：基本資料欄位強制分行，第一行姓名，第二行「(法名) / 性別」。
- * 3. [System] 維持 v87.31 所有邏輯與設定。
+ * 1. [UI] 紀錄卡片：法名移除括號，前方加入 "/" 分隔符號。
+ * 2. [UI] 資料總覽：法名移除括號，前方加入 "/" 分隔符號。
+ * 3. [System] 維持 v87.32 所有邏輯與設定。
  */
 
 // --- 主色系設定 ---
@@ -1493,7 +1493,7 @@ export default function App() {
                           <div className={`flex items-baseline gap-2 mb-4 ${isInactive ? 'text-stone-400' : 'text-slate-800'}`}>
                               <span className="text-xl font-bold">{n.real_name}</span>
                               <span className="text-base font-bold opacity-70">
-                                  {n.dharma_name ? `(${n.dharma_name})` : ''} <span className="mx-1 text-stone-400">/</span> {n.gender}
+                                  {n.dharma_name ? ` / ${n.dharma_name}` : ''} <span className="mx-1 text-stone-400">/</span> {n.gender}
                               </span>
                               
                               <span className={`text-sm font-bold ml-auto ${isInactive ? 'text-stone-400' : 'text-[#7A2E40]'}`}>
@@ -1786,7 +1786,7 @@ export default function App() {
                         <td className="p-4 align-top">
                           <div className={boldStyle}>{n.real_name}</div>
                           <div className="text-sm font-bold text-stone-500 mt-1">
-                              {n.dharma_name ? `(${n.dharma_name})` : '(無)'} / {n.gender}
+                              {n.dharma_name ? ` / ${n.dharma_name}` : ' / (無)'} / {n.gender}
                           </div>
                           <div className={subTextStyle}>{n.registrant_type}</div>
                           <div className={`${n.is_deleted || isEnded ? 'text-stone-400' : 'text-[#4f093c]'} font-bold`}>{n.identity === '參加法會' ? '法會' : (n.identity === '發心義工' ? '義工' : n.identity)}</div>
