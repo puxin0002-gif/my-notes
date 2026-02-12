@@ -10,11 +10,12 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v87.10 (JSX 結構與閉合修復版)
+ * 系統版本：v87.12 (編譯修復與紀錄卡片優化版)
  * 修正說明：
- * 1. [Fix] 重新排版 JSX 結構，打破超長行，解決「找不到 div」的語法解析截斷問題。
- * 2. [System] 確保所有 HTML 標籤正確對應與閉合。
- * 3. [System] 完整保留 v87.9 的所有功能 (反灰樣式、卡片合併顯示、無重複變數)。
+ * 1. [Fix] 徹底移除 JSX 中導致編譯失敗的 filterAct 及 adminFilterActivities 殘留參照。
+ * 2. [UI] 紀錄卡片：姓名調整至第 2 行，字級同「地點」大小。
+ * 3. [UI] 紀錄卡片：身份精簡為「法會」/「義工」，顯示於姓名後方。
+ * 4. [UI] 紀錄卡片：「勾選內容」與「自訂備註」合併顯示在行程下方。
  */
 
 // --- 主色系設定 ---
@@ -1290,15 +1291,18 @@ export default function App() {
                    <div key={n.id} className={`rounded-[24px] shadow-sm border border-stone-100 overflow-hidden hover:shadow-md transition-all group`} style={{ backgroundColor: CARD_BG_COLOR }}>
                       <div className="relative p-6 pb-0">
                           
-                          <div className="flex items-baseline gap-2 mb-3">
-                              <span className="text-3xl font-black text-slate-800">{n.real_name}</span>
-                              {n.dharma_name && <span className="text-lg font-bold text-stone-500">({n.dharma_name})</span>}
-                              <span className="text-xs bg-stone-100 text-stone-500 px-2 py-1 rounded-full">{n.registrant_type}</span>
-                          </div>
-
                           <div className="flex items-center gap-2 mb-2">
                               <span className={`px-3 py-1 rounded-lg text-xs font-bold text-white ${status.color}`}>{status.text}</span>
                               <h3 className="text-lg font-bold text-slate-600">{n.activity_location} <span className="text-stone-300 mx-1">|</span> {n.activity_name}</h3>
+                          </div>
+
+                          <div className="flex items-baseline gap-2 mb-3">
+                              <span className="text-lg font-bold text-slate-800">{n.real_name}</span>
+                              {n.dharma_name && <span className="text-base font-bold text-stone-500">({n.dharma_name})</span>}
+                              <span className="text-sm font-bold text-[#4f093c]">
+                                {n.identity === '參加法會' ? '法會' : (n.identity === '發心義工' ? '義工' : n.identity)}
+                              </span>
+                              <span className="text-xs bg-stone-100 text-stone-500 px-2 py-1 rounded-full">{n.registrant_type}</span>
                           </div>
                           
                           <div className={`space-y-3 ${isInactive ? 'opacity-50 pointer-events-none' : ''}`}>
@@ -1332,7 +1336,6 @@ export default function App() {
                                     </div>
                                 )}
 
-                                <p><span className="font-bold text-stone-400">身分：</span> {n.identity} {n.volunteer_type ? ` - ${n.volunteer_type}` : ''}</p>
                                 {n.volunteer_group && <p><span className="font-bold text-[#4f093c]">組別：</span> {n.volunteer_group}</p>}
 
                                 {(n.start_date || n.end_date) && (
@@ -1482,13 +1485,13 @@ export default function App() {
                     
                     if(n.is_deleted) { 
                       statusBadge = <span className="px-2 py-0.5 rounded text-xs font-bold w-fit bg-red-100 text-red-700">已刪除</span>; 
-                      rowStyle = "bg-stone-100 text-stone-400"; 
+                      rowStyle = "bg-stone-100"; 
                       textStyle = "text-stone-400"; 
                       subTextStyle = "text-stone-400"; 
                       boldStyle = "font-bold text-lg text-stone-400"; 
                     } else if(isEnded) { 
                       statusBadge = <span className="px-2 py-0.5 rounded text-xs font-bold w-fit bg-stone-200 text-stone-600">已圓滿</span>; 
-                      rowStyle = "bg-stone-50 text-stone-500"; 
+                      rowStyle = "bg-stone-50"; 
                       textStyle = "text-stone-400"; 
                       subTextStyle = "text-stone-400"; 
                       boldStyle = "font-bold text-lg text-stone-400"; 
