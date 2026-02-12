@@ -10,13 +10,10 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v87.26 (密碼重設與排版全面優化版)
+ * 系統版本：v87.27 (設定頁面按鈕排版優化版)
  * 修正說明：
- * 1. [Fix] 忘記密碼：動態建立具備 SERVICE_ROLE_KEY 的管理員實例，解決「This endpoint requires a valid Bearer token」權限錯誤。
- * 2. [UI] 忘記密碼：新密碼強制為「6碼純數字」，並於重設成功後彈出視窗顯示。
- * 3. [UI] 登記表單：「發心開始/結束」輸入框字級放大，完全比照「抵達/離開」樣式。
- * 4. [UI] 審核中心：保留所有申請紀錄(已批准/已拒絕/待審核)，不因狀態改變而消失。
- * 5. [System] 完整保留 v87.24 的反灰樣式、資料總覽底色、時間精準匯出等設定。
+ * 1. [UI] 設定頁籤：將「發佈設定」按鈕移至大標旁邊，統一按鈕尺寸與樣式，並移除底部多餘按鈕。
+ * 2. [System] 完整保留 v87.26 所有的密碼重設修復、反灰樣式、資料總覽底色、時間精準匯出等設定。
  */
 
 // --- 主色系設定 ---
@@ -1811,8 +1808,15 @@ export default function App() {
         {/* Admin Settings Tab */}
         {activeTab === 'admin_settings' && isAdmin && (
            <div className={`p-10 rounded-[40px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}>
-              <h3 className="text-3xl font-bold text-[#4f093c] mb-2">1、報名行程設定</h3>
-              <p className="text-sm text-stone-400 mb-10">設定地點、活動、行程層級與日期控制</p>
+              <div className="flex justify-between items-start mb-8">
+                 <div>
+                    <h3 className="text-3xl font-bold text-[#4f093c] mb-2">1、報名行程設定</h3>
+                    <p className="text-sm text-stone-400">設定地點、活動、行程層級與日期控制</p>
+                 </div>
+                 <button onClick={handlePublishSettings} className="bg-[#4f093c] text-white px-6 py-3 rounded-xl font-bold text-base shadow-md hover:bg-[#3d072e] flex items-center gap-2 transition-all shrink-0">
+                    <UploadCloud className="w-5 h-5" /> 發佈設定
+                 </button>
+              </div>
               
               <div className="grid grid-cols-1 lg:grid-cols-4 gap-3 h-[600px]">
                  {/* Column 1: Location */}
@@ -1913,10 +1917,10 @@ export default function App() {
               </div>
 
               <div className="mt-20">
-                 <div className="flex justify-between items-end mb-6">
+                 <div className="flex justify-between items-center mb-6">
                     <h3 className="text-3xl font-bold text-[#4f093c]">2、欄位管理</h3>
-                    <button onClick={handlePublishSettings} className="bg-[#4f093c] text-white px-6 py-2 rounded-xl font-bold text-sm shadow hover:bg-[#3d072e]">
-                      <UploadCloud className="w-4 h-4 inline-block mr-2" />發佈設定
+                    <button onClick={handlePublishSettings} className="bg-[#4f093c] text-white px-6 py-3 rounded-xl font-bold text-base shadow-md hover:bg-[#3d072e] flex items-center gap-2 transition-all shrink-0">
+                      <UploadCloud className="w-5 h-5" /> 發佈設定
                     </button>
                  </div>
                  <div className="overflow-x-auto rounded-[40px] border border-stone-100 shadow-sm">
@@ -1949,11 +1953,6 @@ export default function App() {
                           ))}
                        </tbody>
                     </table>
-                 </div>
-                 <div className="mt-6 flex justify-end">
-                    <button onClick={handlePublishSettings} className="bg-[#4f093c] text-white px-6 py-2 rounded-xl font-bold shadow-lg hover:bg-[#3d072e] flex items-center gap-2 transition-all">
-                      <UploadCloud className="w-4 h-4" /> 發佈設定
-                    </button>
                  </div>
               </div>
            </div>
