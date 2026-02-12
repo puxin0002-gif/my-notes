@@ -10,12 +10,11 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v87.29 (介面微調與深色模式優化版)
+ * 系統版本：v87.30 (資料雙重篩選與性別顯示優化版)
  * 修正說明：
- * 1. [UI] 登入畫面：卡片底色改為 CARD_BG_COLOR (#f0e6d5)，下方按鈕加大並改色(藍/橘)。
- * 2. [UI] 設定頁面：「截止報名」與「圓滿結束」標籤加大並改為紅色，增強警示效果。
- * 3. [Fix] 手機深色模式：在根容器加入 color-scheme: light，強制表單元件(如日期選擇器)呈現淺色，避免文字與背景同色。
- * 4. [System] 完整保留 v87.28 的所有功能 (性別欄位、匯出優化、反灰樣式)。
+ * 1. [UI] 登入畫面 & 介面：維持 v87.29 所有設定。
+ * 2. [Data] 資料顯示：在「紀錄」、「資料總覽」與「Excel匯出」中，於姓名後方加入「性別」欄位。
+ * 3. [Filter] 資料篩選：改為「地點」+「活動」雙重篩選，並合併於同一行顯示，方便精確查找。
  */
 
 // --- 主色系設定 ---
@@ -46,7 +45,7 @@ interface Note {
   user_id: string;
   real_name: string;
   dharma_name?: string;
-  gender: string; // 新增性別
+  gender: string; // 性別
   registrant_type: string;
   registration_option: string;
   activity_location: string;
@@ -169,7 +168,6 @@ const getIdLast4FromEmail = (email: string | undefined | null): string => {
   } catch { return '0000'; }
 };
 
-// 增強版：精準格式化日期與時間
 const formatDateTime = (isoString: string | undefined | null): string => {
   if (!isoString) return '-';
   try {
@@ -265,23 +263,22 @@ export default function App() {
   const [password, setPassword] = useState<string>('');
   const [authMode, setAuthMode] = useState<'login'|'signup'|'forgot'>('login');
   
-  // 修改密碼 Modal 狀態
   const [showPwdModal, setShowPwdModal] = useState<boolean>(false);
   const [newPwdVal, setNewPwdVal] = useState<string>('');
   const [resetPwdResult, setResetPwdResult] = useState<{user: string, pwd: string}|null>(null);
   
-  // 日期狀態
   const [todayDate, setTodayDate] = useState('');
   const [currentDateTime, setCurrentDateTime] = useState('');
   const [historyFilterLoc, setHistoryFilterLoc] = useState<string>('');
   
   // 資料頁籤的篩選器
   const [filterLoc, setFilterLoc] = useState<string>('');
+  const [filterAct, setFilterAct] = useState<string>(''); // 新增活動篩選
   const [searchText, setSearchText] = useState<string>('');
   
   const [formData, setFormData] = useState(INITIAL_FORM_DATA);
 
-  // 管理介面狀態
+  // 管理後台設定用
   const [newBulletin, setNewBulletin] = useState<string>('');
   const [newLocation, setNewLocation] = useState<string>('');
   const [newActivity, setNewActivity] = useState<string>('');
@@ -476,6 +473,16 @@ export default function App() {
   const adminActivities = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity).map(h => h.activity as string))].sort(), [hierarchyData, mgmtSelectedLoc]);
   const adminOptions = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option).map(h => h.option as string))].sort(), [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct]);
   const adminContents = useMemo(() => hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option === mgmtSelectedOpt && h.content), [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
+
+  // 資料篩選專用
+  const filterActivityOptions = useMemo(() => {
+    let source = hierarchyData;
+    if (filterLoc) {
+        source = source.filter(h => h.location === filterLoc);
+    }
+    // 修正：使用明確的型別判斷 (Type Predicate) 排除 null，解決 TS 錯誤
+    return [...new Set(source.map(h => h.activity).filter((a): a is string => !!a))].sort();
+  }, [hierarchyData, filterLoc]);
 
   const filteredTransportOptions = useMemo(() => {
     const all = ["大車-精舍統一行程", "小車-自訂抵離寺", "自行前往-自訂抵離寺"];
@@ -1064,6 +1071,7 @@ export default function App() {
   const filteredAdminNotes = useMemo(() => {
     return notes.filter(n => {
         if (filterLoc && n.activity_location !== filterLoc) return false;
+        if (filterAct && n.activity_name !== filterAct) return false; // 新增活動篩選
         if (searchText) {
             const search = searchText.toLowerCase();
             return (
@@ -1090,7 +1098,7 @@ export default function App() {
         if (a.transportation !== b.transportation) return String(a.transportation || '').localeCompare(String(b.transportation || ''));
         return String(a.identity || '').localeCompare(String(b.identity || ''));
     });
-  }, [notes, filterLoc, searchText, getRestrictionStatus]); 
+  }, [notes, filterLoc, filterAct, searchText, getRestrictionStatus]); 
 
   const getCurrentDeadlineText = () => {
       const { endDate, deadline } = getHierarchyDates(formData.activity_location, formData.activity_name, formData.activity_option);
@@ -1454,7 +1462,6 @@ export default function App() {
                  const status = getCardStatus(n);
                  const isInactive = status.isInactive;
                  
-                 // TypeScript 陣列型別與髒字串修復
                  const rawContents: any = n.selected_contents;
                  let safeContents: string[] = [];
                  if (Array.isArray(rawContents)) {
@@ -1482,11 +1489,14 @@ export default function App() {
                               </h3>
                           </div>
 
-                          {/* 第二行：姓名移至此處，並放大字級同地點。身分精簡後放置於此 */}
+                          {/* 第二行：姓名+性別 */}
                           <div className={`flex items-baseline gap-2 mb-4 ${isInactive ? 'text-stone-400' : 'text-slate-800'}`}>
                               <span className="text-xl font-bold">{n.real_name}</span>
                               {n.dharma_name && <span className="text-base font-bold opacity-70">({n.dharma_name})</span>}
-                              <span className={`text-sm font-bold ${isInactive ? 'text-stone-400' : 'text-[#7A2E40]'}`}>
+                              {/* 新增性別顯示 */}
+                              <span className="text-sm font-bold opacity-70 text-slate-500">({n.gender})</span>
+                              
+                              <span className={`text-sm font-bold ml-auto ${isInactive ? 'text-stone-400' : 'text-[#7A2E40]'}`}>
                                 {n.identity === '參加法會' ? '法會' : (n.identity === '發心義工' ? '義工' : n.identity)}
                               </span>
                               <span className={`text-xs px-2 py-1 rounded-full ${isInactive ? 'bg-stone-200/50 text-stone-400' : 'bg-stone-100 text-stone-500'}`}>{n.registrant_type}</span>
@@ -1494,7 +1504,7 @@ export default function App() {
                           
                           <div className={`space-y-3 ${isInactive ? 'opacity-70 pointer-events-none' : ''}`}>
                              
-                             {/* 第三行：行程選項 (修改為藍色字體、字級縮小為 text-sm) */}
+                             {/* 第三行：行程選項 */}
                              <div className={`text-sm font-bold border-l-[3px] pl-2 ${isInactive ? 'text-stone-400 border-stone-300' : 'text-blue-600 border-blue-600'}`}>
                                  {n.activity_option}
                              </div>
@@ -1517,7 +1527,6 @@ export default function App() {
                                 </div>
                              )}
                              
-                             {/* 其他交通、安單等細節 */}
                              <div className="text-sm pt-2 border-t border-stone-100 grid grid-cols-1 gap-1">
                                 {n.transportation && <p className={isInactive ? 'text-stone-400' : 'text-stone-600'}><span className="font-bold opacity-70">交通：</span> {n.transportation}</p>}
                                 {(n.arrival_datetime || n.departure_datetime) && (
@@ -1675,11 +1684,27 @@ export default function App() {
           <div className={`p-8 rounded-[32px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}>
             <div className="flex justify-between items-center mb-8">
               <h3 className="text-3xl font-bold text-[#4f093c]">資料總覽-所有報名資料</h3>
-              <div className="flex gap-3">
-                <select className="p-2 bg-white border-none rounded-xl text-base font-bold text-stone-600 outline-none" value={filterLoc} onChange={e=>setFilterLoc(e.target.value)}>
+              <div className="flex gap-3 items-center">
+                {/* 雙重篩選：地點 + 活動 */}
+                <select 
+                    className="p-2 bg-white border-none rounded-xl text-base font-bold text-stone-600 outline-none" 
+                    value={filterLoc} 
+                    onChange={e => { setFilterLoc(e.target.value); setFilterAct(''); }}
+                >
                   <option value="">所有地點</option>
                   {locations.map(l => <option key={l} value={l}>{l}</option>)}
                 </select>
+
+                <select 
+                    className="p-2 bg-white border-none rounded-xl text-base font-bold text-stone-600 outline-none max-w-[12rem] truncate" 
+                    value={filterAct} 
+                    onChange={e => setFilterAct(e.target.value)}
+                    disabled={!filterLoc} // 選擇地點後才能選活動，避免混淆
+                >
+                    <option value="">{filterLoc ? '所有活動' : '請先選地點'}</option>
+                    {filterActivityOptions.map(a => <option key={a} value={a}>{a}</option>)}
+                </select>
+
                 <div className="relative">
                   <input type="text" placeholder="搜尋..." className="p-2 pl-8 border-none rounded-xl text-base font-bold text-stone-600 outline-none" value={searchText} onChange={e=>setSearchText(e.target.value)} />
                   <Search className="w-4 h-4 absolute left-2 top-1/2 -translate-y-1/2 text-stone-400"/>
@@ -1706,7 +1731,6 @@ export default function App() {
                   {filteredAdminNotes.map(n => { 
                     const { isEnded } = getRestrictionStatus(n.activity_location, n.activity_name, n.activity_option); 
                     
-                    // TypeScript 陣列型別與髒字串修復
                     const rawContents: any = n.selected_contents;
                     let safeContents: string[] = [];
                     if (Array.isArray(rawContents)) {
@@ -1723,7 +1747,6 @@ export default function App() {
                     const hasRemarks = typeof n.other_remarks === 'string' && n.other_remarks.trim().length > 0 && n.other_remarks !== 'null';
                     const hasMemo = typeof n.memo === 'string' && n.memo.trim().length > 0 && n.memo !== 'null';
                     
-                    // 內容與備註合併，無前綴文字
                     const mergedRemarks = [];
                     if (hasContents) mergedRemarks.push(safeContents.join('、'));
                     if (hasRemarks) mergedRemarks.push(n.other_remarks);
@@ -1762,6 +1785,8 @@ export default function App() {
                         </td>
                         <td className="p-4 align-top">
                           <div className={boldStyle}>{n.real_name} <span className="text-sm font-normal opacity-70">({n.dharma_name || '無'})</span></div>
+                          {/* 性別顯示 */}
+                          <div className="text-xs font-bold text-slate-500 mt-0.5">{n.gender}</div>
                           <div className={subTextStyle}>{n.registrant_type}</div>
                           <div className={`${n.is_deleted || isEnded ? 'text-stone-400' : 'text-[#4f093c]'} font-bold`}>{n.identity === '參加法會' ? '法會' : (n.identity === '發心義工' ? '義工' : n.identity)}</div>
                         </td>
@@ -1861,11 +1886,11 @@ export default function App() {
                     <div className="px-3 pt-3 pb-2 space-y-3 bg-white border-b border-stone-100">
                         <div className="space-y-1">
                             <label className="text-sm font-bold text-red-600 uppercase tracking-wider">截止報名</label>
-                            <input type="date" className="w-full p-2 text-xs border border-stone-200 rounded-lg bg-stone-50" disabled={!mgmtSelectedAct} value={currentActivityDates.dead} onChange={(e) => handleUpdateActivityDate('activity_deadline', e.target.value)} />
+                            <input type="date" className="w-full p-2 text-xs border border-stone-200 rounded-lg bg-stone-50" disabled={!mgmtSelectedAct} value={currentActivityDates.dead || ''} onChange={(e) => handleUpdateActivityDate('activity_deadline', e.target.value)} />
                         </div>
                         <div className="space-y-1">
                             <label className="text-sm font-bold text-red-600 uppercase tracking-wider">圓滿結束</label>
-                            <input type="date" className="w-full p-2 text-xs border border-stone-200 rounded-lg bg-stone-50" disabled={!mgmtSelectedAct} value={currentActivityDates.end} onChange={(e) => handleUpdateActivityDate('activity_end_date', e.target.value)} />
+                            <input type="date" className="w-full p-2 text-xs border border-stone-200 rounded-lg bg-stone-50" disabled={!mgmtSelectedAct} value={currentActivityDates.end || ''} onChange={(e) => handleUpdateActivityDate('activity_end_date', e.target.value)} />
                         </div>
                     </div>
 
@@ -1890,11 +1915,11 @@ export default function App() {
                     <div className="px-3 pt-3 pb-2 space-y-3 bg-white border-b border-stone-100">
                         <div className="space-y-1">
                             <label className="text-sm font-bold text-red-600 uppercase tracking-wider">截止報名</label>
-                            <input type="date" className="w-full p-2 text-xs border border-stone-200 rounded-lg bg-stone-50" disabled={!mgmtSelectedOpt || !!currentActivityDates.dead} value={currentActivityDates.dead || currentOptionDates.dead} onChange={(e) => handleUpdateOptionDate('option_deadline', e.target.value)} />
+                            <input type="date" className="w-full p-2 text-xs border border-stone-200 rounded-lg bg-stone-50" disabled={!mgmtSelectedOpt || !!currentActivityDates.dead} value={currentActivityDates.dead || currentOptionDates.dead || ''} onChange={(e) => handleUpdateOptionDate('option_deadline', e.target.value)} />
                         </div>
                         <div className="space-y-1">
                             <label className="text-sm font-bold text-red-600 uppercase tracking-wider">圓滿結束</label>
-                            <input type="date" className="w-full p-2 text-xs border border-stone-200 rounded-lg bg-stone-50" disabled={!mgmtSelectedOpt || !!currentActivityDates.end} value={currentActivityDates.end || currentOptionDates.end} onChange={(e) => handleUpdateOptionDate('option_end_date', e.target.value)} />
+                            <input type="date" className="w-full p-2 text-xs border border-stone-200 rounded-lg bg-stone-50" disabled={!mgmtSelectedOpt || !!currentActivityDates.end} value={currentActivityDates.end || currentOptionDates.end || ''} onChange={(e) => handleUpdateOptionDate('option_end_date', e.target.value)} />
                         </div>
                     </div>
                     <div className="flex-1 overflow-y-auto p-2 space-y-1">
