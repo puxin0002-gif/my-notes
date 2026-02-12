@@ -10,13 +10,13 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v87.25 (密碼重設與輸入樣式優化版)
+ * 系統版本：v87.26 (密碼重設與排版全面優化版)
  * 修正說明：
- * 1. [Fix] 忘記密碼：真正呼叫 supabase.auth.admin.updateUserById 更新密碼，解決無法登入問題。
- * 2. [UI] 忘記密碼：新密碼改為純數字，並使用彈出式獨立視窗顯示。
- * 3. [UI] 審核中心：移除 pending 過濾，讓「已處理」的資料保留在列表中，並顯示審核狀態。
- * 4. [UI] 登記表單：「發心開始/結束」的輸入框大小已調大，比照「抵寺/離寺」的樣式。
- * 5. [System] 完整保留 v87.24 所有的資料匯出與反灰樣式設定。
+ * 1. [Fix] 忘記密碼：動態建立具備 SERVICE_ROLE_KEY 的管理員實例，解決「This endpoint requires a valid Bearer token」權限錯誤。
+ * 2. [UI] 忘記密碼：新密碼強制為「6碼純數字」，並於重設成功後彈出視窗顯示。
+ * 3. [UI] 登記表單：「發心開始/結束」輸入框字級放大，完全比照「抵達/離開」樣式。
+ * 4. [UI] 審核中心：保留所有申請紀錄(已批准/已拒絕/待審核)，不因狀態改變而消失。
+ * 5. [System] 完整保留 v87.24 的反灰樣式、資料總覽底色、時間精準匯出等設定。
  */
 
 // --- 主色系設定 ---
@@ -168,17 +168,15 @@ const getIdLast4FromEmail = (email: string | undefined | null): string => {
   } catch { return '0000'; }
 };
 
-// 增強版：精準格式化日期與時間 (解決只存日期卻跑出 08:00 的問題)
+// 增強版：精準格式化日期與時間
 const formatDateTime = (isoString: string | undefined | null): string => {
   if (!isoString) return '-';
   try {
-    // 若為純日期格式 (無 T 且無空格，長度10)
     if (isoString.length === 10 && !isoString.includes('T') && !isoString.includes(' ')) {
         return isoString.replace(/-/g, '/');
     }
     const d = new Date(isoString);
     if (isNaN(d.getTime())) return isoString;
-    // Format: YYYY/MM/DD HH:mm
     return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   } catch { return isoString || '-'; }
 };
@@ -613,11 +611,10 @@ export default function App() {
     return true;
   };
 
-  // 強制將時間轉為 ISO 字串，確保寫入後端時不會被當成純 Date 而截去時間
   const safeDateToISO = (val: string | null | undefined) => {
     if (!val || val.trim() === '') return null;
     try {
-        if (val.endsWith('Z')) return val; // 已經是標準格式
+        if (val.endsWith('Z')) return val; 
         const d = new Date(val);
         if (!isNaN(d.getTime())) return d.toISOString();
     } catch (e) {}
@@ -877,11 +874,19 @@ export default function App() {
         const tempPwd = Math.floor(100000 + Math.random() * 900000).toString();
         
         try {
-            if (!supabaseClient.auth.admin) {
-                throw new Error("無法存取 Admin API，前端的 Anon Key 沒有修改密碼的權限。");
+            const url = typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_SUPABASE_URL : '';
+            const serviceKey = typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY : '';
+
+            if (!serviceKey) {
+                throw new Error("前端未配置 NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY，無法跨權限修改。");
             }
-            
-            const { error: updateErr } = await supabaseClient.auth.admin.updateUserById(req.uid, { password: tempPwd });
+
+            // 建立具有 Service Role 權限的 Admin Client
+            const adminClient = window.supabase.createClient(url, serviceKey, {
+                auth: { autoRefreshToken: false, persistSession: false }
+            });
+
+            const { error: updateErr } = await adminClient.auth.admin.updateUserById(req.uid, { password: tempPwd });
             
             if (updateErr) throw updateErr;
 
@@ -1380,11 +1385,11 @@ export default function App() {
                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-4 bg-white/50 rounded-2xl border border-blue-100">
                      <div className="space-y-2">
                        <label className="text-sm font-bold text-[#4f093c] ml-1">發心開始*</label>
-                       <input type="datetime-local" min={currentDateTime} className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white" value={formData.start_date || ''} onChange={e=>setFormData({...formData, start_date: e.target.value})} />
+                       <input type="datetime-local" min={currentDateTime} className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white focus:ring-2 focus:ring-[#4f093c]/20 outline-none shadow-sm" value={formData.start_date || ''} onChange={e=>setFormData({...formData, start_date: e.target.value})} />
                      </div>
                      <div className="space-y-2">
                        <label className="text-sm font-bold text-[#4f093c] ml-1">發心結束*</label>
-                       <input type="datetime-local" min={formData.start_date || currentDateTime} className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white" value={formData.end_date || ''} onChange={e=>setFormData({...formData, end_date: e.target.value})} />
+                       <input type="datetime-local" min={formData.start_date || currentDateTime} className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white focus:ring-2 focus:ring-[#4f093c]/20 outline-none shadow-sm" value={formData.end_date || ''} onChange={e=>setFormData({...formData, end_date: e.target.value})} />
                      </div>
                    </div>
                  )}
@@ -1733,7 +1738,7 @@ export default function App() {
                       boldStyle = "font-bold text-xl text-stone-400"; 
                     } else { 
                       statusBadge = <span className={`px-2 py-0.5 rounded text-xs font-bold w-fit ${n.registration_option === '新增' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{n.registration_option}</span>;
-                      rowStyle = "border-b border-white"; 
+                      rowStyle = "hover:brightness-95 transition-all border-b border-white"; 
                       rowStyleObj = { backgroundColor: CARD_BG_COLOR };
                     } 
                     
@@ -1995,7 +2000,7 @@ export default function App() {
                <p className="text-stone-500 text-center text-sm">
                  已成功為 <span className="font-bold text-slate-800">{resetPwdResult.user}</span> 重設密碼。<br/>請通知使用者使用以下新密碼登入：
                </p>
-               <div className="bg-stone-100 px-6 py-4 rounded-xl w-full text-center">
+               <div className="bg-stone-100 px-6 py-4 rounded-xl w-full text-center border border-stone-200 shadow-inner">
                    <span className="text-4xl font-black text-blue-600 tracking-widest">{resetPwdResult.pwd}</span>
                </div>
                <button onClick={() => setResetPwdResult(null)} className="w-full mt-4 bg-[#4f093c] text-white py-3 rounded-xl font-bold shadow-md hover:bg-[#3d072e] transition-all">
