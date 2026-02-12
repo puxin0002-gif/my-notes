@@ -10,11 +10,11 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v87.19 (匯出Excel優化版 - 抵離寺欄位拆分與時間修復)
+ * 系統版本：v87.20 (匯出時間與密碼重設修復版)
  * 修正說明：
- * 1. [Fix] 強化時間字串拆分邏輯，相容包含 'T' 與包含 ' ' (空格) 的時間格式，確保時間欄位不為空。
- * 2. [Feature] 匯出欄位拆分：「抵達」拆為「抵達日期」、「抵達時間」；「離開」拆為「離開日期」、「離開時間」。
- * 3. [System] 完整保留 v87.18 所有的視覺與介面優化設定。
+ * 1. [Fix] 忘記密碼申請：補上預設/查詢到的 uid，修復 "null value in column 'uid' violates not-null constraint" 錯誤。
+ * 2. [Fix] Excel 匯出時間為空：強化時間字串的 Regex 解析，確保各種格式 (帶T、帶空白、無秒數) 都能精準抓出 HH:mm。
+ * 3. [System] 完整保留 v87.19 所有的視覺與介面優化設定。
  */
 
 // --- 主色系設定 ---
@@ -393,9 +393,31 @@ export default function App() {
                 } else { alert('請檢查信箱並點擊驗證連結。'); }
             }
         } else if (authMode === 'forgot') {
+            // 先嘗試從資料庫取得使用者的 uid，避免 not-null constraint 錯誤
+            let insertUid = '00000000-0000-0000-0000-000000000000'; 
+            try {
+                const { data: uData } = await supabaseClient
+                    .from('user_permissions')
+                    .select('uid')
+                    .eq('user_name', finalUsername)
+                    .eq('id_last4', finalIdLast4)
+                    .maybeSingle();
+                
+                if (uData && uData.uid) {
+                    insertUid = uData.uid;
+                }
+            } catch (e) {
+                console.warn("Could not fetch user uid", e);
+            }
+
             const { error } = await supabaseClient.from('reset_requests').insert([{
-                user_name: finalUsername, id_last4: finalIdLast4, status: 'pending', created_at: new Date().toISOString()
+                user_name: finalUsername, 
+                id_last4: finalIdLast4, 
+                uid: insertUid, // 補上 uid
+                status: 'pending', 
+                created_at: new Date().toISOString()
             }]);
+            
             if (error) throw error;
             alert('重設申請已送出。');
             setAuthMode('login');
@@ -734,17 +756,19 @@ export default function App() {
         
         const finalContentStr = safeContents.length > 0 ? safeContents.join('、') : null;
 
-        // 處理時間拆分
+        // 處理時間拆分 (強化 Regex 以支援包含 T 或空格的情況)
         const getFormatDate = (datetime: string | null | undefined) => {
             if (!datetime) return '';
-            if (datetime.includes('T')) return datetime.split('T')[0];
-            if (datetime.includes(' ')) return datetime.split(' ')[0];
+            const match = datetime.match(/^(\d{4}[-/]\d{2}[-/]\d{2})/);
+            if (match) return match[1].replace(/-/g, '/');
+            if (datetime.includes('T')) return datetime.split('T')[0].replace(/-/g, '/');
+            if (datetime.includes(' ')) return datetime.split(' ')[0].replace(/-/g, '/');
             return datetime;
         };
         const getFormatTime = (datetime: string | null | undefined) => {
             if (!datetime) return '';
-            if (datetime.includes('T')) return datetime.split('T')[1].substring(0, 5);
-            if (datetime.includes(' ')) return datetime.split(' ')[1].substring(0, 5);
+            const match = datetime.match(/\b(\d{2}:\d{2})\b/);
+            if (match) return match[1];
             return '';
         };
 
@@ -1573,6 +1597,7 @@ export default function App() {
                     safeContents = safeContents.filter(s => s && s !== '[]');
                     const hasContents = safeContents.length > 0;
                     const hasRemarks = typeof n.other_remarks === 'string' && n.other_remarks.trim().length > 0 && n.other_remarks !== 'null';
+                    const hasMemo = typeof n.memo === 'string' && n.memo.trim().length > 0 && n.memo !== 'null';
                     
                     // 內容與備註合併，無前綴文字
                     const mergedRemarks = [];
@@ -1646,6 +1671,7 @@ export default function App() {
                         <td className="p-4 align-top">
                           <div className="flex flex-col gap-1">
                             {mergedRemarks.length > 0 && <div className={subTextStyle}>{mergedRemarks.join(' / ')}</div>}
+                            {hasMemo && <div className={`${subTextStyle} mt-2 pt-2 border-t border-stone-200 border-dashed`}>{n.memo}</div>}
                           </div>
                         </td>
                         <td className="p-4 align-top">
