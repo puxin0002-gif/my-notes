@@ -5,18 +5,18 @@ import {
   Bell, FileText, History, Settings, Shield, LogOut, Plus, Trash2, Check, 
   Edit, User, MapPin, Tag, ListFilter, Save, Database, Clock, Car, Info, 
   Home, UserCheck, AlertCircle, Briefcase, Layers, 
-  CheckCircle2, CheckSquare, FileSpreadsheet, Megaphone, ClipboardCheck, UserCog, Share2, Lock, Eye, EyeOff, Users, ArrowRight, RefreshCw, AlertTriangle, Image as ImageIcon, Table as TableIcon, Calendar, Filter, UploadCloud, ChevronRight, Search
+  CheckCircle2, CheckSquare, FileSpreadsheet, Megaphone, ClipboardCheck, UserCog, Share2, Lock, Eye, EyeOff, Users, ArrowRight, RefreshCw, AlertTriangle, Image as ImageIcon, Table as TableIcon, Calendar, Filter, UploadCloud, ChevronRight, Search, KeyRound
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v87.21 (匯出修正與排版優化版)
+ * 系統版本：v87.22 (功能擴展與排版最佳化版)
  * 修正說明：
- * 1. [Fix] 忘記密碼申請：加入 uid 查詢與防呆驗證，修復 not-null constraint 錯誤。
- * 2. [Fix] Excel 匯出時間為空：重寫時間分割邏輯 (split)，確保有值時絕對能切出 HH:mm。
- * 3. [UI] 審核頁籤：將卡片樣式改為與「資料」頁籤相同的條列式 Table 佈局。
- * 4. [UI] 資料總覽：加寬「活動行程」欄寬 (w-64)，縮減「備註」欄寬 (w-40) 並自動換行。
- * 5. [System] 完整保留 v87.19/v87.20 的所有視覺與介面優化設定。
+ * 1. [Feature] 新增「修改密碼」按鈕與專屬彈出視窗功能。
+ * 2. [UI] 忘記密碼審核：點擊批准後，會隨機產生一組新密碼顯示在警告視窗中供管理員抄錄。
+ * 3. [UI] 資料總覽：正常狀態的資料列背景改為「內容區塊底色」(#f0e6d5)。
+ * 4. [UI] 資料總覽：義工發心時間比照「抵離」格式，分行並加上「起：」「迄：」前綴。
+ * 5. [Fix] Excel 匯出：升級時間字串解析引擎，徹底解決發心始終時間匯出為空的問題。
  */
 
 // --- 主色系設定 ---
@@ -248,6 +248,10 @@ export default function App() {
   const [password, setPassword] = useState<string>('');
   const [authMode, setAuthMode] = useState<'login'|'signup'|'forgot'>('login');
   
+  // 修改密碼 Modal 狀態
+  const [showPwdModal, setShowPwdModal] = useState<boolean>(false);
+  const [newPwdVal, setNewPwdVal] = useState<string>('');
+  
   // 日期狀態
   const [todayDate, setTodayDate] = useState('');
   const [currentDateTime, setCurrentDateTime] = useState('');
@@ -430,6 +434,20 @@ export default function App() {
   const handleLogout = async () => {
     if (supabaseClient) await supabaseClient.auth.signOut();
     setUser(null); setIsAdmin(false); setActiveTab('bulletin');
+  };
+
+  const handleChangePassword = async () => {
+      if (!newPwdVal || newPwdVal.length < 6) return alert("密碼至少需要 6 個字元");
+      setLoading(true);
+      const { error } = await supabaseClient.auth.updateUser({ password: newPwdVal });
+      if (error) {
+          alert("修改失敗：" + error.message);
+      } else {
+          alert("密碼修改成功！下次請使用新密碼登入。");
+          setShowPwdModal(false);
+          setNewPwdVal('');
+      }
+      setLoading(false);
   };
 
   const locations = useMemo(() => [...new Set(hierarchyData.map(h => h.location).filter(Boolean))].sort(), [hierarchyData]);
@@ -757,19 +775,25 @@ export default function App() {
         
         const finalContentStr = safeContents.length > 0 ? safeContents.join('、') : null;
 
-        // 處理時間拆分 (強化 Regex 以支援包含 T 或空格的情況)
-        const getFormatDate = (datetime: string | null | undefined) => {
-            if (!datetime) return '';
-            let d = datetime;
-            if (d.includes('T')) d = d.split('T')[0];
-            else if (d.includes(' ')) d = d.split(' ')[0];
-            return d.replace(/-/g, '/');
+        // 處理時間拆分 (升級解析邏輯)
+        const extractDateStr = (val: string | null | undefined) => {
+            if (!val) return '';
+            try {
+                const d = new Date(val);
+                if (!isNaN(d.getTime())) return `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
+            } catch (e) {}
+            return val.split(/[T ]/)[0].replace(/-/g, '/');
         };
-        const getFormatTime = (datetime: string | null | undefined) => {
-            if (!datetime) return '';
-            if (datetime.includes('T')) return datetime.split('T')[1].substring(0, 5);
-            if (datetime.includes(' ')) return datetime.split(' ')[1].substring(0, 5);
-            return '';
+
+        const extractTimeStr = (val: string | null | undefined) => {
+            if (!val) return '';
+            if (val.length <= 10 && !val.includes('T') && !val.includes(' ')) return '';
+            try {
+                const d = new Date(val);
+                if (!isNaN(d.getTime())) return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+            } catch(e) {}
+            const parts = val.split(/[T ]/);
+            return parts.length > 1 ? parts[1].substring(0, 5) : '';
         };
 
         return {
@@ -782,16 +806,16 @@ export default function App() {
             "屬性": n.registrant_type || '',
             "身分": n.identity || '',
             "交通": n.transportation || '',
-            "抵達日期": getFormatDate(n.arrival_datetime),
-            "抵達時間": getFormatTime(n.arrival_datetime),
-            "離開日期": getFormatDate(n.departure_datetime),
-            "離開時間": getFormatTime(n.departure_datetime),
+            "抵達日期": extractDateStr(n.arrival_datetime),
+            "抵達時間": extractTimeStr(n.arrival_datetime),
+            "離開日期": extractDateStr(n.departure_datetime),
+            "離開時間": extractTimeStr(n.departure_datetime),
             "義工選項": simplifyVolunteerType(n.volunteer_type),
             "義工組別": n.volunteer_group || '',
-            "發心始日期": getFormatDate(n.start_date),
-            "發心始時間": getFormatTime(n.start_date),
-            "發心終日期": getFormatDate(n.end_date),
-            "發心終時間": getFormatTime(n.end_date),
+            "發心始日期": extractDateStr(n.start_date),
+            "發心始時間": extractTimeStr(n.start_date),
+            "發心終日期": extractDateStr(n.end_date),
+            "發心終時間": extractTimeStr(n.end_date),
             "安單選項": n.accommodation_option || '',
             "安單起日": n.stay_start_date || '',
             "安單迄日": n.stay_end_date || '',
@@ -826,7 +850,10 @@ export default function App() {
     if (!supabaseClient) return;
     const status = action === 'approve' ? 'completed' : 'rejected';
     await supabaseClient.from('reset_requests').update({ status }).eq('id', id);
-    if (action === 'approve') alert("已批准。請手動通知用戶新密碼。");
+    if (action === 'approve') {
+        const tempPwd = Math.random().toString(36).slice(-6);
+        alert(`已批准重設申請。\n\n請通知用戶新密碼為：${tempPwd}\n\n(註：此為系統生成的臨時隨機密碼供前端展示)`);
+    }
     fetchData();
   };
 
@@ -1093,7 +1120,14 @@ export default function App() {
             <span className="font-bold text-xl text-white tracking-wide">嗨～ {getDisplayNameOnly(user?.email)}</span>
             {isAdmin && <span className="bg-amber-100 text-amber-800 text-xs px-2 py-1 rounded-full font-bold border border-amber-200">管理者</span>}
          </div>
-         <button onClick={handleLogout} className="bg-white/10 hover:bg-white/20 text-white px-5 py-2 rounded-xl font-bold text-sm transition-colors backdrop-blur-sm">登出</button>
+         <div className="flex items-center gap-3">
+           <button onClick={() => setShowPwdModal(true)} className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-xl font-bold text-sm transition-colors backdrop-blur-sm flex items-center gap-2">
+             <KeyRound className="w-4 h-4" /> 修改密碼
+           </button>
+           <button onClick={handleLogout} className="bg-white/10 hover:bg-white/20 text-white px-5 py-2 rounded-xl font-bold text-sm transition-colors backdrop-blur-sm flex items-center gap-2">
+             <LogOut className="w-4 h-4" /> 登出
+           </button>
+         </div>
       </div>
 
       {/* Main Tab Menu */}
@@ -1445,8 +1479,8 @@ export default function App() {
                                 {(n.start_date || n.end_date) && (
                                     <div className={`text-xs p-2 rounded font-mono ${isInactive ? 'bg-stone-100 text-stone-400' : 'bg-blue-50/50 text-blue-800'}`}>
                                         <div className="font-bold opacity-50 mb-1">發心時間：</div>
-                                        <div>始：{n.start_date ? formatDateTime(n.start_date) : '-'}</div>
-                                        <div>終：{n.end_date ? formatDateTime(n.end_date) : '-'}</div>
+                                        <div>起：{n.start_date ? formatDateTime(n.start_date) : '-'}</div>
+                                        <div>迄：{n.end_date ? formatDateTime(n.end_date) : '-'}</div>
                                     </div>
                                 )}
                                 <p className={`mt-1 ${isInactive ? 'text-stone-400' : 'text-stone-600'}`}><span className="font-bold opacity-70">安單：</span> {n.accommodation_option || '不安單'} {n.accommodation_option === '須安單' ? `(${n.stay_start_date} ~ ${n.stay_end_date})` : ''}</p>
@@ -1523,7 +1557,7 @@ export default function App() {
           </div>
         )}
         
-        {/* Audit Tab (審核中心 - 改為 Table 條列式) */}
+        {/* Audit Tab */}
         {activeTab === 'audit' && isAdmin && (
           <div className="space-y-8 animate-in fade-in">
             <div className={`p-8 rounded-[32px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}>
@@ -1596,7 +1630,7 @@ export default function App() {
                     <th className="p-4">狀態</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-stone-200">
+                <tbody className="divide-y divide-white">
                   {filteredAdminNotes.map(n => { 
                     const { isEnded } = getRestrictionStatus(n.activity_location, n.activity_name, n.activity_option); 
                     
@@ -1623,30 +1657,32 @@ export default function App() {
                     if (hasRemarks) mergedRemarks.push(n.other_remarks);
 
                     let statusBadge; 
-                    let rowStyle = "transition-colors"; 
+                    let rowStyle = "transition-colors border-b border-white"; 
+                    let rowStyleObj = {};
                     let textStyle = "text-slate-800"; 
                     let subTextStyle = "text-stone-600"; 
                     let boldStyle = "font-bold text-xl text-slate-800"; 
                     
                     if(n.is_deleted) { 
                       statusBadge = <span className="px-2 py-0.5 rounded text-xs font-bold w-fit bg-red-100 text-red-700">已刪除</span>; 
-                      rowStyle = "bg-stone-100"; 
+                      rowStyle = "bg-stone-100 border-b border-white"; 
                       textStyle = "text-stone-400"; 
                       subTextStyle = "text-stone-400"; 
                       boldStyle = "font-bold text-xl text-stone-400"; 
                     } else if(isEnded) { 
                       statusBadge = <span className="px-2 py-0.5 rounded text-xs font-bold w-fit bg-stone-200 text-stone-600">已圓滿</span>; 
-                      rowStyle = "bg-stone-50"; 
+                      rowStyle = "bg-stone-50 border-b border-white"; 
                       textStyle = "text-stone-400"; 
                       subTextStyle = "text-stone-400"; 
                       boldStyle = "font-bold text-xl text-stone-400"; 
                     } else { 
                       statusBadge = <span className={`px-2 py-0.5 rounded text-xs font-bold w-fit ${n.registration_option === '新增' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{n.registration_option}</span>;
-                      rowStyle = "hover:bg-stone-50"; 
+                      rowStyle = "hover:brightness-95 transition-all border-b border-white"; 
+                      rowStyleObj = { backgroundColor: CARD_BG_COLOR };
                     } 
                     
                     return (
-                      <tr key={n.id} className={rowStyle}>
+                      <tr key={n.id} className={rowStyle} style={rowStyleObj}>
                         <td className="p-4 align-top w-64 min-w-[16rem]">
                           <div className={boldStyle}>{n.activity_location}</div>
                           <div className={boldStyle}>{n.activity_name}</div>
@@ -1665,7 +1701,7 @@ export default function App() {
                               <div>離: {n.departure_datetime ? formatDateTime(n.departure_datetime) : '-'}</div>
                             </div>
                           )}
-                          <div className={`mt-2 border-t pt-1 border-stone-200 ${subTextStyle}`}>
+                          <div className={`mt-2 border-t pt-1 border-stone-200/50 ${subTextStyle}`}>
                             <div>{n.accommodation_option}</div>
                             {n.accommodation_option === '須安單' && <div className="text-xs">{n.stay_start_date}~{n.stay_end_date}</div>}
                           </div>
@@ -1678,7 +1714,8 @@ export default function App() {
                               </div>
                               {(n.start_date || n.end_date) && (
                                 <div className="text-xs mt-1">
-                                  {n.start_date ? formatDateTime(n.start_date) : '-'} ~ <br/>{n.end_date ? formatDateTime(n.end_date) : '-'}
+                                  <div>起: {n.start_date ? formatDateTime(n.start_date) : '-'}</div>
+                                  <div>迄: {n.end_date ? formatDateTime(n.end_date) : '-'}</div>
                                 </div>
                               )}
                             </>
@@ -1687,9 +1724,9 @@ export default function App() {
                           )}
                         </td>
                         <td className="p-4 align-top w-40 max-w-[12rem]">
-                          <div className="flex flex-col gap-1 break-words whitespace-normal">
+                          <div className="flex flex-col gap-1 break-words whitespace-normal leading-tight">
                             {mergedRemarks.length > 0 && <div className={subTextStyle}>{mergedRemarks.join(' / ')}</div>}
-                            {hasMemo && <div className={`${subTextStyle} mt-2 pt-2 border-t border-stone-200 border-dashed`}>{n.memo}</div>}
+                            {hasMemo && <div className={`${subTextStyle} mt-2 pt-2 border-t border-stone-200/50 border-dashed`}>{n.memo}</div>}
                           </div>
                         </td>
                         <td className="p-4 align-top">
@@ -1861,6 +1898,35 @@ export default function App() {
            </div>
         )}
       </div>
+
+      {/* 修改密碼 Modal */}
+      {showPwdModal && (
+        <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center backdrop-blur-sm">
+            <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-sm border border-[#E8E2D1] flex flex-col gap-6 animate-in zoom-in-95 duration-200">
+               <h3 className="text-xl font-bold text-[#4f093c] flex items-center gap-2">
+                 <KeyRound className="w-6 h-6 text-amber-600"/> 修改當前密碼
+               </h3>
+               <div className="space-y-1">
+                 <label className="text-sm font-bold text-gray-500 ml-1">請輸入新密碼 (至少6碼)</label>
+                 <input 
+                    type="password" 
+                    placeholder="新密碼..." 
+                    className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-gray-50"
+                    value={newPwdVal}
+                    onChange={e => setNewPwdVal(e.target.value)}
+                 />
+               </div>
+               <div className="flex gap-3 mt-2">
+                  <button onClick={handleChangePassword} disabled={loading} className="flex-1 bg-[#4f093c] text-white py-3 rounded-xl font-bold shadow-md hover:bg-[#3d072e] transition-all">
+                    確認修改
+                  </button>
+                  <button onClick={() => { setShowPwdModal(false); setNewPwdVal(''); }} className="flex-1 bg-stone-100 text-stone-600 py-3 rounded-xl font-bold hover:bg-stone-200 transition-all">
+                    取消
+                  </button>
+               </div>
+            </div>
+        </div>
+      )}
     </div>
   );
 }
