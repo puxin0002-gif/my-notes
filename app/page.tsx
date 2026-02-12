@@ -10,13 +10,12 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v87.14 (TypeScript 型別修復與紀錄卡片樣式定案版)
+ * 系統版本：v87.15 (資料解析修復與卡片樣式優化版)
  * 修正說明：
- * 1. [Fix] 修復 selected_contents 在陣列/字串解析時的 TS 型別錯誤 (never type)。
- * 2. [UI] 紀錄卡片：「姓名」移至第 2 行，放大字級；身分精簡為「法會/義工」並接在姓名後方。
- * 3. [UI] 行程內容與自訂備註：合併顯示於行程下方，若無值則不顯示任何框線。
- * 4. [UI] 義工選項：精簡為「一般義工/長期義工/佛巡」。
- * 5. [UI] 狀態樣式：「已刪除/已圓滿」反灰且無懸停變色。
+ * 1. [Fix] 強化 selected_contents 陣列字串解析，"[]" 不顯示，"["內容"]" 僅留文字。
+ * 2. [UI] 紀錄與資料表：自訂備註/勾選內容若無值，不顯示橘色空框。
+ * 3. [UI] 紀錄與資料表：義工選項精簡為「一般義工/佛巡/長期義工」，並接在義工組別前方。
+ * 4. [System] 完整保留 v87.14 的功能，確保無編譯錯誤。
  */
 
 // --- 主色系設定 ---
@@ -174,6 +173,14 @@ const formatDateTime = (isoString: string | undefined | null): string => {
     // Format: YYYY/MM/DD HH:mm
     return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   } catch { return isoString || '-'; }
+};
+
+const simplifyVolunteerType = (type: string | undefined | null) => {
+  if (!type) return '';
+  if (type.includes('一般義工')) return '一般義工';
+  if (type.includes('長期義工')) return '長期義工';
+  if (type.includes('佛巡')) return '佛巡';
+  return type;
 };
 
 const renderBulletinContent = (content: string) => {
@@ -1289,15 +1296,21 @@ export default function App() {
                  const status = getCardStatus(n);
                  const isInactive = status.isInactive;
                  
-                 // TypeScript 陣列型別斷言修復
+                 // TypeScript 陣列型別與髒字串修復
                  const rawContents: any = n.selected_contents;
-                 const safeContents: string[] = Array.isArray(rawContents) 
-                    ? rawContents.filter(Boolean) 
-                    : (typeof rawContents === 'string' 
-                        ? rawContents.replace(/^\{|\}$/g, '').split(',').map((s: string)=>s.replace(/^"|"$/g, '').trim()).filter(Boolean) 
-                        : []);
+                 let safeContents: string[] = [];
+                 if (Array.isArray(rawContents)) {
+                     safeContents = rawContents.map(s => String(s).replace(/[\[\]"]/g, '').trim()).filter(Boolean);
+                 } else if (typeof rawContents === 'string') {
+                     let s = rawContents.trim();
+                     if (s !== '[]' && s !== '{}' && s !== 'null' && s !== '""') {
+                         s = s.replace(/^\[|\]$/g, '').replace(/^\{|\}$/g, '');
+                         safeContents = s.split(',').map((item: string) => item.replace(/^"|"$/g, '').replace(/^'|'$/g, '').replace(/[\[\]"]/g, '').trim()).filter(Boolean);
+                     }
+                 }
+                 safeContents = safeContents.filter(s => s && s !== '[]');
                  const hasContents = safeContents.length > 0;
-                 const hasRemarks = typeof n.other_remarks === 'string' && n.other_remarks.trim().length > 0;
+                 const hasRemarks = typeof n.other_remarks === 'string' && n.other_remarks.trim().length > 0 && n.other_remarks !== 'null';
 
                  return (
                    <div key={n.id} className={`rounded-[24px] shadow-sm border overflow-hidden ${isInactive ? 'bg-stone-50 border-stone-200' : 'hover:shadow-md transition-all border-stone-100'}`} style={{ backgroundColor: isInactive ? '#f5f5f4' : CARD_BG_COLOR }}>
@@ -1356,7 +1369,12 @@ export default function App() {
                                     </div>
                                 )}
 
-                                {n.volunteer_group && <p className={isInactive ? 'text-stone-400' : 'text-stone-600'}><span className="font-bold opacity-70">組別：</span> {n.volunteer_group}</p>}
+                                {n.identity === '發心義工' && (
+                                    <p className={isInactive ? 'text-stone-400' : 'text-stone-600'}>
+                                        <span className="font-bold opacity-70">組別：</span> 
+                                        {simplifyVolunteerType(n.volunteer_type)}{n.volunteer_group ? ` - ${n.volunteer_group}` : ''}
+                                    </p>
+                                )}
 
                                 {(n.start_date || n.end_date) && (
                                     <div className={`text-xs p-2 rounded font-mono ${isInactive ? 'bg-stone-100 text-stone-400' : 'bg-blue-50/50 text-blue-800'}`}>
@@ -1498,15 +1516,21 @@ export default function App() {
                   {filteredAdminNotes.map(n => { 
                     const { isEnded } = getRestrictionStatus(n.activity_location, n.activity_name, n.activity_option); 
                     
-                    // TypeScript 陣列型別斷言修復
+                    // TypeScript 陣列型別與髒字串修復
                     const rawContents: any = n.selected_contents;
-                    const safeContents: string[] = Array.isArray(rawContents) 
-                        ? rawContents.filter(Boolean) 
-                        : (typeof rawContents === 'string' 
-                            ? rawContents.replace(/^\{|\}$/g, '').split(',').map((s: string)=>s.replace(/^"|"$/g, '').trim()).filter(Boolean) 
-                            : []);
+                    let safeContents: string[] = [];
+                    if (Array.isArray(rawContents)) {
+                        safeContents = rawContents.map(s => String(s).replace(/[\[\]"]/g, '').trim()).filter(Boolean);
+                    } else if (typeof rawContents === 'string') {
+                        let s = rawContents.trim();
+                        if (s !== '[]' && s !== '{}' && s !== 'null' && s !== '""') {
+                            s = s.replace(/^\[|\]$/g, '').replace(/^\{|\}$/g, '');
+                            safeContents = s.split(',').map((item: string) => item.replace(/^"|"$/g, '').replace(/^'|'$/g, '').replace(/[\[\]"]/g, '').trim()).filter(Boolean);
+                        }
+                    }
+                    safeContents = safeContents.filter(s => s && s !== '[]');
                     const hasContents = safeContents.length > 0;
-                    const hasRemarks = typeof n.other_remarks === 'string' && n.other_remarks.trim().length > 0;
+                    const hasRemarks = typeof n.other_remarks === 'string' && n.other_remarks.trim().length > 0 && n.other_remarks !== 'null';
 
                     let statusBadge; 
                     let rowStyle = "hover:bg-stone-50 transition-colors"; 
@@ -1565,8 +1589,9 @@ export default function App() {
                         <td className={`p-4 align-top ${subTextStyle}`}>
                           {n.identity === '發心義工' ? (
                             <>
-                              <div>{n.volunteer_type}</div>
-                              {n.volunteer_group && <div className={`${n.is_deleted || isEnded ? 'text-stone-400' : 'text-slate-700'} font-bold`}>組別: {n.volunteer_group}</div>}
+                              <div className={`${n.is_deleted || isEnded ? 'text-stone-400' : 'text-slate-700'} font-bold`}>
+                                {simplifyVolunteerType(n.volunteer_type)}{n.volunteer_group ? ` - ${n.volunteer_group}` : ''}
+                              </div>
                               {n.start_date && (
                                 <div className="text-xs mt-1">
                                   {n.start_date.replace('T',' ')} ~ <br/>{n.end_date?.replace('T',' ')}
