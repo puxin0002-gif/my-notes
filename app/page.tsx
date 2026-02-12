@@ -10,12 +10,11 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v87.16 (欄位顯示修復與最佳化版)
+ * 系統版本：v87.17 (行程樣式微調版)
  * 修正說明：
- * 1. [UI] 資料總覽：勾選內容解析 [] 轉為 null。若有值則與自訂備註合併至「備註」欄，不標示欄名。
- * 2. [UI] 義工時間：在所有顯示處強制轉為完整的日期/時間格式 (YYYY/MM/DD HH:mm)。
- * 3. [UI] 義工選項：登記表單恢復長選項；資料與紀錄頁自動精簡為「一般義工/長期義工/佛巡」。
- * 4. [System] 確保無重複宣告、無多餘下拉選單、編譯順暢。
+ * 1. [UI] 將「紀錄」與「資料」頁籤中的「行程」(activity_option) 字級縮小為 sm。
+ * 2. [UI] 將「行程」的字體顏色改為藍色系，以區分層次，反灰時則維持淡灰色。
+ * 3. [System] 完整保留 v87.16 的所有優化設定與編譯修復。
  */
 
 // --- 主色系設定 ---
@@ -1336,8 +1335,8 @@ export default function App() {
                           
                           <div className={`space-y-3 ${isInactive ? 'opacity-70 pointer-events-none' : ''}`}>
                              
-                             {/* 第三行：行程選項 */}
-                             <div className={`text-lg font-bold border-l-4 pl-2 ${isInactive ? 'text-stone-400 border-stone-300' : 'text-[#7A2E40] border-[#7A2E40]'}`}>
+                             {/* 第三行：行程選項 (修改為藍色字體、字級縮小為 text-sm) */}
+                             <div className={`text-sm font-bold border-l-[3px] pl-2 ${isInactive ? 'text-stone-400 border-stone-300' : 'text-blue-600 border-blue-600'}`}>
                                  {n.activity_option}
                              </div>
 
@@ -1561,7 +1560,7 @@ export default function App() {
                         <td className="p-4 align-top">
                           <div className={boldStyle}>{n.activity_location}</div>
                           <div className={boldStyle}>{n.activity_name}</div>
-                          <div className={`${subTextStyle} mt-1 text-base font-bold`}>{n.activity_option}</div>
+                          <div className={`mt-1 text-sm font-bold ${n.is_deleted || isEnded ? 'text-stone-400' : 'text-blue-600'}`}>{n.activity_option}</div>
                         </td>
                         <td className="p-4 align-top">
                           <div className={boldStyle}>{n.real_name} <span className="text-sm font-normal opacity-70">({n.dharma_name || '無'})</span></div>
