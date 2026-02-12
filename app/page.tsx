@@ -10,12 +10,12 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v87.15 (資料解析修復與卡片樣式優化版)
+ * 系統版本：v87.16 (欄位顯示修復與最佳化版)
  * 修正說明：
- * 1. [Fix] 強化 selected_contents 陣列字串解析，"[]" 不顯示，"["內容"]" 僅留文字。
- * 2. [UI] 紀錄與資料表：自訂備註/勾選內容若無值，不顯示橘色空框。
- * 3. [UI] 紀錄與資料表：義工選項精簡為「一般義工/佛巡/長期義工」，並接在義工組別前方。
- * 4. [System] 完整保留 v87.14 的功能，確保無編譯錯誤。
+ * 1. [UI] 資料總覽：勾選內容解析 [] 轉為 null。若有值則與自訂備註合併至「備註」欄，不標示欄名。
+ * 2. [UI] 義工時間：在所有顯示處強制轉為完整的日期/時間格式 (YYYY/MM/DD HH:mm)。
+ * 3. [UI] 義工選項：登記表單恢復長選項；資料與紀錄頁自動精簡為「一般義工/長期義工/佛巡」。
+ * 4. [System] 確保無重複宣告、無多餘下拉選單、編譯順暢。
  */
 
 // --- 主色系設定 ---
@@ -201,7 +201,7 @@ const INITIAL_FORM_DATA = {
   selected_contents: [] as string[], 
   other_remarks: '', memo: '',
   identity: '參加法會', 
-  volunteer_type: '一般義工', transportation: '',
+  volunteer_type: '一般義工-精舍設定組別', transportation: '',
   arrival_datetime: '', departure_datetime: '', volunteer_group: '', 
   start_date: '', end_date: '', accommodation_option: '不安單', 
   stay_start_date: '', stay_end_date: ''
@@ -1227,9 +1227,9 @@ export default function App() {
                      <label className="text-sm font-bold text-[#4f093c] ml-1">義工選項*</label>
                      <select className="w-full p-3 text-lg border border-stone-200 rounded-xl bg-white" value={formData.volunteer_type} onChange={e=>setFormData({...formData, volunteer_type: e.target.value})}>
                        <option value="">請選擇</option>
-                       <option value="一般義工">一般義工</option>
-                       <option value="長期義工">長期義工</option>
-                       <option value="佛巡">佛巡</option>
+                       <option value="一般義工-精舍設定組別">一般義工-精舍設定組別</option>
+                       <option value="長期義工-請至平台報名">長期義工-請至平台報名</option>
+                       <option value="佛巡-請至平台報名">佛巡-請至平台報名</option>
                      </select>
                    </div>
                  )}
@@ -1531,9 +1531,10 @@ export default function App() {
                     safeContents = safeContents.filter(s => s && s !== '[]');
                     const hasContents = safeContents.length > 0;
                     const hasRemarks = typeof n.other_remarks === 'string' && n.other_remarks.trim().length > 0 && n.other_remarks !== 'null';
+                    const hasMemo = typeof n.memo === 'string' && n.memo.trim().length > 0 && n.memo !== 'null';
 
                     let statusBadge; 
-                    let rowStyle = "hover:bg-stone-50 transition-colors"; 
+                    let rowStyle = "transition-colors"; 
                     let textStyle = "text-slate-800"; 
                     let subTextStyle = "text-stone-600"; 
                     let boldStyle = "font-bold text-xl text-slate-800"; 
@@ -1551,7 +1552,8 @@ export default function App() {
                       subTextStyle = "text-stone-400"; 
                       boldStyle = "font-bold text-xl text-stone-400"; 
                     } else { 
-                      statusBadge = <span className={`px-2 py-0.5 rounded text-xs font-bold w-fit ${n.registration_option === '新增' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{n.registration_option}</span>; 
+                      statusBadge = <span className={`px-2 py-0.5 rounded text-xs font-bold w-fit ${n.registration_option === '新增' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{n.registration_option}</span>;
+                      rowStyle = "hover:bg-stone-50"; 
                     } 
                     
                     return (
@@ -1560,13 +1562,6 @@ export default function App() {
                           <div className={boldStyle}>{n.activity_location}</div>
                           <div className={boldStyle}>{n.activity_name}</div>
                           <div className={`${subTextStyle} mt-1 text-base font-bold`}>{n.activity_option}</div>
-                          
-                          {(hasContents || hasRemarks) && (
-                             <div className={`mt-2 text-sm font-medium p-2 rounded-lg ${n.is_deleted || isEnded ? 'bg-stone-200 text-stone-400 border border-stone-300' : 'bg-orange-50 text-orange-800 border border-orange-100'}`}>
-                                {hasContents && <div className="flex gap-1"><span className={`px-1 rounded text-xs shrink-0 mt-0.5 ${n.is_deleted || isEnded ? 'bg-stone-300 text-stone-500' : 'bg-white/60 text-orange-600'}`}>內容</span><span>{safeContents.join('、')}</span></div>}
-                                {hasRemarks && <div className="flex gap-1 mt-1"><span className={`px-1 rounded text-xs shrink-0 mt-0.5 ${n.is_deleted || isEnded ? 'bg-stone-300 text-stone-500' : 'bg-white/60 text-orange-600'}`}>自訂</span><span>{n.other_remarks}</span></div>}
-                             </div>
-                          )}
                         </td>
                         <td className="p-4 align-top">
                           <div className={boldStyle}>{n.real_name} <span className="text-sm font-normal opacity-70">({n.dharma_name || '無'})</span></div>
@@ -1577,8 +1572,8 @@ export default function App() {
                           <div className={`${n.is_deleted || isEnded ? 'text-stone-400' : 'text-slate-700'} font-bold`}>{n.transportation}</div>
                           {(n.arrival_datetime || n.departure_datetime) && (
                             <div className={`text-xs mt-1 ${subTextStyle}`}>
-                              <div>抵: {n.arrival_datetime?.replace('T', ' ')}</div>
-                              <div>離: {n.departure_datetime?.replace('T', ' ')}</div>
+                              <div>抵: {n.arrival_datetime ? formatDateTime(n.arrival_datetime) : '-'}</div>
+                              <div>離: {n.departure_datetime ? formatDateTime(n.departure_datetime) : '-'}</div>
                             </div>
                           )}
                           <div className={`mt-2 border-t pt-1 border-stone-200 ${subTextStyle}`}>
@@ -1594,7 +1589,7 @@ export default function App() {
                               </div>
                               {n.start_date && (
                                 <div className="text-xs mt-1">
-                                  {n.start_date.replace('T',' ')} ~ <br/>{n.end_date?.replace('T',' ')}
+                                  {formatDateTime(n.start_date)} ~ <br/>{formatDateTime(n.end_date)}
                                 </div>
                               )}
                             </>
@@ -1603,11 +1598,11 @@ export default function App() {
                           )}
                         </td>
                         <td className="p-4 align-top">
-                          {n.memo && (
-                            <div>
-                              <span className="opacity-70 font-bold text-xs">其他:</span> <span className={subTextStyle}>{n.memo}</span>
-                            </div>
-                          )}
+                          <div className="flex flex-col gap-1">
+                            {hasContents && <div className={subTextStyle}>{safeContents.join('、')}</div>}
+                            {hasRemarks && <div className={subTextStyle}>{n.other_remarks}</div>}
+                            {hasMemo && <div className={subTextStyle}>{n.memo}</div>}
+                          </div>
                         </td>
                         <td className="p-4 align-top">
                           <div className="flex flex-col gap-1">
