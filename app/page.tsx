@@ -10,10 +10,13 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v87.27 (設定頁面按鈕排版優化版)
+ * 系統版本：v87.28 (介面優化與新增性別欄位版)
  * 修正說明：
- * 1. [UI] 設定頁籤：將「發佈設定」按鈕移至大標旁邊，統一按鈕尺寸與樣式，並移除底部多餘按鈕。
- * 2. [System] 完整保留 v87.26 所有的密碼重設修復、反灰樣式、資料總覽底色、時間精準匯出等設定。
+ * 1. [Feature] 新增「性別」欄位 (gender)，為必填，選項：男/女，位於法名後方。
+ * 2. [UI] 登入畫面：卡片底色改為 CARD_BG_COLOR，底部按鈕加大並改色。
+ * 3. [UI] 設定頁籤：「截止報名」與「圓滿結束」標籤加大變紅，更顯眼。
+ * 4. [UI] 公告頁籤：刪除按鈕常駐顯示 (移除隱藏邏輯)，樣式改為明顯的紅色按鈕。
+ * 5. [System] 同步更新匯出、紀錄卡片、資料表格以支援性別顯示。
  */
 
 // --- 主色系設定 ---
@@ -44,6 +47,7 @@ interface Note {
   user_id: string;
   real_name: string;
   dharma_name?: string;
+  gender: string; // 新增性別
   registrant_type: string;
   registration_option: string;
   activity_location: string;
@@ -109,6 +113,7 @@ interface FieldDefinition {
 const DEFAULT_FIELD_DEFINITIONS: FieldDefinition[] = [
   { field_key: 'real_name', field_label: '姓名', field_type: '文字', is_required: true, description: '真實姓名' },
   { field_key: 'dharma_name', field_label: '法名', field_type: '文字', is_required: false, description: '' },
+  { field_key: 'gender', field_label: '性別', field_type: '文字', is_required: true, description: '男/女' },
   { field_key: 'registrant_type', field_label: '屬性', field_type: '文字', is_required: true, description: '學員身分' },
   { field_key: 'registration_option', field_label: '報名選項', field_type: '文字', is_required: true, description: '新增或異動' },
   { field_key: 'activity_location', field_label: '活動地點', field_type: '文字', is_required: true, description: '' },
@@ -211,7 +216,7 @@ const renderBulletinContent = (content: string) => {
 };
 
 const INITIAL_FORM_DATA = {
-  real_name: '', dharma_name: '', registrant_type: '目前上禪修班學員', registration_option: '新增',
+  real_name: '', dharma_name: '', gender: '', registrant_type: '目前上禪修班學員', registration_option: '新增',
   activity_location: '', activity_name: '', activity_option: '',
   selected_contents: [] as string[], 
   other_remarks: '', memo: '',
@@ -563,6 +568,10 @@ export default function App() {
 
     for (const config of fieldConfigs) {
       if (config.is_required) {
+        if (config.field_key === 'gender') {
+            if (!formData.gender) { alert("請選擇性別"); return false; }
+            continue;
+        }
         if (config.field_key === 'transportation' && !fieldVisibility.transportation) continue;
         if (config.field_key === 'volunteer_group' && !fieldVisibility.volunteerGroup) continue;
         if (config.field_key === 'volunteer_type' && !fieldVisibility.volunteerType) continue;
@@ -780,7 +789,6 @@ export default function App() {
     const exportData = filteredAdminNotes.map(n => {
         const { isEnded } = getRestrictionStatus(n.activity_location, n.activity_name, n.activity_option);
         
-        // 解析陣列與清理
         const rawContents: any = n.selected_contents;
         let safeContents: string[] = [];
         if (Array.isArray(rawContents)) {
@@ -795,7 +803,6 @@ export default function App() {
         safeContents = safeContents.filter(s => s && s !== '[]');
         const finalContentStr = safeContents.length > 0 ? safeContents.join('、') : null;
 
-        // 共用相同解析邏輯
         const extractDateStr = (val: string | null | undefined) => {
             const formatted = formatDateTime(val);
             if (formatted === '-' || !formatted) return '';
@@ -815,6 +822,7 @@ export default function App() {
             "勾選內容": finalContentStr,
             "姓名": n.real_name || '',
             "法名": n.dharma_name || '',
+            "性別": n.gender || '',
             "屬性": n.registrant_type || '',
             "身分": n.identity || '',
             "交通": n.transportation || '',
@@ -1223,7 +1231,7 @@ export default function App() {
                    <div className="text-2xl font-bold text-slate-800 leading-relaxed pl-4">{renderBulletinContent(b.content)}</div>
                    <div className="mt-6 text-sm text-stone-400 font-mono flex items-center gap-2 pl-4"><Clock className="w-4 h-4"/> {formatDateTime(b.created_at)}</div>
                    {isAdmin && (
-                     <button onClick={()=>handleDeleteBulletin(b.id)} className="absolute top-6 right-6 text-stone-300 hover:text-red-400 p-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                     <button onClick={()=>handleDeleteBulletin(b.id)} className="absolute top-6 right-6 text-white bg-red-500 hover:bg-red-600 p-2 rounded-lg shadow-md transition-colors">
                        <Trash2 className="w-5 h-5"/>
                      </button>
                    )}
@@ -1251,14 +1259,22 @@ export default function App() {
                        <label className="text-sm font-bold text-[#4f093c] ml-1">法名</label>
                        <input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.dharma_name} onChange={e=>setFormData({...formData, dharma_name: e.target.value})} />
                      </div>
-                     <div className="md:col-span-3 space-y-1">
+                     <div className="md:col-span-2 space-y-1">
+                        <label className="text-sm font-bold text-[#4f093c] ml-1">性別*</label>
+                        <select className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.gender} onChange={e=>setFormData({...formData, gender: e.target.value})}>
+                          <option value="">請選擇</option>
+                          <option value="男">男</option>
+                          <option value="女">女</option>
+                        </select>
+                     </div>
+                     <div className="md:col-span-2 space-y-1">
                        <label className="text-sm font-bold text-[#4f093c] ml-1">報名選項*</label>
                        <select className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.registration_option} onChange={e=>setFormData({...formData, registration_option: e.target.value})}>
                          <option value="新增">新增</option>
                          <option value="異動">異動</option>
                        </select>
                      </div>
-                     <div className="md:col-span-4 space-y-1">
+                     <div className="md:col-span-3 space-y-1">
                        <label className="text-sm font-bold text-[#4f093c] ml-1">屬性*</label>
                        <select className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.registrant_type} onChange={e=>setFormData({...formData, registrant_type: e.target.value})}>
                          <option value="目前上禪修班學員">目前上禪修班學員</option>
@@ -1811,7 +1827,7 @@ export default function App() {
               <div className="flex justify-between items-start mb-8">
                  <div>
                     <h3 className="text-3xl font-bold text-[#4f093c] mb-2">1、報名行程設定</h3>
-                    <p className="text-sm text-stone-400">設定地點、活動、行程層級與日期控制</p>
+                    <p className="text-sm text-stone-400 mb-10">設定地點、活動、行程層級與日期控制</p>
                  </div>
                  <button onClick={handlePublishSettings} className="bg-[#4f093c] text-white px-6 py-3 rounded-xl font-bold text-base shadow-md hover:bg-[#3d072e] flex items-center gap-2 transition-all shrink-0">
                     <UploadCloud className="w-5 h-5" /> 發佈設定
@@ -1821,13 +1837,11 @@ export default function App() {
               <div className="grid grid-cols-1 lg:grid-cols-4 gap-3 h-[600px]">
                  {/* Column 1: Location */}
                  <div className="flex flex-col bg-white/50 rounded-3xl border border-stone-100 overflow-hidden">
-                    <div className="p-3 border-b border-stone-100 bg-white">
-                      <h4 className="font-bold text-slate-700 flex items-center gap-2"><div className="w-2 h-6 bg-[#4f093c] rounded-full"></div>地點</h4>
-                    </div>
-                    <div className="p-2 flex gap-2 border-b border-stone-100">
-                      <input className="flex-1 p-2 text-sm border rounded-lg" placeholder="新地點..." value={newLocation} onChange={e=>setNewLocation(e.target.value)} />
-                      <button onClick={addLocation} className="bg-[#4f093c] text-white p-2 rounded-lg hover:bg-[#3d072e] shrink-0"><Plus/></button>
-                    </div>
+                    <div className="p-3 border-b border-stone-100 bg-white"><h4 className="font-bold text-slate-700 flex items-center gap-2"><div className="w-2 h-6 bg-[#4f093c] rounded-full"></div>地點</h4></div>
+                    
+                    {/* 新增輸入框 (移至最上方) - p-2 */}
+                    <div className="p-2 flex gap-2 border-b border-stone-100"><input className="flex-1 p-2 text-sm border rounded-lg" placeholder="新地點..." value={newLocation} onChange={e=>setNewLocation(e.target.value)} /><button onClick={addLocation} className="bg-[#4f093c] text-white p-2 rounded-lg hover:bg-[#3d072e] shrink-0"><Plus/></button></div>
+                    
                     <div className="flex-1 overflow-y-auto p-2 space-y-1">
                         {locations.map(l => (
                             <div key={l} onClick={()=>setMgmtSelectedLoc(l)} className={`p-3 rounded-xl cursor-pointer flex justify-between items-center transition-all ${mgmtSelectedLoc === l ? 'bg-[#4f093c] text-white shadow-md' : 'hover:bg-stone-100 text-stone-600'}`}>
@@ -1840,13 +1854,12 @@ export default function App() {
 
                  {/* Column 2: Activity */}
                  <div className="flex flex-col bg-white/50 rounded-3xl border border-stone-100 overflow-hidden">
-                    <div className="p-3 border-b border-stone-100 bg-white">
-                      <h4 className="font-bold text-slate-700 flex items-center gap-2"><div className="w-2 h-6 bg-[#4f093c] rounded-full"></div>活動</h4>
-                    </div>
-                    <div className="p-2 flex gap-2 border-b border-stone-100">
-                      <input className="flex-1 p-2 text-sm border rounded-lg" placeholder="新活動..." disabled={!mgmtSelectedLoc} value={newActivity} onChange={e=>setNewActivity(e.target.value)} />
-                      <button onClick={addActivity} className="bg-[#4f093c] text-white p-2 rounded-lg hover:bg-[#3d072e] disabled:opacity-50 shrink-0"><Plus/></button>
-                    </div>
+                    <div className="p-3 border-b border-stone-100 bg-white"><h4 className="font-bold text-slate-700 flex items-center gap-2"><div className="w-2 h-6 bg-[#4f093c] rounded-full"></div>活動</h4></div>
+                    
+                    {/* 新增輸入框 (移至最上方) - p-2 */}
+                    <div className="p-2 flex gap-2 border-b border-stone-100"><input className="flex-1 p-2 text-sm border rounded-lg" placeholder="新活動..." disabled={!mgmtSelectedLoc} value={newActivity} onChange={e=>setNewActivity(e.target.value)} /><button onClick={addActivity} className="bg-[#4f093c] text-white p-2 rounded-lg hover:bg-[#3d072e] disabled:opacity-50 shrink-0"><Plus/></button></div>
+
+                    {/* Date Settings for Activity - slightly reduced padding */}
                     <div className="px-3 pt-3 pb-2 space-y-3 bg-white border-b border-stone-100">
                         <div className="space-y-1">
                             <label className="text-[10px] font-bold text-stone-400 uppercase tracking-wider">截止報名</label>
@@ -1857,6 +1870,7 @@ export default function App() {
                             <input type="date" className="w-full p-2 text-xs border border-stone-200 rounded-lg bg-stone-50" disabled={!mgmtSelectedAct} value={currentActivityDates.end} onChange={(e) => handleUpdateActivityDate('activity_end_date', e.target.value)} />
                         </div>
                     </div>
+
                     <div className="flex-1 overflow-y-auto p-2 space-y-1">
                         {adminActivities.map(a => (
                             <div key={a} onClick={()=>setMgmtSelectedAct(a)} className={`p-3 rounded-xl cursor-pointer flex justify-between items-center transition-all ${mgmtSelectedAct === a ? 'bg-[#4f093c] text-white shadow-md' : 'hover:bg-stone-100 text-stone-600'}`}>
@@ -1869,13 +1883,12 @@ export default function App() {
 
                  {/* Column 3: Option */}
                  <div className="flex flex-col bg-white/50 rounded-3xl border border-stone-100 overflow-hidden">
-                    <div className="p-3 border-b border-stone-100 bg-white">
-                      <h4 className="font-bold text-slate-700 flex items-center gap-2"><div className="w-2 h-6 bg-[#4f093c] rounded-full"></div>行程</h4>
-                    </div>
-                    <div className="p-2 flex gap-2 border-b border-stone-100">
-                      <input className="flex-1 p-2 text-sm border rounded-lg" placeholder="新行程..." disabled={!mgmtSelectedAct} value={newOption} onChange={e=>setNewOption(e.target.value)} />
-                      <button onClick={addOption} className="bg-[#4f093c] text-white p-2 rounded-lg hover:bg-[#3d072e] disabled:opacity-50 shrink-0"><Plus/></button>
-                    </div>
+                    <div className="p-3 border-b border-stone-100 bg-white"><h4 className="font-bold text-slate-700 flex items-center gap-2"><div className="w-2 h-6 bg-[#4f093c] rounded-full"></div>行程</h4></div>
+                    
+                    {/* 新增輸入框 - p-2 */}
+                    <div className="p-2 flex gap-2 border-b border-stone-100"><input className="flex-1 p-2 text-sm border rounded-lg" placeholder="新行程..." disabled={!mgmtSelectedAct} value={newOption} onChange={e=>setNewOption(e.target.value)} /><button onClick={addOption} className="bg-[#4f093c] text-white p-2 rounded-lg hover:bg-[#3d072e] disabled:opacity-50 shrink-0"><Plus/></button></div>
+
+                    {/* Date Settings for Option */}
                     <div className="px-3 pt-3 pb-2 space-y-3 bg-white border-b border-stone-100">
                         <div className="space-y-1">
                             <label className="text-[10px] font-bold text-stone-400 uppercase tracking-wider">截止報名</label>
@@ -1886,6 +1899,7 @@ export default function App() {
                             <input type="date" className="w-full p-2 text-xs border border-stone-200 rounded-lg bg-stone-50" disabled={!mgmtSelectedOpt || !!currentActivityDates.end} value={currentActivityDates.end || currentOptionDates.end} onChange={(e) => handleUpdateOptionDate('option_end_date', e.target.value)} />
                         </div>
                     </div>
+
                     <div className="flex-1 overflow-y-auto p-2 space-y-1">
                         {adminOptions.map(o => (
                             <div key={o} onClick={()=>setMgmtSelectedOpt(o)} className={`p-3 rounded-xl cursor-pointer flex justify-between items-center transition-all ${mgmtSelectedOpt === o ? 'bg-[#4f093c] text-white shadow-md' : 'hover:bg-stone-100 text-stone-600'}`}>
@@ -1898,13 +1912,11 @@ export default function App() {
 
                  {/* Column 4: Content */}
                  <div className="flex flex-col bg-white/50 rounded-3xl border border-stone-100 overflow-hidden">
-                    <div className="p-3 border-b border-stone-100 bg-white">
-                      <h4 className="font-bold text-slate-700 flex items-center gap-2"><div className="w-2 h-6 bg-[#4f093c] rounded-full"></div>內容</h4>
-                    </div>
-                    <div className="p-2 flex gap-2 border-b border-stone-100">
-                      <input className="flex-1 p-2 text-sm border rounded-lg" placeholder="新內容..." disabled={!mgmtSelectedOpt} value={newContent} onChange={e=>setNewContent(e.target.value)} />
-                      <button onClick={addContent} className="bg-[#4f093c] text-white p-2 rounded-lg hover:bg-[#3d072e] disabled:opacity-50 shrink-0"><Plus/></button>
-                    </div>
+                    <div className="p-3 border-b border-stone-100 bg-white"><h4 className="font-bold text-slate-700 flex items-center gap-2"><div className="w-2 h-6 bg-[#4f093c] rounded-full"></div>內容</h4></div>
+                    
+                    {/* 新增輸入框 - p-2 */}
+                    <div className="p-2 flex gap-2 border-b border-stone-100"><input className="flex-1 p-2 text-sm border rounded-lg" placeholder="新內容..." disabled={!mgmtSelectedOpt} value={newContent} onChange={e=>setNewContent(e.target.value)} /><button onClick={addContent} className="bg-[#4f093c] text-white p-2 rounded-lg hover:bg-[#3d072e] disabled:opacity-50 shrink-0"><Plus/></button></div>
+
                     <div className="flex-1 overflow-y-auto p-2 space-y-1">
                         {adminContents.map(c => (
                             <div key={c.id} className="p-3 bg-white rounded-xl shadow-sm border border-stone-100 flex justify-between items-center">
@@ -1917,42 +1929,22 @@ export default function App() {
               </div>
 
               <div className="mt-20">
-                 <div className="flex justify-between items-center mb-6">
+                 <div className="flex justify-between items-end mb-6">
                     <h3 className="text-3xl font-bold text-[#4f093c]">2、欄位管理</h3>
-                    <button onClick={handlePublishSettings} className="bg-[#4f093c] text-white px-6 py-3 rounded-xl font-bold text-base shadow-md hover:bg-[#3d072e] flex items-center gap-2 transition-all shrink-0">
-                      <UploadCloud className="w-5 h-5" /> 發佈設定
-                    </button>
+                    <button onClick={handlePublishSettings} className="bg-[#4f093c] text-white px-6 py-2 rounded-xl font-bold text-sm shadow hover:bg-[#3d072e]"><UploadCloud className="w-4 h-4 inline-block mr-2" />發佈設定</button>
                  </div>
                  <div className="overflow-x-auto rounded-[40px] border border-stone-100 shadow-sm">
                     <table className="w-full text-left text-sm bg-white">
                        <thead className="bg-stone-50 text-stone-600 font-bold border-b border-stone-200">
-                          <tr>
-                            <th className="p-6">欄位名稱 (Key)</th>
-                            <th className="p-6">顯示標籤 (Label)</th>
-                            <th className="p-6">類型 (Type)</th>
-                            <th className="p-6">必填設定</th>
-                            <th className="p-6">備註說明</th>
-                          </tr>
+                          <tr><th className="p-6">欄位名稱 (Key)</th><th className="p-6">顯示標籤 (Label)</th><th className="p-6">類型 (Type)</th><th className="p-6">必填設定</th><th className="p-6">備註說明</th></tr>
                        </thead>
                        <tbody className="divide-y divide-[#F2ECE4] text-slate-600 font-bold text-base">
-                          {fieldConfigs.map((col) => (
-                            <tr key={col.field_key} className="hover:bg-[#FAF9F6] transition-colors">
-                              <td className="p-6 font-mono text-[#4f093c]">{col.field_key}</td>
-                              <td className="p-6">{col.field_label}</td>
-                              <td className="p-6 font-mono text-slate-400">{col.field_type}</td>
-                              <td className="p-6">
-                                <label className="flex items-center cursor-pointer">
-                                  <input type="checkbox" checked={col.is_required} onChange={(e) => handleUpdateFieldConfig(col.field_key, 'is_required', e.target.checked)} className="w-5 h-5 rounded border-slate-300 text-[#4f093c] focus:ring-[#4f093c]" />
-                                  <span className="ml-2 text-sm">{col.is_required ? '必填' : '選填'}</span>
-                                </label>
-                              </td>
-                              <td className="p-6">
-                                <input type="text" value={col.description || ''} onChange={(e) => handleUpdateFieldConfig(col.field_key, 'description', e.target.value)} className="w-full p-2 border rounded-lg text-sm" placeholder="備註..." />
-                              </td>
-                            </tr>
-                          ))}
+                          {fieldConfigs.map((col) => <tr key={col.field_key} className="hover:bg-[#FAF9F6] transition-colors"><td className="p-6 font-mono text-[#4f093c]">{col.field_key}</td><td className="p-6">{col.field_label}</td><td className="p-6 font-mono text-slate-400">{col.field_type}</td><td className="p-6"><label className="flex items-center cursor-pointer"><input type="checkbox" checked={col.is_required} onChange={(e) => handleUpdateFieldConfig(col.field_key, 'is_required', e.target.checked)} className="w-5 h-5 rounded border-slate-300 text-[#4f093c] focus:ring-[#4f093c]" /><span className="ml-2 text-sm">{col.is_required ? '必填' : '選填'}</span></label></td><td className="p-6"><input type="text" value={col.description || ''} onChange={(e) => handleUpdateFieldConfig(col.field_key, 'description', e.target.value)} className="w-full p-2 border rounded-lg text-sm" placeholder="備註..." /></td></tr>)}
                        </tbody>
                     </table>
+                 </div>
+                 <div className="mt-6 flex justify-end">
+                    <button onClick={handlePublishSettings} className="bg-[#4f093c] text-white px-6 py-2 rounded-xl font-bold shadow-lg hover:bg-[#3d072e] flex items-center gap-2 transition-all"><UploadCloud className="w-4 h-4" /> 發佈設定</button>
                  </div>
               </div>
            </div>
