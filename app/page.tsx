@@ -10,11 +10,13 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v87.17 (行程樣式微調版)
+ * 系統版本：v87.18 (匯出Excel優化版)
  * 修正說明：
- * 1. [UI] 將「紀錄」與「資料」頁籤中的「行程」(activity_option) 字級縮小為 sm。
- * 2. [UI] 將「行程」的字體顏色改為藍色系，以區分層次，反灰時則維持淡灰色。
- * 3. [System] 完整保留 v87.16 的所有優化設定與編譯修復。
+ * 1. [Feature] 將「匯出 CSV」改為「匯出資料」，並改為產出 .xlsx 檔案 (動態載入 SheetJS)。
+ * 2. [Feature] 匯出欄位調整：「內容」改為「勾選內容」(並過濾 [] 為 null)、「義工選項」、「義工組別」。
+ * 3. [Feature] 匯出欄位拆分：「發心始/終」拆分為日期與時間欄位；「安單」拆分為選項、起日、迄日。
+ * 4. [Feature] 匯出狀態欄位追加「已圓滿」的判定邏輯。
+ * 5. [System] 完整保留 v87.17 所有的視覺與介面優化設定。
  */
 
 // --- 主色系設定 ---
@@ -134,6 +136,7 @@ const DEFAULT_FIELD_DEFINITIONS: FieldDefinition[] = [
 declare global {
   interface Window {
     supabase: any;
+    XLSX: any;
   }
 }
 
@@ -697,50 +700,80 @@ export default function App() {
     }
   };
   
-  const handleExport = () => {
-    const columns = [
-        { label: "地點", value: (n: Note) => n.activity_location },
-        { label: "活動", value: (n: Note) => n.activity_name },
-        { label: "行程", value: (n: Note) => n.activity_option },
-        { label: "內容", value: (n: Note) => Array.isArray(n.selected_contents) ? n.selected_contents.join(';') : '' },
-        { label: "姓名", value: (n: Note) => n.real_name },
-        { label: "法名", value: (n: Note) => n.dharma_name || '' },
-        { label: "屬性", value: (n: Note) => n.registrant_type },
-        { label: "身分", value: (n: Note) => n.identity },
-        { label: "交通", value: (n: Note) => n.transportation || '' },
-        { label: "抵達", value: (n: Note) => n.arrival_datetime?.replace('T', ' ') || '' },
-        { label: "離開", value: (n: Note) => n.departure_datetime?.replace('T', ' ') || '' },
-        { label: "義工", value: (n: Note) => n.volunteer_type || '' },
-        { label: "組別", value: (n: Note) => n.volunteer_group || '' },
-        { label: "發心始", value: (n: Note) => n.start_date?.replace('T', ' ') || '' },
-        { label: "發心終", value: (n: Note) => n.end_date?.replace('T', ' ') || '' },
-        { label: "安單", value: (n: Note) => (n.accommodation_option || '') + (n.stay_start_date ? ` ${n.stay_start_date}~${n.stay_end_date}` : '') },
-        { label: "自訂備註", value: (n: Note) => n.other_remarks || '' },
-        { label: "備註", value: (n: Note) => n.memo || '' },
-        { label: "選項", value: (n: Note) => n.registration_option },
-        { label: "狀態", value: (n: Note) => n.is_deleted ? '已刪除' : '正常' },
-        { label: "填表人", value: (n: Note) => n.sign_name || '' },
-        { label: "填表時間", value: (n: Note) => n.created_at?.replace('T', ' ').slice(0, 16) || '' },
-    ];
+  const handleExport = async () => {
+    // 確保 XLSX 函式庫已載入
+    if (!window.XLSX) {
+        try {
+            await new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+                script.onload = resolve;
+                script.onerror = reject;
+                document.head.appendChild(script);
+            });
+        } catch (error) {
+            alert('無法載入 Excel 匯出套件，請檢查網路連線。');
+            return;
+        }
+    }
 
-    const headerRow = columns.map(c => `"${c.label}"`).join(",");
-    const bodyRows = filteredAdminNotes.map(n => 
-        columns.map(c => {
-            const val = c.value(n);
-            return `"${String(val).replace(/"/g, '""')}"`;
-        }).join(",")
-    );
+    const exportData = filteredAdminNotes.map(n => {
+        const { isEnded } = getRestrictionStatus(n.activity_location, n.activity_name, n.activity_option);
+        
+        // 處理勾選內容
+        const rawContents: any = n.selected_contents;
+        let safeContents: string[] = [];
+        if (Array.isArray(rawContents)) {
+            safeContents = rawContents.map(s => String(s).replace(/[\[\]"]/g, '').trim()).filter(Boolean);
+        } else if (typeof rawContents === 'string') {
+            let s = rawContents.trim();
+            if (s !== '[]' && s !== '{}' && s !== 'null' && s !== '""') {
+                s = s.replace(/^\[|\]$/g, '').replace(/^\{|\}$/g, '');
+                safeContents = s.split(',').map((item: string) => item.replace(/^"|"$/g, '').replace(/^'|'$/g, '').replace(/[\[\]"]/g, '').trim()).filter(Boolean);
+            }
+        }
+        safeContents = safeContents.filter(s => s && s !== '[]');
+        
+        const finalContentStr = safeContents.length > 0 ? safeContents.join('、') : null;
 
-    const csvContent = "\uFEFF" + headerRow + "\n" + bodyRows.join("\n");
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement("a");
-    const url = URL.createObjectURL(blob);
-    
-    link.setAttribute("href", url);
-    link.setAttribute("download", `學員登記表_${new Date().toISOString().slice(0,10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+        // 處理時間拆分
+        const getFormatDate = (datetime: string | null | undefined) => datetime ? datetime.split('T')[0] : '';
+        const getFormatTime = (datetime: string | null | undefined) => datetime && datetime.includes('T') ? datetime.split('T')[1].substring(0, 5) : '';
+
+        return {
+            "地點": n.activity_location || '',
+            "活動": n.activity_name || '',
+            "行程": n.activity_option || '',
+            "勾選內容": finalContentStr,
+            "姓名": n.real_name || '',
+            "法名": n.dharma_name || '',
+            "屬性": n.registrant_type || '',
+            "身分": n.identity || '',
+            "交通": n.transportation || '',
+            "抵達": n.arrival_datetime?.replace('T', ' ') || '',
+            "離開": n.departure_datetime?.replace('T', ' ') || '',
+            "義工選項": simplifyVolunteerType(n.volunteer_type),
+            "義工組別": n.volunteer_group || '',
+            "發心始日期": getFormatDate(n.start_date),
+            "發心始時間": getFormatTime(n.start_date),
+            "發心終日期": getFormatDate(n.end_date),
+            "發心終時間": getFormatTime(n.end_date),
+            "安單選項": n.accommodation_option || '',
+            "安單起日": n.stay_start_date || '',
+            "安單迄日": n.stay_end_date || '',
+            "自訂備註": n.other_remarks || '',
+            "備註": n.memo || '',
+            "選項": n.registration_option || '',
+            "狀態": n.is_deleted ? '已刪除' : (isEnded ? '已圓滿' : '正常'),
+            "填表人": n.sign_name || '',
+            "填表時間": n.created_at?.replace('T', ' ').slice(0, 16) || ''
+        };
+    });
+
+    const worksheet = window.XLSX.utils.json_to_sheet(exportData);
+    const workbook = window.XLSX.utils.book_new();
+    window.XLSX.utils.book_append_sheet(workbook, worksheet, "報名資料");
+    window.XLSX.writeFile(workbook, `學員登記表_${new Date().toISOString().slice(0,10)}.xlsx`);
   };
 
   const handleToggleUserStatus = async (uid: string, currentStatus: boolean) => {
@@ -1345,13 +1378,11 @@ export default function App() {
                                 <div className={`rounded-lg p-3 space-y-1 ${isInactive ? 'bg-stone-100/50 border border-stone-200' : 'bg-orange-50 border border-orange-100'}`}>
                                     {hasContents && (
                                         <div className={`text-sm font-bold flex items-start gap-1 ${isInactive ? 'text-stone-400' : 'text-orange-800'}`}>
-                                            <span className={`px-1.5 py-0.5 rounded text-[11px] shrink-0 mt-0.5 ${isInactive ? 'bg-stone-200 text-stone-500' : 'bg-white/60 text-orange-600'}`}>內容</span> 
                                             <span>{safeContents.join('、')}</span>
                                         </div>
                                     )}
                                     {hasRemarks && (
                                         <div className={`text-sm font-bold flex items-start gap-1 ${isInactive ? 'text-stone-400' : 'text-orange-800'}`}>
-                                            <span className={`px-1.5 py-0.5 rounded text-[11px] shrink-0 mt-0.5 ${isInactive ? 'bg-stone-200 text-stone-500' : 'bg-white/60 text-orange-600'}`}>備註</span>
                                             <span>{n.other_remarks}</span>
                                         </div>
                                     )}
@@ -1494,7 +1525,7 @@ export default function App() {
                   <Search className="w-4 h-4 absolute left-2 top-1/2 -translate-y-1/2 text-stone-400"/>
                 </div>
                 <button onClick={handleExport} className="bg-emerald-600 text-white px-5 py-2 rounded-xl flex items-center gap-2 text-base font-bold hover:bg-emerald-700 shadow-md shadow-emerald-200">
-                  匯出 CSV
+                  匯出資料
                 </button>
               </div>
             </div>
