@@ -10,11 +10,10 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v87.30 (資料雙重篩選與性別顯示優化版)
+ * 系統版本：v87.31 (屬性選項調整版)
  * 修正說明：
- * 1. [UI] 登入畫面 & 介面：維持 v87.29 所有設定。
- * 2. [Data] 資料顯示：在「紀錄」、「資料總覽」與「Excel匯出」中，於姓名後方加入「性別」欄位。
- * 3. [Filter] 資料篩選：改為「地點」+「活動」雙重篩選，並合併於同一行顯示，方便精確查找。
+ * 1. [UI] 登記頁面：將「屬性」下拉選單選項更新為「禪修班學員」、「上過課學員」、「學員家人」。
+ * 2. [System] 預設值：更新表單初始化時的屬性預設值。
  */
 
 // --- 主色系設定 ---
@@ -176,7 +175,7 @@ const formatDateTime = (isoString: string | undefined | null): string => {
     }
     const d = new Date(isoString);
     if (isNaN(d.getTime())) return isoString;
-    return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   } catch { return isoString || '-'; }
 };
 
@@ -213,7 +212,7 @@ const renderBulletinContent = (content: string) => {
 };
 
 const INITIAL_FORM_DATA = {
-  real_name: '', dharma_name: '', gender: '', registrant_type: '目前上禪修班學員', registration_option: '新增',
+  real_name: '', dharma_name: '', gender: '', registrant_type: '禪修班學員', registration_option: '新增',
   activity_location: '', activity_name: '', activity_option: '',
   selected_contents: [] as string[], 
   other_remarks: '', memo: '',
@@ -1283,8 +1282,8 @@ export default function App() {
                      <div className="md:col-span-3 space-y-1">
                        <label className="text-sm font-bold text-[#4f093c] ml-1">屬性*</label>
                        <select className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.registrant_type} onChange={e=>setFormData({...formData, registrant_type: e.target.value})}>
-                         <option value="目前上禪修班學員">目前上禪修班學員</option>
-                         <option value="曾經上禪修班學員">曾經上禪修班學員</option>
+                         <option value="禪修班學員">禪修班學員</option>
+                         <option value="上過課學員">上過課學員</option>
                          <option value="學員家人">學員家人</option>
                        </select>
                      </div>
