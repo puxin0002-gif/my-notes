@@ -10,11 +10,13 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v87.20 (匯出時間與密碼重設修復版)
+ * 系統版本：v87.21 (匯出修正與排版優化版)
  * 修正說明：
- * 1. [Fix] 忘記密碼申請：補上預設/查詢到的 uid，修復 "null value in column 'uid' violates not-null constraint" 錯誤。
- * 2. [Fix] Excel 匯出時間為空：強化時間字串的 Regex 解析，確保各種格式 (帶T、帶空白、無秒數) 都能精準抓出 HH:mm。
- * 3. [System] 完整保留 v87.19 所有的視覺與介面優化設定。
+ * 1. [Fix] 忘記密碼申請：加入 uid 查詢與防呆驗證，修復 not-null constraint 錯誤。
+ * 2. [Fix] Excel 匯出時間為空：重寫時間分割邏輯 (split)，確保有值時絕對能切出 HH:mm。
+ * 3. [UI] 審核頁籤：將卡片樣式改為與「資料」頁籤相同的條列式 Table 佈局。
+ * 4. [UI] 資料總覽：加寬「活動行程」欄寬 (w-64)，縮減「備註」欄寬 (w-40) 並自動換行。
+ * 5. [System] 完整保留 v87.19/v87.20 的所有視覺與介面優化設定。
  */
 
 // --- 主色系設定 ---
@@ -394,26 +396,25 @@ export default function App() {
             }
         } else if (authMode === 'forgot') {
             // 先嘗試從資料庫取得使用者的 uid，避免 not-null constraint 錯誤
-            let insertUid = '00000000-0000-0000-0000-000000000000'; 
-            try {
-                const { data: uData } = await supabaseClient
-                    .from('user_permissions')
-                    .select('uid')
-                    .eq('user_name', finalUsername)
-                    .eq('id_last4', finalIdLast4)
-                    .maybeSingle();
-                
-                if (uData && uData.uid) {
-                    insertUid = uData.uid;
-                }
-            } catch (e) {
-                console.warn("Could not fetch user uid", e);
+            const { data: uData, error: fetchErr } = await supabaseClient
+                .from('user_permissions')
+                .select('uid')
+                .eq('user_name', finalUsername)
+                .eq('id_last4', finalIdLast4)
+                .maybeSingle();
+
+            if (fetchErr) throw fetchErr;
+
+            if (!uData || !uData.uid) {
+                alert('找不到相符的使用者，請確認姓名與ID後四碼是否正確。');
+                setLoading(false);
+                return;
             }
 
             const { error } = await supabaseClient.from('reset_requests').insert([{
                 user_name: finalUsername, 
                 id_last4: finalIdLast4, 
-                uid: insertUid, // 補上 uid
+                uid: uData.uid, // 補上正確的 uid
                 status: 'pending', 
                 created_at: new Date().toISOString()
             }]);
@@ -759,16 +760,15 @@ export default function App() {
         // 處理時間拆分 (強化 Regex 以支援包含 T 或空格的情況)
         const getFormatDate = (datetime: string | null | undefined) => {
             if (!datetime) return '';
-            const match = datetime.match(/^(\d{4}[-/]\d{2}[-/]\d{2})/);
-            if (match) return match[1].replace(/-/g, '/');
-            if (datetime.includes('T')) return datetime.split('T')[0].replace(/-/g, '/');
-            if (datetime.includes(' ')) return datetime.split(' ')[0].replace(/-/g, '/');
-            return datetime;
+            let d = datetime;
+            if (d.includes('T')) d = d.split('T')[0];
+            else if (d.includes(' ')) d = d.split(' ')[0];
+            return d.replace(/-/g, '/');
         };
         const getFormatTime = (datetime: string | null | undefined) => {
             if (!datetime) return '';
-            const match = datetime.match(/\b(\d{2}:\d{2})\b/);
-            if (match) return match[1];
+            if (datetime.includes('T')) return datetime.split('T')[1].substring(0, 5);
+            if (datetime.includes(' ')) return datetime.split(' ')[1].substring(0, 5);
             return '';
         };
 
@@ -1523,25 +1523,43 @@ export default function App() {
           </div>
         )}
         
-        {/* Audit Tab */}
+        {/* Audit Tab (審核中心 - 改為 Table 條列式) */}
         {activeTab === 'audit' && isAdmin && (
-          <div className="space-y-12 animate-in fade-in">
-            <div className="bg-[#4f093c] p-8 rounded-[32px] shadow-xl text-white mb-8">
-              <h2 className="text-3xl font-bold">審核中心</h2>
-              <p className="text-white/60 mt-2">處理密碼重設申請</p>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              {resetRequests.filter(r => r.status === 'pending').map(r => (
-                <div key={r.id} className={`p-8 rounded-[32px] shadow-sm border border-stone-100 relative`} style={{ backgroundColor: CARD_BG_COLOR }}>
-                  <div className="absolute top-6 right-6 px-3 py-1 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold">重設密碼</div>
-                  <div className="text-2xl font-bold text-slate-800 mb-1">{r.user_name}</div>
-                  <div className="text-stone-400 font-mono text-sm mb-6">ID: {r.id_last4}</div>
-                  <div className="flex gap-3">
-                    <button onClick={()=>handleResetAction(r.id, 'approve')} className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-md shadow-blue-200">批准</button>
-                    <button onClick={()=>handleResetAction(r.id, 'reject')} className="flex-1 py-3 bg-stone-100 text-stone-600 font-bold rounded-xl hover:bg-stone-200">拒絕</button>
-                  </div>
-                </div>
-              ))}
+          <div className="space-y-8 animate-in fade-in">
+            <div className={`p-8 rounded-[32px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}>
+              <h2 className="text-3xl font-bold text-[#4f093c] mb-2">審核中心</h2>
+              <p className="text-sm text-stone-500 mb-8">處理用戶的密碼重設申請</p>
+              
+              <div className="overflow-x-auto rounded-2xl border border-stone-100">
+                <table className="w-full text-left text-sm bg-white">
+                  <thead className="bg-[#4f093c] text-white font-bold">
+                    <tr>
+                      <th className="p-4">申請人姓名</th>
+                      <th className="p-4">ID後四碼</th>
+                      <th className="p-4">申請時間</th>
+                      <th className="p-4 text-right">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-stone-200">
+                    {resetRequests.filter(r => r.status === 'pending').map(r => (
+                      <tr key={r.id} className="hover:bg-stone-50 transition-colors">
+                        <td className="p-4 font-bold text-lg text-slate-800">{r.user_name}</td>
+                        <td className="p-4 font-mono text-stone-600">{r.id_last4}</td>
+                        <td className="p-4 text-stone-500 font-mono text-xs">{formatDateTime(r.created_at)}</td>
+                        <td className="p-4 flex gap-2 justify-end">
+                          <button onClick={()=>handleResetAction(r.id, 'approve')} className="px-4 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 shadow-sm shadow-blue-200 transition-colors">批准</button>
+                          <button onClick={()=>handleResetAction(r.id, 'reject')} className="px-4 py-2 bg-stone-200 text-stone-700 font-bold rounded-lg hover:bg-stone-300 transition-colors">拒絕</button>
+                        </td>
+                      </tr>
+                    ))}
+                    {resetRequests.filter(r => r.status === 'pending').length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="p-12 text-center text-stone-400 font-bold bg-white">目前無待審核的申請</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}
@@ -1567,14 +1585,14 @@ export default function App() {
             </div>
 
             <div className="overflow-x-auto rounded-2xl border border-stone-100">
-              <table className="w-full text-left text-sm">
+              <table className="w-full text-left text-sm bg-white">
                 <thead className="bg-[#4f093c] text-white font-bold">
                   <tr>
-                    <th className="p-4">活動行程</th>
+                    <th className="p-4 w-64 min-w-[16rem]">活動行程</th>
                     <th className="p-4">基本資料</th>
                     <th className="p-4">交通/住宿</th>
                     <th className="p-4">義工資訊</th>
-                    <th className="p-4">備註</th>
+                    <th className="p-4 w-40 max-w-[12rem]">備註</th>
                     <th className="p-4">狀態</th>
                   </tr>
                 </thead>
@@ -1629,7 +1647,7 @@ export default function App() {
                     
                     return (
                       <tr key={n.id} className={rowStyle}>
-                        <td className="p-4 align-top">
+                        <td className="p-4 align-top w-64 min-w-[16rem]">
                           <div className={boldStyle}>{n.activity_location}</div>
                           <div className={boldStyle}>{n.activity_name}</div>
                           <div className={`mt-1 text-sm font-bold ${n.is_deleted || isEnded ? 'text-stone-400' : 'text-blue-600'}`}>{n.activity_option}</div>
@@ -1658,9 +1676,9 @@ export default function App() {
                               <div className={`${n.is_deleted || isEnded ? 'text-stone-400' : 'text-slate-700'} font-bold`}>
                                 {simplifyVolunteerType(n.volunteer_type)}{n.volunteer_group ? ` - ${n.volunteer_group}` : ''}
                               </div>
-                              {n.start_date && (
+                              {(n.start_date || n.end_date) && (
                                 <div className="text-xs mt-1">
-                                  {formatDateTime(n.start_date)} ~ <br/>{formatDateTime(n.end_date)}
+                                  {n.start_date ? formatDateTime(n.start_date) : '-'} ~ <br/>{n.end_date ? formatDateTime(n.end_date) : '-'}
                                 </div>
                               )}
                             </>
@@ -1668,8 +1686,8 @@ export default function App() {
                             <span className="opacity-50">-</span>
                           )}
                         </td>
-                        <td className="p-4 align-top">
-                          <div className="flex flex-col gap-1">
+                        <td className="p-4 align-top w-40 max-w-[12rem]">
+                          <div className="flex flex-col gap-1 break-words whitespace-normal">
                             {mergedRemarks.length > 0 && <div className={subTextStyle}>{mergedRemarks.join(' / ')}</div>}
                             {hasMemo && <div className={`${subTextStyle} mt-2 pt-2 border-t border-stone-200 border-dashed`}>{n.memo}</div>}
                           </div>
