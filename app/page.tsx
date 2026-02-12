@@ -10,12 +10,13 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v87.12 (編譯修復與紀錄卡片優化版)
+ * 系統版本：v87.14 (TypeScript 型別修復與紀錄卡片樣式定案版)
  * 修正說明：
- * 1. [Fix] 徹底移除 JSX 中導致編譯失敗的 filterAct 及 adminFilterActivities 殘留參照。
- * 2. [UI] 紀錄卡片：姓名調整至第 2 行，字級同「地點」大小。
- * 3. [UI] 紀錄卡片：身份精簡為「法會」/「義工」，顯示於姓名後方。
- * 4. [UI] 紀錄卡片：「勾選內容」與「自訂備註」合併顯示在行程下方。
+ * 1. [Fix] 修復 selected_contents 在陣列/字串解析時的 TS 型別錯誤 (never type)。
+ * 2. [UI] 紀錄卡片：「姓名」移至第 2 行，放大字級；身分精簡為「法會/義工」並接在姓名後方。
+ * 3. [UI] 行程內容與自訂備註：合併顯示於行程下方，若無值則不顯示任何框線。
+ * 4. [UI] 義工選項：精簡為「一般義工/長期義工/佛巡」。
+ * 5. [UI] 狀態樣式：「已刪除/已圓滿」反灰且無懸停變色。
  */
 
 // --- 主色系設定 ---
@@ -193,7 +194,7 @@ const INITIAL_FORM_DATA = {
   selected_contents: [] as string[], 
   other_remarks: '', memo: '',
   identity: '參加法會', 
-  volunteer_type: '一般義工-由精舍安排組別', transportation: '',
+  volunteer_type: '一般義工', transportation: '',
   arrival_datetime: '', departure_datetime: '', volunteer_group: '', 
   start_date: '', end_date: '', accommodation_option: '不安單', 
   stay_start_date: '', stay_end_date: ''
@@ -1219,9 +1220,9 @@ export default function App() {
                      <label className="text-sm font-bold text-[#4f093c] ml-1">義工選項*</label>
                      <select className="w-full p-3 text-lg border border-stone-200 rounded-xl bg-white" value={formData.volunteer_type} onChange={e=>setFormData({...formData, volunteer_type: e.target.value})}>
                        <option value="">請選擇</option>
-                       <option value="一般義工-由精舍安排組別">一般義工-由精舍安排組別</option>
-                       <option value="長期義工-已於平台報名">長期義工-已於平台報名</option>
-                       <option value="佛巡-已於平台報名">佛巡-已於平台報名</option>
+                       <option value="一般義工">一般義工</option>
+                       <option value="長期義工">長期義工</option>
+                       <option value="佛巡">佛巡</option>
                      </select>
                    </div>
                  )}
@@ -1287,71 +1288,90 @@ export default function App() {
                {sortedHistoryNotes.map(n => {
                  const status = getCardStatus(n);
                  const isInactive = status.isInactive;
+                 
+                 // TypeScript 陣列型別斷言修復
+                 const rawContents: any = n.selected_contents;
+                 const safeContents: string[] = Array.isArray(rawContents) 
+                    ? rawContents.filter(Boolean) 
+                    : (typeof rawContents === 'string' 
+                        ? rawContents.replace(/^\{|\}$/g, '').split(',').map((s: string)=>s.replace(/^"|"$/g, '').trim()).filter(Boolean) 
+                        : []);
+                 const hasContents = safeContents.length > 0;
+                 const hasRemarks = typeof n.other_remarks === 'string' && n.other_remarks.trim().length > 0;
+
                  return (
-                   <div key={n.id} className={`rounded-[24px] shadow-sm border border-stone-100 overflow-hidden hover:shadow-md transition-all group`} style={{ backgroundColor: CARD_BG_COLOR }}>
+                   <div key={n.id} className={`rounded-[24px] shadow-sm border overflow-hidden ${isInactive ? 'bg-stone-50 border-stone-200' : 'hover:shadow-md transition-all border-stone-100'}`} style={{ backgroundColor: isInactive ? '#f5f5f4' : CARD_BG_COLOR }}>
                       <div className="relative p-6 pb-0">
                           
-                          <div className="flex items-center gap-2 mb-2">
+                          {/* 第一行：狀態與地點活動 */}
+                          <div className="flex items-center gap-2 mb-3">
                               <span className={`px-3 py-1 rounded-lg text-xs font-bold text-white ${status.color}`}>{status.text}</span>
-                              <h3 className="text-lg font-bold text-slate-600">{n.activity_location} <span className="text-stone-300 mx-1">|</span> {n.activity_name}</h3>
+                              <h3 className={`text-xl font-bold ${isInactive ? 'text-stone-400' : 'text-slate-800'}`}>
+                                {n.activity_location} <span className="text-stone-300 mx-1">|</span> {n.activity_name}
+                              </h3>
                           </div>
 
-                          <div className="flex items-baseline gap-2 mb-3">
-                              <span className="text-lg font-bold text-slate-800">{n.real_name}</span>
-                              {n.dharma_name && <span className="text-base font-bold text-stone-500">({n.dharma_name})</span>}
-                              <span className="text-sm font-bold text-[#4f093c]">
+                          {/* 第二行：姓名移至此處，並放大字級同地點。身分精簡後放置於此 */}
+                          <div className={`flex items-baseline gap-2 mb-4 ${isInactive ? 'text-stone-400' : 'text-slate-800'}`}>
+                              <span className="text-xl font-bold">{n.real_name}</span>
+                              {n.dharma_name && <span className="text-base font-bold opacity-70">({n.dharma_name})</span>}
+                              <span className={`text-sm font-bold ${isInactive ? 'text-stone-400' : 'text-[#7A2E40]'}`}>
                                 {n.identity === '參加法會' ? '法會' : (n.identity === '發心義工' ? '義工' : n.identity)}
                               </span>
-                              <span className="text-xs bg-stone-100 text-stone-500 px-2 py-1 rounded-full">{n.registrant_type}</span>
+                              <span className={`text-xs px-2 py-1 rounded-full ${isInactive ? 'bg-stone-200/50 text-stone-400' : 'bg-stone-100 text-stone-500'}`}>{n.registrant_type}</span>
                           </div>
                           
-                          <div className={`space-y-3 ${isInactive ? 'opacity-50 pointer-events-none' : ''}`}>
-                             <div className="text-base font-bold text-[#7A2E40] border-l-4 border-[#7A2E40] pl-2">
+                          <div className={`space-y-3 ${isInactive ? 'opacity-70 pointer-events-none' : ''}`}>
+                             
+                             {/* 第三行：行程選項 */}
+                             <div className={`text-lg font-bold border-l-4 pl-2 ${isInactive ? 'text-stone-400 border-stone-300' : 'text-[#7A2E40] border-[#7A2E40]'}`}>
                                  {n.activity_option}
                              </div>
 
-                             {((n.selected_contents && n.selected_contents.length > 0) || n.other_remarks) && (
-                                <div className="bg-orange-50 rounded-lg p-3 border border-orange-100 space-y-1">
-                                    {n.selected_contents && Array.isArray(n.selected_contents) && n.selected_contents.length > 0 && (
-                                        <div className="text-sm text-orange-800 font-bold">
-                                            <span className="bg-white/50 px-1 rounded text-orange-600 mr-1">內容</span> 
-                                            {n.selected_contents.join('、')}
+                             {/* 第四行：勾選內容與自訂備註合併顯示框 */}
+                             {(hasContents || hasRemarks) && (
+                                <div className={`rounded-lg p-3 space-y-1 ${isInactive ? 'bg-stone-100/50 border border-stone-200' : 'bg-orange-50 border border-orange-100'}`}>
+                                    {hasContents && (
+                                        <div className={`text-sm font-bold flex items-start gap-1 ${isInactive ? 'text-stone-400' : 'text-orange-800'}`}>
+                                            <span className={`px-1.5 py-0.5 rounded text-[11px] shrink-0 mt-0.5 ${isInactive ? 'bg-stone-200 text-stone-500' : 'bg-white/60 text-orange-600'}`}>內容</span> 
+                                            <span>{safeContents.join('、')}</span>
                                         </div>
                                     )}
-                                    {n.other_remarks && (
-                                        <div className="text-sm text-orange-800 font-bold">
-                                            <span className="bg-white/50 px-1 rounded text-orange-600 mr-1">備註</span>
-                                            {n.other_remarks}
+                                    {hasRemarks && (
+                                        <div className={`text-sm font-bold flex items-start gap-1 ${isInactive ? 'text-stone-400' : 'text-orange-800'}`}>
+                                            <span className={`px-1.5 py-0.5 rounded text-[11px] shrink-0 mt-0.5 ${isInactive ? 'bg-stone-200 text-stone-500' : 'bg-white/60 text-orange-600'}`}>備註</span>
+                                            <span>{n.other_remarks}</span>
                                         </div>
                                     )}
                                 </div>
                              )}
                              
-                             <div className="text-sm text-stone-600 pt-2 border-t border-stone-100 grid grid-cols-1 gap-1">
-                                {n.transportation && <p><span className="font-bold text-stone-400">交通：</span> {n.transportation}</p>}
+                             {/* 其他交通、安單等細節 */}
+                             <div className="text-sm pt-2 border-t border-stone-100 grid grid-cols-1 gap-1">
+                                {n.transportation && <p className={isInactive ? 'text-stone-400' : 'text-stone-600'}><span className="font-bold opacity-70">交通：</span> {n.transportation}</p>}
                                 {(n.arrival_datetime || n.departure_datetime) && (
-                                    <div className="text-xs bg-blue-50/50 p-2 rounded text-blue-800 font-mono">
+                                    <div className={`text-xs p-2 rounded font-mono ${isInactive ? 'bg-stone-100 text-stone-400' : 'bg-blue-50/50 text-blue-800'}`}>
                                         <div>抵：{n.arrival_datetime ? formatDateTime(n.arrival_datetime) : '-'}</div>
                                         <div>離：{n.departure_datetime ? formatDateTime(n.departure_datetime) : '-'}</div>
                                     </div>
                                 )}
 
-                                {n.volunteer_group && <p><span className="font-bold text-[#4f093c]">組別：</span> {n.volunteer_group}</p>}
+                                {n.volunteer_group && <p className={isInactive ? 'text-stone-400' : 'text-stone-600'}><span className="font-bold opacity-70">組別：</span> {n.volunteer_group}</p>}
 
                                 {(n.start_date || n.end_date) && (
-                                    <div className="text-xs bg-blue-50/50 p-2 rounded text-blue-800 font-mono">
-                                        <div className="font-bold text-blue-900/50 mb-1">發心時間：</div>
+                                    <div className={`text-xs p-2 rounded font-mono ${isInactive ? 'bg-stone-100 text-stone-400' : 'bg-blue-50/50 text-blue-800'}`}>
+                                        <div className="font-bold opacity-50 mb-1">發心時間：</div>
                                         <div>始：{n.start_date ? formatDateTime(n.start_date) : '-'}</div>
                                         <div>終：{n.end_date ? formatDateTime(n.end_date) : '-'}</div>
                                     </div>
                                 )}
-                                <p className="mt-1"><span className="font-bold text-stone-400">安單：</span> {n.accommodation_option || '不安單'} {n.accommodation_option === '須安單' ? `(${n.stay_start_date} ~ ${n.stay_end_date})` : ''}</p>
+                                <p className={`mt-1 ${isInactive ? 'text-stone-400' : 'text-stone-600'}`}><span className="font-bold opacity-70">安單：</span> {n.accommodation_option || '不安單'} {n.accommodation_option === '須安單' ? `(${n.stay_start_date} ~ ${n.stay_end_date})` : ''}</p>
                                 
-                                {n.memo && <div className="mt-2 text-stone-400 text-xs italic">備註: {n.memo}</div>}
+                                {n.memo && <div className={`mt-2 text-xs italic ${isInactive ? 'text-stone-300' : 'text-stone-400'}`}>其他備註: {n.memo}</div>}
                              </div>
                              
                              <div className="pt-2 flex justify-between items-end">
-                                <div className="text-xs text-stone-400 font-mono">{n.created_at ? n.created_at.slice(0, 16).replace('T', ' ') : ''}</div>
+                                <div className={`text-xs font-mono ${isInactive ? 'text-stone-300' : 'text-stone-400'}`}>{n.created_at ? n.created_at.slice(0, 16).replace('T', ' ') : ''}</div>
                                 {!isInactive && (
                                    <label className="flex items-center gap-2 cursor-pointer select-none text-red-400 hover:text-red-600 transition-colors bg-white px-3 py-1 rounded-full shadow-sm border border-stone-100">
                                      <input type="checkbox" className="w-4 h-4 rounded accent-red-500" checked={n.is_deleted} onChange={() => handleToggleDeleteNote(n.id, n.is_deleted)} />
@@ -1477,24 +1497,35 @@ export default function App() {
                 <tbody className="divide-y divide-stone-200">
                   {filteredAdminNotes.map(n => { 
                     const { isEnded } = getRestrictionStatus(n.activity_location, n.activity_name, n.activity_option); 
+                    
+                    // TypeScript 陣列型別斷言修復
+                    const rawContents: any = n.selected_contents;
+                    const safeContents: string[] = Array.isArray(rawContents) 
+                        ? rawContents.filter(Boolean) 
+                        : (typeof rawContents === 'string' 
+                            ? rawContents.replace(/^\{|\}$/g, '').split(',').map((s: string)=>s.replace(/^"|"$/g, '').trim()).filter(Boolean) 
+                            : []);
+                    const hasContents = safeContents.length > 0;
+                    const hasRemarks = typeof n.other_remarks === 'string' && n.other_remarks.trim().length > 0;
+
                     let statusBadge; 
-                    let rowStyle = "hover:bg-stone-50"; 
+                    let rowStyle = "hover:bg-stone-50 transition-colors"; 
                     let textStyle = "text-slate-800"; 
                     let subTextStyle = "text-stone-600"; 
-                    let boldStyle = "font-bold text-lg text-slate-800"; 
+                    let boldStyle = "font-bold text-xl text-slate-800"; 
                     
                     if(n.is_deleted) { 
                       statusBadge = <span className="px-2 py-0.5 rounded text-xs font-bold w-fit bg-red-100 text-red-700">已刪除</span>; 
                       rowStyle = "bg-stone-100"; 
                       textStyle = "text-stone-400"; 
                       subTextStyle = "text-stone-400"; 
-                      boldStyle = "font-bold text-lg text-stone-400"; 
+                      boldStyle = "font-bold text-xl text-stone-400"; 
                     } else if(isEnded) { 
                       statusBadge = <span className="px-2 py-0.5 rounded text-xs font-bold w-fit bg-stone-200 text-stone-600">已圓滿</span>; 
                       rowStyle = "bg-stone-50"; 
                       textStyle = "text-stone-400"; 
                       subTextStyle = "text-stone-400"; 
-                      boldStyle = "font-bold text-lg text-stone-400"; 
+                      boldStyle = "font-bold text-xl text-stone-400"; 
                     } else { 
                       statusBadge = <span className={`px-2 py-0.5 rounded text-xs font-bold w-fit ${n.registration_option === '新增' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{n.registration_option}</span>; 
                     } 
@@ -1504,17 +1535,19 @@ export default function App() {
                         <td className="p-4 align-top">
                           <div className={boldStyle}>{n.activity_location}</div>
                           <div className={boldStyle}>{n.activity_name}</div>
-                          <div className={`${subTextStyle} mt-1`}>{n.activity_option}</div>
-                          {n.selected_contents && Array.isArray(n.selected_contents) && n.selected_contents.length > 0 && (
-                            <div className={`text-sm ${n.is_deleted || isEnded ? 'text-stone-400 bg-stone-200' : 'text-[#4f093c] bg-stone-100'} mt-1 font-medium p-1 rounded inline-block`}>
-                              內容：{n.selected_contents.join('、')}
-                            </div>
+                          <div className={`${subTextStyle} mt-1 text-base font-bold`}>{n.activity_option}</div>
+                          
+                          {(hasContents || hasRemarks) && (
+                             <div className={`mt-2 text-sm font-medium p-2 rounded-lg ${n.is_deleted || isEnded ? 'bg-stone-200 text-stone-400 border border-stone-300' : 'bg-orange-50 text-orange-800 border border-orange-100'}`}>
+                                {hasContents && <div className="flex gap-1"><span className={`px-1 rounded text-xs shrink-0 mt-0.5 ${n.is_deleted || isEnded ? 'bg-stone-300 text-stone-500' : 'bg-white/60 text-orange-600'}`}>內容</span><span>{safeContents.join('、')}</span></div>}
+                                {hasRemarks && <div className="flex gap-1 mt-1"><span className={`px-1 rounded text-xs shrink-0 mt-0.5 ${n.is_deleted || isEnded ? 'bg-stone-300 text-stone-500' : 'bg-white/60 text-orange-600'}`}>自訂</span><span>{n.other_remarks}</span></div>}
+                             </div>
                           )}
                         </td>
                         <td className="p-4 align-top">
-                          <div className={boldStyle}>{n.real_name} <span className="text-sm font-normal text-stone-500">{n.dharma_name}</span></div>
-                          <div className="text-stone-500">{n.registrant_type}</div>
-                          <div className={`${n.is_deleted || isEnded ? 'text-stone-400' : 'text-[#4f093c]'} font-bold`}>{n.identity}</div>
+                          <div className={boldStyle}>{n.real_name} <span className="text-sm font-normal opacity-70">({n.dharma_name || '無'})</span></div>
+                          <div className={subTextStyle}>{n.registrant_type}</div>
+                          <div className={`${n.is_deleted || isEnded ? 'text-stone-400' : 'text-[#4f093c]'} font-bold`}>{n.identity === '參加法會' ? '法會' : (n.identity === '發心義工' ? '義工' : n.identity)}</div>
                         </td>
                         <td className="p-4 align-top text-stone-600">
                           <div className={`${n.is_deleted || isEnded ? 'text-stone-400' : 'text-slate-700'} font-bold`}>{n.transportation}</div>
@@ -1541,25 +1574,20 @@ export default function App() {
                               )}
                             </>
                           ) : (
-                            <span className="text-stone-300">-</span>
+                            <span className="opacity-50">-</span>
                           )}
                         </td>
                         <td className="p-4 align-top">
-                          {n.other_remarks && (
-                            <div className="mb-2">
-                              <span className={`${n.is_deleted || isEnded ? 'text-stone-400' : 'text-orange-600'} font-bold text-xs`}>自訂:</span> <span className={subTextStyle}>{n.other_remarks}</span>
-                            </div>
-                          )}
                           {n.memo && (
                             <div>
-                              <span className="text-stone-400 font-bold text-xs">其他:</span> <span className={subTextStyle}>{n.memo}</span>
+                              <span className="opacity-70 font-bold text-xs">其他:</span> <span className={subTextStyle}>{n.memo}</span>
                             </div>
                           )}
                         </td>
                         <td className="p-4 align-top">
                           <div className="flex flex-col gap-1">
                             {statusBadge}
-                            <div className="text-xs text-stone-400 mt-1">
+                            <div className="text-xs opacity-70 mt-1">
                               <div>{n.sign_name}</div>
                               <div>{formatDateTime(n.created_at)}</div>
                             </div>
