@@ -10,11 +10,11 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v87.23 (欄寬微調與時間匯出最終修復版)
+ * 系統版本：v87.24 (時間寫入與解析完美修正版)
  * 修正說明：
- * 1. [UI] 資料總覽：縮小「活動行程」欄寬，加寬「交通/住宿」及「義工資訊」並加上 whitespace-nowrap 防折行。
- * 2. [Fix] Excel 匯出：使用與 UI 相同的 formatDateTime 解析結果來做字串切割，確保發心時間匯出絕對有值。
- * 3. [System] 完整保留 v87.22 所有的視覺與介面優化設定、忘記密碼修復等。
+ * 1. [Fix] 登記寫入：強制將所有時間欄位轉換為標準 ISO 格式 (toISOString) 寫入後端，確保時間不遺失。
+ * 2. [UI/Export] 時間解析統一：優化 formatDateTime 與 Excel 的 extractTimeStr 邏輯，徹底解決舊資料偽時間與匯出空白問題。
+ * 3. [System] 完整保留 v87.23 所有的視覺與介面優化設定、忘記密碼修復等。
  */
 
 // --- 主色系設定 ---
@@ -165,14 +165,32 @@ const getIdLast4FromEmail = (email: string | undefined | null): string => {
     return str.length > 4 ? str.slice(-4) : '0000';
   } catch { return '0000'; }
 };
+
+// 增強版：精準格式化日期與時間 (解決只存日期卻跑出 08:00 的問題)
 const formatDateTime = (isoString: string | undefined | null): string => {
   if (!isoString) return '-';
   try {
+    // 若為純日期格式 (無 T 且無空格，長度10)
+    if (isoString.length === 10 && !isoString.includes('T') && !isoString.includes(' ')) {
+        return isoString.replace(/-/g, '/');
+    }
     const d = new Date(isoString);
-    if (isNaN(d.getTime())) return '-';
+    if (isNaN(d.getTime())) return isoString;
     // Format: YYYY/MM/DD HH:mm
     return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   } catch { return isoString || '-'; }
+};
+
+const formatDateOnly = (isoString: string | undefined | null): string => {
+  if (!isoString) return '-';
+  try {
+    if (isoString.length === 10 && !isoString.includes('T') && !isoString.includes(' ')) {
+        return isoString.replace(/-/g, '/');
+    }
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return isoString;
+    return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+  } catch { return isoString; }
 };
 
 const simplifyVolunteerType = (type: string | undefined | null) => {
@@ -397,6 +415,7 @@ export default function App() {
                 } else { alert('請檢查信箱並點擊驗證連結。'); }
             }
         } else if (authMode === 'forgot') {
+            // 先嘗試從資料庫取得使用者的 uid，避免 not-null constraint 錯誤
             const { data: uData, error: fetchErr } = await supabaseClient
                 .from('user_permissions')
                 .select('uid')
@@ -592,6 +611,17 @@ export default function App() {
     return true;
   };
 
+  // 強制將時間轉為 ISO 字串，確保寫入後端時不會被當成純 Date 而截去時間
+  const safeDateToISO = (val: string | null | undefined) => {
+    if (!val || val.trim() === '') return null;
+    try {
+        if (val.endsWith('Z')) return val; // 已經是標準格式
+        const d = new Date(val);
+        if (!isNaN(d.getTime())) return d.toISOString();
+    } catch (e) {}
+    return val;
+  };
+
   const sanitizeDate = (dateStr: string | null | undefined) => (dateStr && dateStr.trim() !== '') ? dateStr : null;
 
   const handleSubmitNote = async () => {
@@ -620,12 +650,12 @@ export default function App() {
         audit_status: '免審核',
         is_deleted: false, 
         created_at: new Date().toISOString(),
-        start_date: sanitizeDate(finalData.start_date),
-        end_date: sanitizeDate(finalData.end_date),
+        start_date: safeDateToISO(finalData.start_date),
+        end_date: safeDateToISO(finalData.end_date),
         stay_start_date: sanitizeDate(finalData.stay_start_date),
         stay_end_date: sanitizeDate(finalData.stay_end_date),
-        arrival_datetime: sanitizeDate(finalData.arrival_datetime),
-        departure_datetime: sanitizeDate(finalData.departure_datetime),
+        arrival_datetime: safeDateToISO(finalData.arrival_datetime),
+        departure_datetime: safeDateToISO(finalData.departure_datetime),
         sign_name: signName, 
         id_2: id2            
     };
@@ -754,6 +784,7 @@ export default function App() {
     const exportData = filteredAdminNotes.map(n => {
         const { isEnded } = getRestrictionStatus(n.activity_location, n.activity_name, n.activity_option);
         
+        // 解析陣列與清理
         const rawContents: any = n.selected_contents;
         let safeContents: string[] = [];
         if (Array.isArray(rawContents)) {
@@ -768,23 +799,18 @@ export default function App() {
         safeContents = safeContents.filter(s => s && s !== '[]');
         const finalContentStr = safeContents.length > 0 ? safeContents.join('、') : null;
 
-        // 升級版：精準擷取格式為 YYYY/MM/DD 的日期，以及 HH:mm 的時間
-        const formatExportDate = (val: string | null | undefined) => {
-            if (!val) return { date: '', time: '' };
+        // 共用相同解析邏輯
+        const extractDateStr = (val: string | null | undefined) => {
             const formatted = formatDateTime(val);
-            if (formatted !== '-' && formatted.includes(' ')) {
-                const parts = formatted.split(' ');
-                return { date: parts[0], time: parts[1] };
-            }
-            if (val.includes('T')) return { date: val.split('T')[0].replace(/-/g, '/'), time: val.split('T')[1].substring(0, 5) };
-            if (val.includes(' ')) return { date: val.split(' ')[0].replace(/-/g, '/'), time: val.split(' ')[1].substring(0, 5) };
-            return { date: val.replace(/-/g, '/'), time: '' };
+            if (formatted === '-' || !formatted) return '';
+            return formatted.split(' ')[0];
         };
-
-        const arrival = formatExportDate(n.arrival_datetime);
-        const departure = formatExportDate(n.departure_datetime);
-        const start = formatExportDate(n.start_date);
-        const end = formatExportDate(n.end_date);
+        const extractTimeStr = (val: string | null | undefined) => {
+            const formatted = formatDateTime(val);
+            if (formatted === '-' || !formatted) return '';
+            const parts = formatted.split(' ');
+            return parts.length > 1 ? parts[1] : '';
+        };
 
         return {
             "地點": n.activity_location || '',
@@ -796,16 +822,16 @@ export default function App() {
             "屬性": n.registrant_type || '',
             "身分": n.identity || '',
             "交通": n.transportation || '',
-            "抵達日期": arrival.date,
-            "抵達時間": arrival.time,
-            "離開日期": departure.date,
-            "離開時間": departure.time,
+            "抵達日期": extractDateStr(n.arrival_datetime),
+            "抵達時間": extractTimeStr(n.arrival_datetime),
+            "離開日期": extractDateStr(n.departure_datetime),
+            "離開時間": extractTimeStr(n.departure_datetime),
             "義工選項": simplifyVolunteerType(n.volunteer_type),
             "義工組別": n.volunteer_group || '',
-            "發心始日期": start.date,
-            "發心始時間": start.time,
-            "發心終日期": end.date,
-            "發心終時間": end.time,
+            "發心始日期": extractDateStr(n.start_date),
+            "發心始時間": extractTimeStr(n.start_date),
+            "發心終日期": extractDateStr(n.end_date),
+            "發心終時間": extractTimeStr(n.end_date),
             "安單選項": n.accommodation_option || '',
             "安單起日": n.stay_start_date || '',
             "安單迄日": n.stay_end_date || '',
