@@ -5,16 +5,16 @@ import {
   Bell, FileText, History, Settings, Shield, LogOut, Plus, Trash2, Check, 
   Edit, User, MapPin, Tag, ListFilter, Save, Database, Clock, Car, Info, 
   Home, UserCheck, AlertCircle, Briefcase, Layers, 
-  CheckCircle2, CheckSquare, FileSpreadsheet, Megaphone, ClipboardCheck, UserCog, Share2, Lock, Eye, EyeOff, Users, ArrowRight, RefreshCw, AlertTriangle, Image as ImageIcon, Table as TableIcon, Calendar, Filter, UploadCloud, ChevronRight, Search, KeyRound
+  CheckCircle2, CheckSquare, FileSpreadsheet, Megaphone, ClipboardCheck, UserCog, Share2, Lock, Eye, EyeOff, Users, ArrowRight, RefreshCw, AlertTriangle, Image as ImageIcon, Table as TableIcon, Calendar, Filter, UploadCloud, ChevronRight, Search, KeyRound, BarChart3, PieChart, TrendingUp, Download
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v87.33 (法名顯示格式調整版)
+ * 系統版本：v87.54 (統計資料型別修復版)
  * 修正說明：
- * 1. [UI] 紀錄卡片：法名移除括號，前方加入 "/" 分隔符號。
- * 2. [UI] 資料總覽：法名移除括號，前方加入 "/" 分隔符號。
- * 3. [System] 維持 v87.32 所有邏輯與設定。
+ * 1. [Fix] 修正 statisticsData 中 selected_contents 的型別判斷錯誤 (TS Error: Property 'trim' does not exist on type 'never')。
+ * 2. [Fix] 修正 map 函式參數隱含 any 的錯誤 (TS Error: Parameter 'item' implicitly has an 'any' type)。
+ * 3. [System] 保持所有 v87.53 功能。
  */
 
 // --- 主色系設定 ---
@@ -137,6 +137,8 @@ declare global {
   interface Window {
     supabase: any;
     XLSX: any;
+    html2canvas: any;
+    jspdf: any;
   }
 }
 
@@ -242,6 +244,229 @@ const getLocalTodayDateTime = () => {
   return `${year}-${month}-${day}T${hours}:${minutes}`;
 };
 
+// --- PDF 匯出工具函式 ---
+const downloadPDF = async (elementId: string, title: string) => {
+    if (!window.html2canvas || !window.jspdf) {
+        try {
+            await Promise.all([
+                new Promise((resolve, reject) => {
+                    if (window.html2canvas) return resolve(true);
+                    const script = document.createElement('script');
+                    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+                    script.onload = resolve;
+                    script.onerror = reject;
+                    document.head.appendChild(script);
+                }),
+                new Promise((resolve, reject) => {
+                    if (window.jspdf) return resolve(true);
+                    const script = document.createElement('script');
+                    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+                    script.onload = resolve;
+                    script.onerror = reject;
+                    document.head.appendChild(script);
+                })
+            ]);
+        } catch (e) {
+            alert('無法載入 PDF 產生工具，請檢查網路。');
+            return;
+        }
+    }
+
+    const element = document.getElementById(elementId);
+    if (!element) {
+        alert('找不到圖表元件');
+        return;
+    }
+
+    try {
+        const titleDiv = document.createElement('div');
+        titleDiv.innerText = title;
+        titleDiv.style.textAlign = 'center';
+        titleDiv.style.fontSize = '24px';
+        titleDiv.style.fontWeight = 'bold';
+        titleDiv.style.marginBottom = '20px';
+        titleDiv.style.color = '#4f093c';
+        titleDiv.style.fontFamily = 'sans-serif'; 
+        
+        element.insertBefore(titleDiv, element.firstChild);
+        await new Promise(r => setTimeout(r, 100));
+
+        const canvas = await window.html2canvas(element, { 
+            scale: 2, 
+            useCORS: true, 
+            logging: false,
+            backgroundColor: '#ffffff'
+        });
+        
+        element.removeChild(titleDiv);
+
+        const imgData = canvas.toDataURL('image/png');
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF('p', 'mm', 'a4');
+        const pdfWidth = pdf.internal.pageSize.getWidth();
+        const pdfHeight = pdf.internal.pageSize.getHeight();
+        
+        const imgProps = pdf.getImageProperties(imgData);
+        const imgHeight = (imgProps.height * pdfWidth) / imgProps.width;
+        
+        const pageHeight = pdfHeight - 20;
+
+        let heightLeft = imgHeight;
+        let position = 10; 
+        let pageNum = 1;
+
+        pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, imgHeight);
+        pdf.setFontSize(10);
+        pdf.text(`Page ${pageNum}`, pdfWidth / 2, pdfHeight - 10, { align: 'center' });
+
+        heightLeft -= pageHeight;
+
+        while (heightLeft >= 0) {
+           position = heightLeft - imgHeight;
+           pdf.addPage();
+           pageNum++;
+           const yPos = - (pageHeight * (pageNum - 1)) + 10; 
+           pdf.addImage(imgData, 'PNG', 0, yPos, pdfWidth, imgHeight);
+           pdf.text(`Page ${pageNum}`, pdfWidth / 2, pdfHeight - 10, { align: 'center' });
+           heightLeft -= pageHeight;
+        }
+        
+        pdf.save(`${title}_${new Date().toISOString().slice(0,10)}.pdf`);
+    } catch (err) {
+        console.error(err);
+        alert('匯出 PDF 失敗');
+        const element = document.getElementById(elementId);
+        if (element && element.firstChild && element.firstChild.textContent === title) {
+             element.removeChild(element.firstChild);
+        }
+    }
+};
+
+// --- 統計圖表組件 ---
+const StatsBarChart = ({ title, data }: { title: string, data: Record<string, { dharma_m: number, dharma_f: number, vol_m: number, vol_f: number }> }) => {
+  const keys = Object.keys(data).sort((a, b) => {
+      const totalA = data[a].dharma_m + data[a].dharma_f + data[a].vol_m + data[a].vol_f;
+      const totalB = data[b].dharma_m + data[b].dharma_f + data[b].vol_m + data[b].vol_f;
+      return totalB - totalA;
+  });
+
+  return (
+    <div className="bg-white p-8 rounded-3xl shadow-sm border border-stone-100 h-auto break-inside-avoid">
+      <h4 className="font-bold text-[#4f093c] text-2xl mb-8 flex items-center gap-2">
+        <BarChart3 className="w-6 h-6"/> {title}
+      </h4>
+      <div className="space-y-8">
+        {keys.length === 0 ? (
+           <div className="text-center text-stone-300 py-10 font-bold text-xl">無資料</div>
+        ) : (
+           keys.map(key => {
+             const d = data[key];
+             const total = d.dharma_m + d.dharma_f + d.vol_m + d.vol_f;
+             if (total === 0) return null;
+             
+             const getPct = (val: number) => total > 0 ? (val / total) * 100 : 0;
+
+             return (
+               <div key={key} className="space-y-3 pb-6 border-b border-stone-100 last:border-0 last:pb-0 break-inside-avoid">
+                 <div className="flex justify-between items-end pb-2">
+                   <span className="font-bold text-slate-700 text-xl max-w-[70%] leading-normal whitespace-normal">{key || '未指定'}</span>
+                   <span className="font-black text-[#4f093c] text-3xl whitespace-nowrap">{total} <span className="text-sm font-bold text-slate-400">人</span></span>
+                 </div>
+                 
+                 <div className="h-6 w-full bg-stone-100 rounded-lg overflow-hidden flex shadow-inner">
+                   {d.dharma_m > 0 && <div style={{ width: `${getPct(d.dharma_m)}%` }} className="bg-blue-600 h-full" />}
+                   {d.dharma_f > 0 && <div style={{ width: `${getPct(d.dharma_f)}%` }} className="bg-blue-300 h-full" />}
+                   {d.vol_m > 0 && <div style={{ width: `${getPct(d.vol_m)}%` }} className="bg-orange-500 h-full" />}
+                   {d.vol_f > 0 && <div style={{ width: `${getPct(d.vol_f)}%` }} className="bg-orange-300 h-full" />}
+                 </div>
+
+                 <div className="grid grid-cols-4 gap-2 text-center bg-stone-50 p-3 rounded-xl border border-stone-100">
+                    <div className="flex flex-col"><span className="text-blue-700 font-bold text-base">法會(男)</span><span className="text-slate-700 font-bold text-xl">{d.dharma_m}</span></div>
+                    <div className="flex flex-col border-l border-stone-200"><span className="text-blue-400 font-bold text-base">法會(女)</span><span className="text-slate-700 font-bold text-xl">{d.dharma_f}</span></div>
+                    <div className="flex flex-col border-l border-stone-200"><span className="text-orange-600 font-bold text-base">義工(男)</span><span className="text-slate-700 font-bold text-xl">{d.vol_m}</span></div>
+                    <div className="flex flex-col border-l border-stone-200"><span className="text-orange-400 font-bold text-base">義工(女)</span><span className="text-slate-700 font-bold text-xl">{d.vol_f}</span></div>
+                 </div>
+               </div>
+             );
+           })
+        )}
+      </div>
+    </div>
+  );
+};
+
+// --- 身分比例結構圖 ---
+const IdentityRatioChart = ({ data }: { data: Record<string, { dharma_m: number, dharma_f: number, vol_m: number, vol_f: number }> }) => {
+    
+    const dharmaData = data['參加法會'] || { dharma_m: 0, dharma_f: 0, vol_m: 0, vol_f: 0 };
+    const volData = data['發心義工'] || { dharma_m: 0, dharma_f: 0, vol_m: 0, vol_f: 0 };
+    
+    const totalDharma = (dharmaData.dharma_m + dharmaData.dharma_f);
+    const totalVol = (volData.vol_m + volData.vol_f);
+    const totalAll = totalDharma + totalVol;
+
+    if (totalAll === 0) return <div className="p-6 bg-white rounded-3xl shadow-sm border border-stone-100 flex items-center justify-center text-stone-300 font-bold h-40 text-xl">尚無身分數據</div>;
+
+    const dharmaPct = (totalDharma / totalAll) * 100;
+    const volPct = (totalVol / totalAll) * 100;
+
+    const getSubPct = (val: number, parentTotal: number) => parentTotal > 0 ? (val / parentTotal) * 100 : 0;
+
+    return (
+        <div className="bg-white p-8 rounded-3xl shadow-sm border border-stone-100 break-inside-avoid">
+            <h4 className="font-bold text-[#4f093c] text-2xl mb-8 flex items-center gap-2">
+                <PieChart className="w-6 h-6"/> 身分比例結構圖
+            </h4>
+            
+            <div className="flex w-full h-32 rounded-2xl overflow-hidden shadow-inner font-bold text-white relative text-lg">
+                <div style={{ width: `${dharmaPct}%` }} className="h-full flex flex-col transition-all duration-500">
+                    <div className="flex-1 bg-blue-600 flex items-center justify-center relative group">
+                        <div className="z-10 drop-shadow-md text-center"><div>參加法會</div><div className="text-2xl">{totalDharma}人 ({dharmaPct.toFixed(1)}%)</div></div>
+                        <div className="absolute inset-0 flex opacity-20 group-hover:opacity-30 transition-opacity">
+                             <div style={{width: `${getSubPct(dharmaData.dharma_m, totalDharma)}%`}} className="bg-black h-full"></div>
+                             <div style={{width: `${getSubPct(dharmaData.dharma_f, totalDharma)}%`}} className="bg-white h-full"></div>
+                        </div>
+                    </div>
+                    <div className="h-3 flex">
+                       <div style={{width: `${getSubPct(dharmaData.dharma_m, totalDharma)}%`}} className="bg-blue-800 h-full"></div>
+                       <div style={{width: `${getSubPct(dharmaData.dharma_f, totalDharma)}%`}} className="bg-blue-300 h-full"></div>
+                    </div>
+                </div>
+                <div style={{ width: `${volPct}%` }} className="h-full flex flex-col transition-all duration-500">
+                    <div className="flex-1 bg-orange-500 flex items-center justify-center relative group">
+                        <div className="z-10 drop-shadow-md text-center"><div>發心義工</div><div className="text-2xl">{totalVol}人 ({volPct.toFixed(1)}%)</div></div>
+                        <div className="absolute inset-0 flex opacity-20 group-hover:opacity-30 transition-opacity">
+                             <div style={{width: `${getSubPct(volData.vol_m, totalVol)}%`}} className="bg-black h-full"></div>
+                             <div style={{width: `${getSubPct(volData.vol_f, totalVol)}%`}} className="bg-white h-full"></div>
+                        </div>
+                    </div>
+                    <div className="h-3 flex">
+                       <div style={{width: `${getSubPct(volData.vol_m, totalVol)}%`}} className="bg-orange-800 h-full"></div>
+                       <div style={{width: `${getSubPct(volData.vol_f, totalVol)}%`}} className="bg-orange-200 h-full"></div>
+                    </div>
+                </div>
+            </div>
+            <div className="grid grid-cols-2 gap-8 mt-8">
+                <div className="space-y-3">
+                    <div className="flex justify-between items-center text-blue-700 font-bold border-b-2 border-blue-100 pb-2 text-lg"><span>參加法會</span><span className="text-2xl">{totalDharma}</span></div>
+                    <div className="flex justify-between text-base text-stone-600 font-bold"><span>男眾: <span className="text-xl text-slate-800">{dharmaData.dharma_m}</span></span><span>女眾: <span className="text-xl text-slate-800">{dharmaData.dharma_f}</span></span></div>
+                </div>
+                <div className="space-y-3">
+                    <div className="flex justify-between items-center text-orange-700 font-bold border-b-2 border-orange-100 pb-2 text-lg"><span>發心義工</span><span className="text-2xl">{totalVol}</span></div>
+                    <div className="flex justify-between text-base text-stone-600 font-bold"><span>男眾: <span className="text-xl text-slate-800">{volData.vol_m}</span></span><span>女眾: <span className="text-xl text-slate-800">{volData.vol_f}</span></span></div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const OverviewCard = ({ title, count, icon: Icon, color }: { title: string, count: number, icon: any, color: string }) => (
+    <div className="bg-white p-6 rounded-2xl shadow-sm border border-stone-100 flex items-center gap-5 break-inside-avoid">
+        <div className={`p-4 rounded-full ${color} text-white`}><Icon className="w-8 h-8"/></div>
+        <div><p className="text-base text-stone-400 font-bold">{title}</p><p className="text-4xl font-black text-slate-800">{count}</p></div>
+    </div>
+);
+
 export default function App() {
   const [supabaseClient, setSupabaseClient] = useState<any>(null);
   const [user, setUser] = useState<any>(null);
@@ -273,9 +498,17 @@ export default function App() {
   
   // 資料頁籤的篩選器
   const [filterLoc, setFilterLoc] = useState<string>('');
-  const [filterAct, setFilterAct] = useState<string>(''); // 新增活動篩選
+  const [filterAct, setFilterAct] = useState<string>(''); 
   const [searchText, setSearchText] = useState<string>('');
   
+  // 資料狀態篩選
+  const [dataViewType, setDataViewType] = useState<'active' | 'completed'>('active');
+
+  // 統計頁籤的篩選器
+  const [statFilterLoc, setStatFilterLoc] = useState<string>('');
+  const [statFilterAct, setStatFilterAct] = useState<string>('');
+  const [statsViewType, setStatsViewType] = useState<'active' | 'completed'>('active');
+
   const [formData, setFormData] = useState(INITIAL_FORM_DATA);
 
   // 管理後台設定用
@@ -292,6 +525,10 @@ export default function App() {
   const [newUser, setNewUser] = useState({ name: '', id4: '', pwd: '' });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Column resizing state
+  const [colWidths, setColWidths] = useState([200, 250, 230, 230, 160, 100, 80]);
+  const resizeRef = useRef<{ index: number; startX: number; startWidth: number } | null>(null);
 
   useEffect(() => {
     setTodayDate(getLocalTodayDate());
@@ -382,6 +619,46 @@ export default function App() {
     }
   }, [user, fetchData, supabaseClient]);
 
+  // --- Column Resizing Handlers ---
+  const onResize = useCallback((e: MouseEvent) => {
+    if (!resizeRef.current) return;
+    const { index, startX, startWidth } = resizeRef.current;
+    const diff = e.clientX - startX;
+    const newWidth = Math.max(50, startWidth + diff); 
+    setColWidths(prev => {
+       const next = [...prev];
+       next[index] = newWidth;
+       return next;
+    });
+  }, []);
+
+  const endResize = useCallback(() => {
+    resizeRef.current = null;
+    document.removeEventListener('mousemove', onResize);
+    document.removeEventListener('mouseup', endResize);
+    document.body.style.cursor = 'default';
+  }, [onResize]);
+
+  const startResize = (index: number, e: React.MouseEvent) => {
+    e.preventDefault();
+    resizeRef.current = {
+      index,
+      startX: e.clientX,
+      startWidth: colWidths[index],
+    };
+    document.addEventListener('mousemove', onResize);
+    document.addEventListener('mouseup', endResize);
+    document.body.style.cursor = 'col-resize';
+  };
+
+  useEffect(() => {
+      return () => {
+          document.removeEventListener('mousemove', onResize);
+          document.removeEventListener('mouseup', endResize);
+      }
+  }, [onResize, endResize]);
+
+  // --- Auth & other handlers ---
   const handleAuthAction = async () => {
     if (!username || !idLast4) return alert('請輸入姓名與 ID 後四碼');
     if (!supabaseClient && !isMock) return alert('系統未連線至資料庫');
@@ -484,6 +761,16 @@ export default function App() {
     return [...new Set(source.map(h => h.activity).filter((a): a is string => !!a))].sort();
   }, [hierarchyData, filterLoc]);
 
+  // 統計篩選專用
+  const statActivityOptions = useMemo(() => {
+    let source = hierarchyData;
+    if (statFilterLoc) {
+        source = source.filter(h => h.location === statFilterLoc);
+    }
+    // 修正：使用明確的型別判斷
+    return [...new Set(source.map(h => h.activity).filter((a): a is string => !!a))].sort();
+  }, [hierarchyData, statFilterLoc]);
+
   const filteredTransportOptions = useMemo(() => {
     const all = ["大車-精舍統一行程", "小車-自訂抵離寺", "自行前往-自訂抵離寺"];
     if (formData.activity_option && formData.activity_option.includes('自訂行程')) {
@@ -567,6 +854,39 @@ export default function App() {
       if (status.isDeadlined) return !isAdmin;
       return false;
   }, [formData, getRestrictionStatus, isAdmin]);
+
+  const renderActivityOptions = () => {
+      return availableActivities.map(a => {
+         const { isEnded, isDeadlined } = getRestrictionStatus(formData.activity_location, a, '');
+         let label = '(可報名)';
+         if (isEnded) label = '(已圓滿)';
+         else if (isDeadlined) label = isAdmin ? '(已截止-管理員可報)' : '(已截止)';
+         
+         const isDisabled = isEnded || (isDeadlined && !isAdmin);
+         return <option key={a} value={a} disabled={isDisabled}>{a} {label}</option>;
+      });
+  };
+
+  const renderOptionOptions = () => {
+      return availableOptions.map(o => {
+         const { isEnded, isDeadlined } = getRestrictionStatus(formData.activity_location, formData.activity_name, o);
+         let label = '(可報名)';
+         if (isEnded) label = '(已圓滿)';
+         else if (isDeadlined) label = isAdmin ? '(已截止-管理員可報)' : '(已截止)';
+         
+         const isDisabled = isEnded || (isDeadlined && !isAdmin);
+         return <option key={o} value={o} disabled={isDisabled}>{o} {label}</option>;
+      });
+  };
+
+  const getSubmitButtonStatus = () => {
+      const { isEnded, isDeadlined } = getRestrictionStatus(formData.activity_location, formData.activity_name, formData.activity_option);
+      if (isEnded) return { disabled: true, text: '已圓滿 (無法報名)' };
+      if (isDeadlined) {
+          return isAdmin ? { disabled: false, text: '確認送出 (管理員權限)' } : { disabled: true, text: '已截止報名' };
+      }
+      return { disabled: false, text: '確認送出' };
+  };
 
   const validateForm = () => {
     const status = getRestrictionStatus(formData.activity_location, formData.activity_name, formData.activity_option);
@@ -1035,43 +1355,21 @@ export default function App() {
     return { end: found?.option_end_date || '', dead: found?.option_deadline || '' };
   }, [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
 
-  const renderActivityOptions = () => {
-      return availableActivities.map(a => {
-         const { isEnded, isDeadlined } = getRestrictionStatus(formData.activity_location, a, '');
-         let label = '(可報名)';
-         if (isEnded) label = '(已圓滿)';
-         else if (isDeadlined) label = isAdmin ? '(已截止-管理員可報)' : '(已截止)';
-         
-         const isDisabled = isEnded || (isDeadlined && !isAdmin);
-         return <option key={a} value={a} disabled={isDisabled}>{a} {label}</option>;
-      });
-  };
-
-  const renderOptionOptions = () => {
-      return availableOptions.map(o => {
-         const { isEnded, isDeadlined } = getRestrictionStatus(formData.activity_location, formData.activity_name, o);
-         let label = '(可報名)';
-         if (isEnded) label = '(已圓滿)';
-         else if (isDeadlined) label = isAdmin ? '(已截止-管理員可報)' : '(已截止)';
-         
-         const isDisabled = isEnded || (isDeadlined && !isAdmin);
-         return <option key={o} value={o} disabled={isDisabled}>{o} {label}</option>;
-      });
-  };
-  
-  const getSubmitButtonStatus = () => {
-      const { isEnded, isDeadlined } = getRestrictionStatus(formData.activity_location, formData.activity_name, formData.activity_option);
-      if (isEnded) return { disabled: true, text: '已圓滿 (無法報名)' };
-      if (isDeadlined) {
-          return isAdmin ? { disabled: false, text: '確認送出 (管理員權限)' } : { disabled: true, text: '已截止報名' };
-      }
-      return { disabled: false, text: '確認送出' };
-  };
-
   const filteredAdminNotes = useMemo(() => {
     return notes.filter(n => {
+        // v87.52 新增篩選邏輯：已圓滿 vs 未圓滿
+        const { isEnded } = getRestrictionStatus(n.activity_location, n.activity_name, n.activity_option); 
+        
+        if (dataViewType === 'active') {
+            // 顯示未圓滿 (isEnded = false)
+            if (isEnded) return false;
+        } else {
+            // 顯示已圓滿 (isEnded = true)
+            if (!isEnded) return false;
+        }
+
         if (filterLoc && n.activity_location !== filterLoc) return false;
-        if (filterAct && n.activity_name !== filterAct) return false; // 新增活動篩選
+        if (filterAct && n.activity_name !== filterAct) return false; 
         if (searchText) {
             const search = searchText.toLowerCase();
             return (
@@ -1082,23 +1380,50 @@ export default function App() {
         }
         return true;
     }).sort((a, b) => {
-        const getVal = (note: Note) => {
-            if (note.is_deleted) return 2;
-            const { isEnded } = getRestrictionStatus(note.activity_location, note.activity_name, note.activity_option);
-            if (isEnded) return 1;
-            return 0;
+        // v87.45 排序邏輯
+        const getStatusVal = (note: Note) => { 
+            if (note.is_deleted) return 2; 
+            const { isEnded } = getRestrictionStatus(note.activity_location, note.activity_name, note.activity_option); 
+            if (isEnded) return 1; 
+            return 0; 
         };
-        const statusA = getVal(a);
-        const statusB = getVal(b);
-        if(statusA !== statusB) return statusA - statusB;
+        const valA = getStatusVal(a);
+        const valB = getStatusVal(b);
+        if (valA !== valB) return valA - valB;
 
         if (a.activity_location !== b.activity_location) return String(a.activity_location || '').localeCompare(String(b.activity_location || ''));
         if (a.activity_name !== b.activity_name) return String(a.activity_name || '').localeCompare(String(b.activity_name || ''));
+
+        // 重複資料置底邏輯
+        const activeNotes = notes.filter(n => !n.is_deleted && !getRestrictionStatus(n.activity_location, n.activity_name, n.activity_option).isEnded);
+        const activeDupMap: Record<string, number> = {};
+        activeNotes.forEach(n => {
+             const k = `${n.activity_location}|${n.activity_name}|${n.real_name}`;
+             activeDupMap[k] = (activeDupMap[k] || 0) + 1;
+        });
+        
+        const isDupA = valA === 0 && (activeDupMap[`${a.activity_location}|${a.activity_name}|${a.real_name}`] || 0) > 1;
+        const isDupB = valB === 0 && (activeDupMap[`${b.activity_location}|${b.activity_name}|${b.real_name}`] || 0) > 1;
+        
+        if (isDupA !== isDupB) return isDupA ? 1 : -1;
+
         if (a.activity_option !== b.activity_option) return String(a.activity_option || '').localeCompare(String(b.activity_option || ''));
         if (a.transportation !== b.transportation) return String(a.transportation || '').localeCompare(String(b.transportation || ''));
-        return String(a.identity || '').localeCompare(String(b.identity || ''));
+        return String(a.real_name || '').localeCompare(String(b.real_name || ''));
     });
-  }, [notes, filterLoc, filterAct, searchText, getRestrictionStatus]); 
+  }, [notes, filterLoc, filterAct, searchText, getRestrictionStatus, dataViewType]); 
+
+  // --- 重複資料計算 ---
+  const duplicateMap = useMemo(() => {
+    const counts: Record<string, number> = {};
+    filteredAdminNotes.forEach(n => {
+        if (!n.is_deleted) {
+            const key = `${n.activity_location}|${n.activity_name}|${n.real_name}`;
+            counts[key] = (counts[key] || 0) + 1;
+        }
+    });
+    return counts;
+  }, [filteredAdminNotes]);
 
   const getCurrentDeadlineText = () => {
       const { endDate, deadline } = getHierarchyDates(formData.activity_location, formData.activity_name, formData.activity_option);
@@ -1107,6 +1432,98 @@ export default function App() {
       if(endDate) text += ` 結束日:${endDate}`;
       return text;
   };
+
+  // --- 統計數據計算 (v87.52: 支援圓滿篩選 & 勾選內容統計) ---
+  const statisticsData = useMemo(() => {
+    const baseData = notes.filter(n => !n.is_deleted);
+    const filtered = baseData.filter(n => {
+        // v87.52 新增：圓滿狀態篩選
+        const { isEnded } = getRestrictionStatus(n.activity_location, n.activity_name, n.activity_option);
+        if (statsViewType === 'active' && isEnded) return false;
+        if (statsViewType === 'completed' && !isEnded) return false;
+
+        if (statFilterLoc && n.activity_location !== statFilterLoc) return false;
+        if (statFilterAct && n.activity_name !== statFilterAct) return false;
+        return true;
+    });
+
+    const aggregate = (groupBy: (n: Note) => string) => {
+        const result: Record<string, { dharma_m: number, dharma_f: number, vol_m: number, vol_f: number }> = {};
+        filtered.forEach(n => {
+            const key = groupBy(n) || '未指定';
+            if (!result[key]) result[key] = { dharma_m: 0, dharma_f: 0, vol_m: 0, vol_f: 0 };
+            
+            const isDharma = n.identity === '參加法會';
+            const isMale = n.gender === '男';
+            
+            if (isDharma && isMale) result[key].dharma_m++;
+            else if (isDharma && !isMale) result[key].dharma_f++;
+            else if (!isDharma && isMale) result[key].vol_m++;
+            else if (!isDharma && !isMale) result[key].vol_f++;
+        });
+        return result;
+    };
+
+    // v87.52 新增：勾選內容統計 - 修正型別問題 v87.54
+    const contentStats: Record<string, { dharma_m: number, dharma_f: number, vol_m: number, vol_f: number }> = {};
+    filtered.forEach(n => {
+        let contents: string[] = [];
+        const raw = n.selected_contents as any; // Cast to any
+        if (Array.isArray(raw)) contents = raw.map((s: any) => String(s).replace(/[\[\]"]/g, '').trim()).filter(Boolean);
+        else if (typeof raw === 'string') {
+            let s = raw.trim();
+            if (s !== '[]' && s !== '{}' && s !== 'null' && s !== '""') {
+                s = s.replace(/^\[|\]$/g, '').replace(/^\{|\}$/g, '');
+                contents = s.split(',').map((item: string) => item.replace(/^"|"$/g, '').replace(/^'|'$/g, '').replace(/[\[\]"]/g, '').trim()).filter(Boolean);
+            }
+        }
+        
+        contents.forEach(c => {
+             if (!contentStats[c]) contentStats[c] = { dharma_m: 0, dharma_f: 0, vol_m: 0, vol_f: 0 };
+             const isDharma = n.identity === '參加法會';
+             const isMale = n.gender === '男';
+             if (isDharma && isMale) contentStats[c].dharma_m++;
+             else if (isDharma && !isMale) contentStats[c].dharma_f++;
+             else if (!isDharma && isMale) contentStats[c].vol_m++;
+             else if (!isDharma && !isMale) contentStats[c].vol_f++;
+        });
+    });
+
+
+    return {
+        byLocationActivity: aggregate(n => `${n.activity_location}-${n.activity_name}`),
+        byOption: aggregate(n => n.activity_option),
+        byIdentity: aggregate(n => n.identity === '參加法會' ? '參加法會' : (n.identity === '發心義工' ? '發心義工' : n.identity)),
+        byTransport: aggregate(n => n.transportation),
+        byContent: contentStats
+    };
+  }, [notes, statFilterLoc, statFilterAct, statsViewType, getRestrictionStatus]);
+
+  const statsOverview = useMemo(() => {
+      let total = 0;
+      let dharma = 0;
+      let vol = 0;
+      
+      const baseData = notes.filter(n => !n.is_deleted);
+      const filtered = baseData.filter(n => {
+          // v87.52 圓滿篩選
+          const { isEnded } = getRestrictionStatus(n.activity_location, n.activity_name, n.activity_option);
+          if (statsViewType === 'active' && isEnded) return false;
+          if (statsViewType === 'completed' && !isEnded) return false;
+
+          if (statFilterLoc && n.activity_location !== statFilterLoc) return false;
+          if (statFilterAct && n.activity_name !== statFilterAct) return false;
+          return true;
+      });
+
+      filtered.forEach(n => {
+          total++;
+          if (n.identity === '參加法會') dharma++;
+          if (n.identity === '發心義工') vol++;
+      });
+
+      return { total, dharma, vol };
+  }, [notes, statFilterLoc, statFilterAct, statsViewType, getRestrictionStatus]);
 
   const submitStatus = getSubmitButtonStatus();
 
@@ -1190,20 +1607,21 @@ export default function App() {
 
       {/* Main Tab Menu */}
       <div className="sticky top-[64px] z-40 bg-[#4f093c] shadow-lg pt-2 pb-4 px-4 mb-8">
-        <div className="flex p-1 bg-white/10 rounded-2xl mx-auto max-w-4xl backdrop-blur-sm">
+        <div className="flex p-1 bg-white/10 rounded-2xl mx-auto max-w-5xl backdrop-blur-sm overflow-x-auto">
            {[{ id: 'bulletin', icon: <Bell className="w-5 h-5"/>, label: '公告' }, 
              { id: 'form', icon: <Edit className="w-5 h-5"/>, label: '登記' }, 
              { id: 'history', icon: <History className="w-5 h-5"/>, label: '紀錄' }, 
-             { id: 'users', icon: <Users className="w-5 h-5"/>, label: '用戶', admin: true }, 
+             { id: 'users', icon: <Users className="w-5 h-5"/>, label: '學員', admin: true }, 
              { id: 'audit', icon: <ClipboardCheck className="w-5 h-5"/>, label: '審核', admin: true }, 
              { id: 'admin_data', icon: <FileSpreadsheet className="w-5 h-5"/>, label: '資料', admin: true }, 
+             { id: 'statistics', icon: <BarChart3 className="w-5 h-5"/>, label: '統計', admin: true },
              { id: 'admin_settings', icon: <Settings className="w-5 h-5"/>, label: '設定', admin: true }
             ].map((tab) => (
              (!tab.admin || isAdmin) && (
                <button 
                  key={tab.id} 
                  onClick={() => setActiveTab(tab.id)} 
-                 className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-xl transition-all ${activeTab === tab.id ? 'bg-white text-[#4f093c] shadow-lg scale-105' : 'text-white/70 hover:text-white hover:bg-white/5'}`}
+                 className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl font-bold text-xl transition-all whitespace-nowrap ${activeTab === tab.id ? 'bg-white text-[#4f093c] shadow-lg scale-105' : 'text-white/70 hover:text-white hover:bg-white/5'}`}
                >
                  {tab.icon}{tab.label}
                </button>
@@ -1213,7 +1631,7 @@ export default function App() {
       </div>
 
       {/* Main Content Area */}
-      <div className="max-w-6xl mx-auto p-6 md:p-10">
+      <div className="max-w-7xl mx-auto p-6 md:p-10">
         
         {/* Bulletin Tab */}
         {activeTab === 'bulletin' && (
@@ -1465,7 +1883,7 @@ export default function App() {
                  const rawContents: any = n.selected_contents;
                  let safeContents: string[] = [];
                  if (Array.isArray(rawContents)) {
-                     safeContents = rawContents.map(s => String(s).replace(/[\[\]"]/g, '').trim()).filter(Boolean);
+                     safeContents = rawContents.map((s: any) => String(s).replace(/[\[\]"]/g, '').trim()).filter(Boolean);
                  } else if (typeof rawContents === 'string') {
                      let s = rawContents.trim();
                      if (s !== '[]' && s !== '{}' && s !== 'null' && s !== '""') {
@@ -1493,7 +1911,7 @@ export default function App() {
                           <div className={`flex items-baseline gap-2 mb-4 ${isInactive ? 'text-stone-400' : 'text-slate-800'}`}>
                               <span className="text-xl font-bold">{n.real_name}</span>
                               <span className="text-base font-bold opacity-70">
-                                  {n.dharma_name ? ` / ${n.dharma_name}` : ''} <span className="mx-1 text-stone-400">/</span> {n.gender}
+                                  {n.dharma_name ? ` / ${n.dharma_name}` : ' / (無)'} <span className="mx-1 text-stone-400">/</span> {n.gender}
                               </span>
                               
                               <span className={`text-sm font-bold ml-auto ${isInactive ? 'text-stone-400' : 'text-[#7A2E40]'}`}>
@@ -1579,58 +1997,318 @@ export default function App() {
           </div>
         )}
 
-        {/* Users Tab */}
-        {activeTab === 'users' && isAdmin && (
+        {/* Statistics Tab */}
+        {activeTab === 'statistics' && isAdmin && (
           <div className={`p-8 rounded-[32px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}>
-            <h4 className="font-bold text-[#4f093c] mb-6 flex items-center gap-2 text-3xl"><Plus className="w-8 h-8"/> 新增使用者</h4>
-            <div className="flex flex-col md:flex-row gap-4">
-              <input className="flex-1 p-3 border rounded-xl text-lg" placeholder="姓名" value={newUser.name} onChange={e=>setNewUser({...newUser, name: e.target.value})} />
-              <input className="w-32 p-3 border rounded-xl text-lg" placeholder="ID後4碼" value={newUser.id4} onChange={e=>setNewUser({...newUser, id4: e.target.value})} />
-              <input className="w-40 p-3 border rounded-xl text-lg" placeholder="密碼" value={newUser.pwd} onChange={e=>setNewUser({...newUser, pwd: e.target.value})} />
-              <button onClick={handleCreateUser} className="bg-blue-600 text-white px-6 rounded-xl font-bold text-lg hover:bg-blue-700 shadow-md shadow-blue-200">新增</button>
+            <div className="flex justify-between items-center mb-8">
+              <h3 className="text-3xl font-bold text-[#4f093c]">報名統計</h3>
+              <div className="flex gap-3 items-center">
+                {/* 狀態切換按鈕 (v87.52) */}
+                <div className="flex bg-stone-200 rounded-lg p-1 mr-2">
+                    <button onClick={() => setStatsViewType('active')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${statsViewType === 'active' ? 'bg-white text-[#4f093c] shadow-sm' : 'text-stone-500 hover:text-stone-700'}`}>未圓滿</button>
+                    <button onClick={() => setStatsViewType('completed')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${statsViewType === 'completed' ? 'bg-white text-[#4f093c] shadow-sm' : 'text-stone-500 hover:text-stone-700'}`}>已圓滿</button>
+                </div>
+                {/* 雙重篩選：地點 + 活動 */}
+                <select className="p-2 bg-white border-none rounded-xl text-base font-bold text-stone-600 outline-none" value={statFilterLoc} onChange={e => { setStatFilterLoc(e.target.value); setStatFilterAct(''); }}>
+                  <option value="">所有地點</option>
+                  {locations.map(l => <option key={l} value={l}>{l}</option>)}
+                </select>
+                <select className="p-2 bg-white border-none rounded-xl text-base font-bold text-stone-600 outline-none max-w-[12rem] truncate" value={statFilterAct} onChange={e => setStatFilterAct(e.target.value)} disabled={!statFilterLoc}>
+                    <option value="">{statFilterLoc ? '所有活動' : '請先選地點'}</option>
+                    {statActivityOptions.map(a => <option key={a} value={a}>{a}</option>)}
+                </select>
+                <button 
+                    onClick={() => downloadPDF('stats-content-area', `${statFilterLoc || '所有地點'} - ${statFilterAct || '所有活動'} 統計表`)}
+                    className="bg-stone-100 hover:bg-stone-200 text-stone-600 px-5 py-2 rounded-xl text-lg font-bold flex items-center gap-2 transition-colors shadow-sm ml-2"
+                >
+                    <Download className="w-5 h-5"/> 下載 PDF
+                </button>
+              </div>
+            </div>
+
+            <div id="stats-content-area">
+                {/* 總數概覽卡片 */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+                    <OverviewCard title="總報名人數" count={statsOverview.total} icon={Users} color="bg-[#4f093c]" />
+                    <OverviewCard title="參加法會" count={statsOverview.dharma} icon={UserCheck} color="bg-blue-600" />
+                    <OverviewCard title="發心義工" count={statsOverview.vol} icon={Briefcase} color="bg-orange-500" />
+                </div>
+
+                {/* 身分比例結構圖 (Main Proportion Chart) */}
+                <div className="mb-10">
+                    <IdentityRatioChart data={statisticsData.byIdentity} />
+                </div>
+
+                {/* Vertical stack, full width charts, auto height based on content */}
+                <div className="space-y-10">
+                   <div>
+                       <StatsBarChart title="各場人數 (地點活動)" data={statisticsData.byLocationActivity} />
+                   </div>
+                   <div>
+                       <StatsBarChart title="各行程人數 (行程)" data={statisticsData.byOption} />
+                   </div>
+                   <div>
+                       <StatsBarChart title="交通方式人數" data={statisticsData.byTransport} />
+                   </div>
+                   {/* v87.52 新增：勾選內容統計 */}
+                   <div>
+                       <StatsBarChart title="勾選內容統計" data={statisticsData.byContent} />
+                   </div>
+                </div>
             </div>
           </div>
         )}
 
-        {activeTab === 'users' && isAdmin && (
-          <div className={`rounded-[32px] shadow-sm border border-stone-100 overflow-hidden mt-8`} style={{ backgroundColor: CARD_BG_COLOR }}>
-            <table className="w-full text-lg text-left">
-              <thead className="bg-[#4f093c] text-white font-bold border-b border-[#4f093c]">
-                <tr>
-                  <th className="p-5">姓名</th>
-                  <th className="p-5">ID後4碼</th>
-                  <th className="p-5">是否為管理員</th>
-                  <th className="p-5">是否刪除</th>
-                  <th className="p-5">報名筆數</th>
-                  <th className="p-5 text-right">是否停用</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-stone-100">
-                {allUsers.map(u => { 
-                  const count = notes.filter(n => n.user_id === u.uid).length; 
-                  return (
-                    <tr key={u.id} className="hover:bg-stone-50/50">
-                      <td className="p-5 font-bold text-[#4f093c]">{u.user_name}</td>
-                      <td className="p-5 font-mono text-stone-400">{u.id_last4}</td>
-                      <td className="p-5"><input type="checkbox" checked={u.is_admin} onChange={() => handleToggleAdmin(u.uid!, u.is_admin)} className="w-5 h-5 rounded border-stone-300 text-[#4f093c] focus:ring-[#4f093c]" /></td>
-                      <td className="p-5"><span className={`px-2 py-1 rounded text-xs font-bold ${u.is_disabled ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'}`}>{u.is_disabled ? '已停用' : '正常'}</span></td>
-                      <td className="p-5 font-bold text-stone-600 pl-8">{count}</td>
-                      <td className="p-5 text-right"><input type="checkbox" checked={u.is_disabled} onChange={() => handleToggleUserStatus(u.uid!, u.is_disabled)} className="w-5 h-5 rounded border-stone-300 text-red-600 focus:ring-red-600" /></td>
-                    </tr>
-                  ); 
-                })}
-              </tbody>
-            </table>
+        {/* Admin Data Tab (Updated v87.52) */}
+        {activeTab === 'admin_data' && isAdmin && (
+          <div className={`p-8 rounded-[32px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}>
+            <div className="flex justify-between items-center mb-8">
+              <h3 className="text-3xl font-bold text-[#4f093c]">資料總覽-所有報名資料</h3>
+              <div className="flex gap-3 items-center">
+                {/* v87.52 新增狀態篩選切換 */}
+                <div className="flex bg-stone-200 rounded-lg p-1 mr-2">
+                    <button onClick={() => setDataViewType('active')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${dataViewType === 'active' ? 'bg-white text-[#4f093c] shadow-sm' : 'text-stone-500 hover:text-stone-700'}`}>未圓滿</button>
+                    <button onClick={() => setDataViewType('completed')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${dataViewType === 'completed' ? 'bg-white text-[#4f093c] shadow-sm' : 'text-stone-500 hover:text-stone-700'}`}>已圓滿</button>
+                </div>
+
+                <select className="p-2 bg-white border-none rounded-xl text-base font-bold text-stone-600 outline-none" value={filterLoc} onChange={e => { setFilterLoc(e.target.value); setFilterAct(''); }}><option value="">所有地點</option>{locations.map(l => <option key={l} value={l}>{l}</option>)}</select>
+                <select className="p-2 bg-white border-none rounded-xl text-base font-bold text-stone-600 outline-none max-w-[12rem] truncate" value={filterAct} onChange={e => setFilterAct(e.target.value)} disabled={!filterLoc}><option value="">{filterLoc ? '所有活動' : '請先選地點'}</option>{filterActivityOptions.map(a => <option key={a} value={a}>{a}</option>)}</select>
+                <div className="relative">
+                  <input type="text" placeholder="搜尋..." className="p-2 pl-8 border-none rounded-xl text-base font-bold text-stone-600 outline-none" value={searchText} onChange={e=>setSearchText(e.target.value)} />
+                  <Search className="w-4 h-4 absolute left-2 top-1/2 -translate-y-1/2 text-stone-400"/>
+                </div>
+                <button onClick={handleExport} className="bg-emerald-600 text-white px-5 py-2 rounded-xl flex items-center gap-2 text-base font-bold hover:bg-emerald-700 shadow-md shadow-emerald-200">匯出資料</button>
+              </div>
+            </div>
+            
+            {/* Table with resizable columns (table-fixed) */}
+            <div className="overflow-x-auto rounded-2xl border border-stone-100">
+              <table className="w-full text-left text-sm bg-white table-fixed">
+                <thead className="bg-[#4f093c] text-white font-bold">
+                  <tr>
+                      {/* Column 1: 活動行程 */}
+                      <th style={{ width: colWidths[0] }} className="p-4 relative group">
+                          活動行程
+                          <div className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 group-hover:bg-white/20" onMouseDown={(e) => startResize(0, e)} />
+                      </th>
+                      {/* Column 2: 基本資料 */}
+                      <th style={{ width: colWidths[1] }} className="p-4 relative group">
+                          基本資料
+                          <div className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 group-hover:bg-white/20" onMouseDown={(e) => startResize(1, e)} />
+                      </th>
+                      {/* Column 3: 交通/住宿 */}
+                      <th style={{ width: colWidths[2] }} className="p-4 relative group">
+                          交通/住宿
+                          <div className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 group-hover:bg-white/20" onMouseDown={(e) => startResize(2, e)} />
+                      </th>
+                      {/* Column 4: 義工資訊 */}
+                      <th style={{ width: colWidths[3] }} className="p-4 relative group">
+                          義工資訊
+                          <div className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 group-hover:bg-white/20" onMouseDown={(e) => startResize(3, e)} />
+                      </th>
+                      {/* Column 5: 備註 */}
+                      <th style={{ width: colWidths[4] }} className="p-4 relative group">
+                          備註
+                          <div className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 group-hover:bg-white/20" onMouseDown={(e) => startResize(4, e)} />
+                      </th>
+                      {/* Column 6: 狀態 */}
+                      <th style={{ width: colWidths[5] }} className="p-4 relative group">
+                          狀態
+                          <div className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 group-hover:bg-white/20" onMouseDown={(e) => startResize(5, e)} />
+                      </th>
+                      {/* Column 7: 刪除 */}
+                      {/* v87.52: 僅在未圓滿 (active) 狀態下顯示刪除欄位 */}
+                      {dataViewType === 'active' && (
+                          <th style={{ width: colWidths[6] }} className="p-4 text-center relative group">
+                              刪除
+                              <div className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 group-hover:bg-white/20" onMouseDown={(e) => startResize(6, e)} />
+                          </th>
+                      )}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white">
+                  {filteredAdminNotes.map(n => {
+                      const { isEnded } = getRestrictionStatus(n.activity_location, n.activity_name, n.activity_option); 
+                      const rawContents: any = n.selected_contents;
+                      let safeContents: string[] = [];
+                      if (Array.isArray(rawContents)) {
+                          safeContents = rawContents.map((s: any) => String(s).replace(/[\[\]"]/g, '').trim()).filter(Boolean);
+                      } else if (typeof rawContents === 'string') {
+                          let s = rawContents.trim();
+                          if (s !== '[]' && s !== '{}' && s !== 'null' && s !== '""') {
+                              s = s.replace(/^\[|\]$/g, '').replace(/^\{|\}$/g, '');
+                              safeContents = s.split(',').map((item: string) => item.replace(/^"|"$/g, '').replace(/^'|'$/g, '').replace(/[\[\]"]/g, '').trim()).filter(Boolean);
+                          }
+                      }
+                      safeContents = safeContents.filter(s => s && s !== '[]');
+                      const hasContents = safeContents.length > 0;
+                      const hasRemarks = typeof n.other_remarks === 'string' && n.other_remarks.trim().length > 0 && n.other_remarks !== 'null';
+                      const hasMemo = typeof n.memo === 'string' && n.memo.trim().length > 0 && n.memo !== 'null';
+                      
+                      const mergedRemarks = [];
+                      if (hasContents) mergedRemarks.push(safeContents.join('、'));
+                      if (hasRemarks) mergedRemarks.push(n.other_remarks);
+
+                      let statusBadge; 
+                      // v87.52: 樣式調整 (已圓滿資料不反灰)
+                      let rowStyle = "transition-colors border-b border-white"; 
+                      let rowStyleObj = {};
+                      let textStyle = "text-slate-800"; 
+                      let subTextStyle = "text-stone-600"; 
+                      let boldStyle = "font-bold text-xl text-slate-800"; 
+                      
+                      if(n.is_deleted) { 
+                        statusBadge = <span className="px-2 py-0.5 rounded text-xs font-bold w-fit bg-red-100 text-red-700">已刪除</span>; 
+                        rowStyle = "bg-stone-100 border-b border-white"; 
+                        textStyle = "text-stone-400"; 
+                        subTextStyle = "text-stone-400"; 
+                        boldStyle = "font-bold text-xl text-stone-400"; 
+                      } else if(isEnded) { 
+                        statusBadge = <span className="px-2 py-0.5 rounded text-xs font-bold w-fit bg-stone-200 text-stone-600">已圓滿</span>; 
+                        rowStyle = "bg-stone-50/50 border-b border-white"; 
+                        textStyle = "text-slate-800"; 
+                        subTextStyle = "text-stone-600"; 
+                        boldStyle = "font-bold text-xl text-slate-800"; 
+                      } else { 
+                        statusBadge = <span className={`px-2 py-0.5 rounded text-xs font-bold w-fit ${n.registration_option === '新增' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{n.registration_option}</span>;
+                        rowStyle = "hover:brightness-95 transition-all border-b border-white"; 
+                        rowStyleObj = { backgroundColor: CARD_BG_COLOR };
+                      } 
+
+                      const dupKey = `${n.activity_location}|${n.activity_name}|${n.real_name}`;
+                      const isDuplicate = !n.is_deleted && (duplicateMap[dupKey] || 0) > 1;
+
+                      return (
+                      <tr key={n.id} className={rowStyle} style={rowStyleObj}>
+                        <td className="p-4 align-top overflow-hidden break-words">
+                          <div className={boldStyle}>{n.activity_location}</div>
+                          <div className={boldStyle}>{n.activity_name}</div>
+                          <div className={`mt-1 text-sm font-bold ${n.is_deleted ? 'text-stone-400' : 'text-blue-600'}`}>{n.activity_option}</div>
+                        </td>
+                        <td className="p-4 align-top overflow-hidden break-words">
+                          <div className={boldStyle}>{n.real_name}</div>
+                          <div className={`text-sm font-bold mt-1 ${subTextStyle}`}>{n.dharma_name ? ` / ${n.dharma_name}` : ' / (無)'} / {n.gender}</div>
+                          <div className={subTextStyle}>{n.registrant_type}</div>
+                          <div className={`${n.is_deleted ? 'text-stone-400' : 'text-[#4f093c]'} font-bold`}>{n.identity}</div>
+                        </td>
+                        <td className={`p-4 align-top overflow-hidden break-words ${subTextStyle}`}>
+                          <div className={`${n.is_deleted ? 'text-stone-400' : 'text-slate-700'} font-bold`}>{n.transportation}</div>
+                          {(n.arrival_datetime || n.departure_datetime) && (
+                            <div className="text-xs mt-1 whitespace-nowrap">
+                              <div>抵: {n.arrival_datetime ? formatDateTime(n.arrival_datetime) : '-'}</div>
+                              <div>離: {n.departure_datetime ? formatDateTime(n.departure_datetime) : '-'}</div>
+                            </div>
+                          )}
+                          <div className="mt-2 border-t pt-1 border-stone-200/50">
+                            <div>{n.accommodation_option}</div>
+                            {n.accommodation_option === '須安單' && <div className="text-xs">{n.stay_start_date}~{n.stay_end_date}</div>}
+                          </div>
+                        </td>
+                        <td className={`p-4 align-top overflow-hidden break-words ${subTextStyle}`}>
+                          {n.identity === '發心義工' ? (
+                            <>
+                              <div className={`${n.is_deleted ? 'text-stone-400' : 'text-slate-700'} font-bold`}>
+                                {simplifyVolunteerType(n.volunteer_type)}{n.volunteer_group ? ` - ${n.volunteer_group}` : ''}
+                              </div>
+                              {(n.start_date || n.end_date) && (
+                                <div className="text-xs mt-1 whitespace-nowrap">
+                                  <div>起: {n.start_date ? formatDateTime(n.start_date) : '-'}</div>
+                                  <div>迄: {n.end_date ? formatDateTime(n.end_date) : '-'}</div>
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            <span className="opacity-50">-</span>
+                          )}
+                        </td>
+                        <td className="p-4 align-top overflow-hidden break-words">
+                          <div className="flex flex-col gap-1 leading-tight">
+                            {mergedRemarks.length > 0 && <div className={subTextStyle}>{mergedRemarks.join(' / ')}</div>}
+                            {hasMemo && <div className={`${subTextStyle} mt-2 pt-2 border-t border-stone-200/50 border-dashed`}>{n.memo}</div>}
+                          </div>
+                        </td>
+                        <td className="p-4 align-top overflow-hidden break-words">
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center gap-1 flex-wrap">
+                                {statusBadge}
+                                {isDuplicate && <span className="text-red-600 text-xs font-bold bg-red-100 px-1.5 py-0.5 rounded-full border border-red-200 w-fit">(重複)</span>}
+                            </div>
+                            <div className="text-xs opacity-70 mt-1">
+                              <div>{n.sign_name}</div>
+                              <div>{formatDateTime(n.created_at)}</div>
+                            </div>
+                          </div>
+                        </td>
+                        {/* v87.52: 刪除欄位僅在 Active View 顯示 */}
+                        {dataViewType === 'active' && (
+                            <td className="p-4 align-top text-center overflow-hidden">
+                                <input 
+                                    type="checkbox" 
+                                    className="w-5 h-5 rounded border-stone-300 text-red-600 focus:ring-red-600 cursor-pointer"
+                                    checked={n.is_deleted} 
+                                    onChange={() => handleToggleDeleteNote(n.id, n.is_deleted)} 
+                                />
+                            </td>
+                        )}
+                      </tr>
+                  );})}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
-        
-        {/* Audit Tab */}
+
+        {/* Users Tab (v87.52: Renamed to 學員) */}
+        {activeTab === 'users' && isAdmin && (
+          <div className="space-y-8 animate-in fade-in">
+             <div className={`p-8 rounded-[32px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}>
+                <h4 className="font-bold text-[#4f093c] mb-6 flex items-center gap-2 text-3xl"><Plus className="w-8 h-8"/> 新增使用者</h4>
+                <div className="flex flex-col md:flex-row gap-4">
+                  <input className="flex-1 p-3 border rounded-xl text-lg" placeholder="姓名" value={newUser.name} onChange={e=>setNewUser({...newUser, name: e.target.value})} />
+                  <input className="w-32 p-3 border rounded-xl text-lg" placeholder="ID後4碼" value={newUser.id4} onChange={e=>setNewUser({...newUser, id4: e.target.value})} />
+                  <input className="w-40 p-3 border rounded-xl text-lg" placeholder="密碼" value={newUser.pwd} onChange={e=>setNewUser({...newUser, pwd: e.target.value})} />
+                  <button onClick={handleCreateUser} className="bg-blue-600 text-white px-6 rounded-xl font-bold text-lg hover:bg-blue-700 shadow-md shadow-blue-200">新增</button>
+                </div>
+             </div>
+             
+             <div className={`rounded-[32px] shadow-sm border border-stone-100 overflow-hidden`} style={{ backgroundColor: CARD_BG_COLOR }}>
+                <table className="w-full text-lg text-left">
+                  <thead className="bg-[#4f093c] text-white font-bold border-b border-[#4f093c]">
+                    <tr>
+                      <th className="p-5">姓名</th>
+                      <th className="p-5">ID後4碼</th>
+                      <th className="p-5">是否為管理員</th>
+                      <th className="p-5">是否刪除</th>
+                      <th className="p-5">報名筆數</th>
+                      <th className="p-5 text-right">是否停用</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-stone-100">
+                    {allUsers.map(u => { 
+                      const count = notes.filter(n => n.user_id === u.uid).length; 
+                      return (
+                        <tr key={u.id} className="hover:bg-stone-50/50">
+                          <td className="p-5 font-bold text-[#4f093c]">{u.user_name}</td>
+                          <td className="p-5 font-mono text-stone-400">{u.id_last4}</td>
+                          <td className="p-5"><input type="checkbox" checked={u.is_admin} onChange={() => handleToggleAdmin(u.uid!, u.is_admin)} className="w-5 h-5 rounded border-stone-300 text-[#4f093c] focus:ring-[#4f093c]" /></td>
+                          <td className="p-5"><span className={`px-2 py-1 rounded text-xs font-bold ${u.is_disabled ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'}`}>{u.is_disabled ? '已停用' : '正常'}</span></td>
+                          <td className="p-5 font-bold text-stone-600 pl-8">{count}</td>
+                          <td className="p-5 text-right"><input type="checkbox" checked={u.is_disabled} onChange={() => handleToggleUserStatus(u.uid!, u.is_disabled)} className="w-5 h-5 rounded border-stone-300 text-red-600 focus:ring-red-600" /></td>
+                        </tr>
+                      ); 
+                    })}
+                  </tbody>
+                </table>
+             </div>
+          </div>
+        )}
+
+        {/* Audit Tab (Restored) */}
         {activeTab === 'audit' && isAdmin && (
           <div className="space-y-8 animate-in fade-in">
             <div className={`p-8 rounded-[32px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}>
               <h2 className="text-3xl font-bold text-[#4f093c] mb-2">審核中心</h2>
               <p className="text-sm text-stone-500 mb-8">處理用戶的密碼重設申請</p>
-              
               <div className="overflow-x-auto rounded-2xl border border-stone-100">
                 <table className="w-full text-left text-sm bg-white">
                   <thead className="bg-[#4f093c] text-white font-bold">
@@ -1649,13 +2327,7 @@ export default function App() {
                         <td className="p-4 font-mono text-stone-600">{r.id_last4}</td>
                         <td className="p-4 text-stone-500 font-mono text-xs">{formatDateTime(r.created_at)}</td>
                         <td className="p-4">
-                           {r.status === 'pending' ? (
-                               <span className="text-amber-600 bg-amber-100 px-2 py-1 rounded text-xs font-bold">待審核</span>
-                           ) : r.status === 'completed' ? (
-                               <span className="text-emerald-600 bg-emerald-100 px-2 py-1 rounded text-xs font-bold">已批准</span>
-                           ) : (
-                               <span className="text-stone-600 bg-stone-200 px-2 py-1 rounded text-xs font-bold">已拒絕</span>
-                           )}
+                           {r.status === 'pending' ? (<span className="text-amber-600 bg-amber-100 px-2 py-1 rounded text-xs font-bold">待審核</span>) : r.status === 'completed' ? (<span className="text-emerald-600 bg-emerald-100 px-2 py-1 rounded text-xs font-bold">已批准</span>) : (<span className="text-stone-600 bg-stone-200 px-2 py-1 rounded text-xs font-bold">已拒絕</span>)}
                         </td>
                         <td className="p-4 flex gap-2 justify-end">
                           {r.status === 'pending' && (
@@ -1667,180 +2339,10 @@ export default function App() {
                         </td>
                       </tr>
                     ))}
-                    {resetRequests.length === 0 && (
-                      <tr>
-                        <td colSpan={5} className="p-12 text-center text-stone-400 font-bold bg-white">目前無任何申請紀錄</td>
-                      </tr>
-                    )}
+                    {resetRequests.length === 0 && (<tr><td colSpan={5} className="p-12 text-center text-stone-400 font-bold bg-white">目前無任何申請紀錄</td></tr>)}
                   </tbody>
                 </table>
               </div>
-            </div>
-          </div>
-        )}
-        
-        {/* Admin Data Tab */}
-        {activeTab === 'admin_data' && isAdmin && (
-          <div className={`p-8 rounded-[32px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}>
-            <div className="flex justify-between items-center mb-8">
-              <h3 className="text-3xl font-bold text-[#4f093c]">資料總覽-所有報名資料</h3>
-              <div className="flex gap-3 items-center">
-                {/* 雙重篩選：地點 + 活動 */}
-                <select 
-                    className="p-2 bg-white border-none rounded-xl text-base font-bold text-stone-600 outline-none" 
-                    value={filterLoc} 
-                    onChange={e => { setFilterLoc(e.target.value); setFilterAct(''); }}
-                >
-                  <option value="">所有地點</option>
-                  {locations.map(l => <option key={l} value={l}>{l}</option>)}
-                </select>
-
-                <select 
-                    className="p-2 bg-white border-none rounded-xl text-base font-bold text-stone-600 outline-none max-w-[12rem] truncate" 
-                    value={filterAct} 
-                    onChange={e => setFilterAct(e.target.value)}
-                    disabled={!filterLoc} // 選擇地點後才能選活動，避免混淆
-                >
-                    <option value="">{filterLoc ? '所有活動' : '請先選地點'}</option>
-                    {filterActivityOptions.map(a => <option key={a} value={a}>{a}</option>)}
-                </select>
-
-                <div className="relative">
-                  <input type="text" placeholder="搜尋..." className="p-2 pl-8 border-none rounded-xl text-base font-bold text-stone-600 outline-none" value={searchText} onChange={e=>setSearchText(e.target.value)} />
-                  <Search className="w-4 h-4 absolute left-2 top-1/2 -translate-y-1/2 text-stone-400"/>
-                </div>
-                <button onClick={handleExport} className="bg-emerald-600 text-white px-5 py-2 rounded-xl flex items-center gap-2 text-base font-bold hover:bg-emerald-700 shadow-md shadow-emerald-200">
-                  匯出資料
-                </button>
-              </div>
-            </div>
-
-            <div className="overflow-x-auto rounded-2xl border border-stone-100">
-              <table className="w-full text-left text-sm bg-white">
-                <thead className="bg-[#4f093c] text-white font-bold">
-                  <tr>
-                    <th className="p-4 w-48 min-w-[12rem]">活動行程</th>
-                    <th className="p-4">基本資料</th>
-                    <th className="p-4 w-56 min-w-[14rem]">交通/住宿</th>
-                    <th className="p-4 w-56 min-w-[14rem]">義工資訊</th>
-                    <th className="p-4 w-40 max-w-[10rem]">備註</th>
-                    <th className="p-4">狀態</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white">
-                  {filteredAdminNotes.map(n => { 
-                    const { isEnded } = getRestrictionStatus(n.activity_location, n.activity_name, n.activity_option); 
-                    
-                    const rawContents: any = n.selected_contents;
-                    let safeContents: string[] = [];
-                    if (Array.isArray(rawContents)) {
-                        safeContents = rawContents.map(s => String(s).replace(/[\[\]"]/g, '').trim()).filter(Boolean);
-                    } else if (typeof rawContents === 'string') {
-                        let s = rawContents.trim();
-                        if (s !== '[]' && s !== '{}' && s !== 'null' && s !== '""') {
-                            s = s.replace(/^\[|\]$/g, '').replace(/^\{|\}$/g, '');
-                            safeContents = s.split(',').map((item: string) => item.replace(/^"|"$/g, '').replace(/^'|'$/g, '').replace(/[\[\]"]/g, '').trim()).filter(Boolean);
-                        }
-                    }
-                    safeContents = safeContents.filter(s => s && s !== '[]');
-                    const hasContents = safeContents.length > 0;
-                    const hasRemarks = typeof n.other_remarks === 'string' && n.other_remarks.trim().length > 0 && n.other_remarks !== 'null';
-                    const hasMemo = typeof n.memo === 'string' && n.memo.trim().length > 0 && n.memo !== 'null';
-                    
-                    const mergedRemarks = [];
-                    if (hasContents) mergedRemarks.push(safeContents.join('、'));
-                    if (hasRemarks) mergedRemarks.push(n.other_remarks);
-
-                    let statusBadge; 
-                    let rowStyle = "transition-colors border-b border-white"; 
-                    let rowStyleObj = {};
-                    let textStyle = "text-slate-800"; 
-                    let subTextStyle = "text-stone-600"; 
-                    let boldStyle = "font-bold text-xl text-slate-800"; 
-                    
-                    if(n.is_deleted) { 
-                      statusBadge = <span className="px-2 py-0.5 rounded text-xs font-bold w-fit bg-red-100 text-red-700">已刪除</span>; 
-                      rowStyle = "bg-stone-100 border-b border-white"; 
-                      textStyle = "text-stone-400"; 
-                      subTextStyle = "text-stone-400"; 
-                      boldStyle = "font-bold text-xl text-stone-400"; 
-                    } else if(isEnded) { 
-                      statusBadge = <span className="px-2 py-0.5 rounded text-xs font-bold w-fit bg-stone-200 text-stone-600">已圓滿</span>; 
-                      rowStyle = "bg-stone-50 border-b border-white"; 
-                      textStyle = "text-stone-400"; 
-                      subTextStyle = "text-stone-400"; 
-                      boldStyle = "font-bold text-xl text-stone-400"; 
-                    } else { 
-                      statusBadge = <span className={`px-2 py-0.5 rounded text-xs font-bold w-fit ${n.registration_option === '新增' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{n.registration_option}</span>;
-                      rowStyle = "hover:brightness-95 transition-all border-b border-white"; 
-                      rowStyleObj = { backgroundColor: CARD_BG_COLOR };
-                    } 
-                    
-                    return (
-                      <tr key={n.id} className={rowStyle} style={rowStyleObj}>
-                        <td className="p-4 align-top w-48 min-w-[12rem]">
-                          <div className={boldStyle}>{n.activity_location}</div>
-                          <div className={boldStyle}>{n.activity_name}</div>
-                          <div className={`mt-1 text-sm font-bold ${n.is_deleted || isEnded ? 'text-stone-400' : 'text-blue-600'}`}>{n.activity_option}</div>
-                        </td>
-                        <td className="p-4 align-top">
-                          <div className={boldStyle}>{n.real_name}</div>
-                          <div className="text-sm font-bold text-stone-500 mt-1">
-                              {n.dharma_name ? ` / ${n.dharma_name}` : ' / (無)'} / {n.gender}
-                          </div>
-                          <div className={subTextStyle}>{n.registrant_type}</div>
-                          <div className={`${n.is_deleted || isEnded ? 'text-stone-400' : 'text-[#4f093c]'} font-bold`}>{n.identity === '參加法會' ? '法會' : (n.identity === '發心義工' ? '義工' : n.identity)}</div>
-                        </td>
-                        <td className="p-4 align-top text-stone-600 w-56 min-w-[14rem]">
-                          <div className={`${n.is_deleted || isEnded ? 'text-stone-400' : 'text-slate-700'} font-bold`}>{n.transportation}</div>
-                          {(n.arrival_datetime || n.departure_datetime) && (
-                            <div className={`text-xs mt-1 ${subTextStyle} whitespace-nowrap`}>
-                              <div>抵: {n.arrival_datetime ? formatDateTime(n.arrival_datetime) : '-'}</div>
-                              <div>離: {n.departure_datetime ? formatDateTime(n.departure_datetime) : '-'}</div>
-                            </div>
-                          )}
-                          <div className={`mt-2 border-t pt-1 border-stone-200/50 ${subTextStyle}`}>
-                            <div>{n.accommodation_option}</div>
-                            {n.accommodation_option === '須安單' && <div className="text-xs">{n.stay_start_date}~{n.stay_end_date}</div>}
-                          </div>
-                        </td>
-                        <td className={`p-4 align-top ${subTextStyle} w-56 min-w-[14rem]`}>
-                          {n.identity === '發心義工' ? (
-                            <>
-                              <div className={`${n.is_deleted || isEnded ? 'text-stone-400' : 'text-slate-700'} font-bold`}>
-                                {simplifyVolunteerType(n.volunteer_type)}{n.volunteer_group ? ` - ${n.volunteer_group}` : ''}
-                              </div>
-                              {(n.start_date || n.end_date) && (
-                                <div className="text-xs mt-1 whitespace-nowrap">
-                                  <div>起: {n.start_date ? formatDateTime(n.start_date) : '-'}</div>
-                                  <div>迄: {n.end_date ? formatDateTime(n.end_date) : '-'}</div>
-                                </div>
-                              )}
-                            </>
-                          ) : (
-                            <span className="opacity-50">-</span>
-                          )}
-                        </td>
-                        <td className="p-4 align-top w-40 max-w-[10rem]">
-                          <div className="flex flex-col gap-1 break-words whitespace-normal leading-tight">
-                            {mergedRemarks.length > 0 && <div className={subTextStyle}>{mergedRemarks.join(' / ')}</div>}
-                            {hasMemo && <div className={`${subTextStyle} mt-2 pt-2 border-t border-stone-200/50 border-dashed`}>{n.memo}</div>}
-                          </div>
-                        </td>
-                        <td className="p-4 align-top">
-                          <div className="flex flex-col gap-1">
-                            {statusBadge}
-                            <div className="text-xs opacity-70 mt-1">
-                              <div>{n.sign_name}</div>
-                              <div>{formatDateTime(n.created_at)}</div>
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
-                    ); 
-                  })}
-                </tbody>
-              </table>
             </div>
           </div>
         )}
