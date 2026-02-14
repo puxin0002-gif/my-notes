@@ -5,16 +5,21 @@ import {
   Bell, FileText, History, Settings, Shield, LogOut, Plus, Trash2, Check, 
   Edit, User, MapPin, Tag, ListFilter, Save, Database, Clock, Car, Info, 
   Home, UserCheck, AlertCircle, Briefcase, Layers, 
-  CheckCircle2, CheckSquare, FileSpreadsheet, Megaphone, ClipboardCheck, UserCog, Share2, Lock, Eye, EyeOff, Users, ArrowRight, RefreshCw, AlertTriangle, Image as ImageIcon, Table as TableIcon, Calendar, Filter, UploadCloud, ChevronRight, Search, KeyRound, BarChart3, PieChart, TrendingUp, Download
+  CheckCircle2, CheckSquare, FileSpreadsheet, Megaphone, ClipboardCheck, UserCog, Share2, Lock, Eye, EyeOff, Users, ArrowRight, RefreshCw, AlertTriangle, Image as ImageIcon, Table as TableIcon, Calendar, Filter, UploadCloud, ChevronRight, Search, KeyRound, BarChart3, PieChart, TrendingUp, Download, Archive
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v87.54 (統計資料型別修復版)
+ * 系統版本：v87.64 (重複宣告與遺留按鈕修復版)
  * 修正說明：
- * 1. [Fix] 修正 statisticsData 中 selected_contents 的型別判斷錯誤 (TS Error: Property 'trim' does not exist on type 'never')。
- * 2. [Fix] 修正 map 函式參數隱含 any 的錯誤 (TS Error: Parameter 'item' implicitly has an 'any' type)。
- * 3. [System] 保持所有 v87.53 功能。
+ * 1. [Fix] 移除 App 元件底部重複宣告的 `colWidths`, `resizeRef`, `onResize`, `endResize`, `startResize`，解決編譯錯誤。
+ * 2. [Remove] 移除「修復資料 ID」功能與按鈕 (依據 v87.62 需求)。
+ * 3. [System] 完整保留 v87.62 所有功能：
+ * - 「已圓滿活動列表」優化為表格呈現 (黑字、自動分組)。
+ * - 報名分流 (activity_id)。
+ * - 統計頁籤完整篩選 (地點/活動/行程/狀態)。
+ * - PDF 匯出 (含標題)。
+ * - 資料表欄寬拖曳。
  */
 
 // --- 主色系設定 ---
@@ -51,6 +56,10 @@ interface Note {
   activity_location: string;
   activity_name: string;
   activity_option: string;
+  
+  // 新增活動關聯 ID
+  activity_id?: string;
+
   selected_contents: string[];
   other_remarks?: string;
   memo?: string;
@@ -70,6 +79,8 @@ interface Note {
   sign_name?: string;
   id_2?: string;
   created_at: string;
+  saved_end_date?: string | null; 
+  saved_deadline?: string | null;
 }
 
 interface Bulletin {
@@ -190,7 +201,7 @@ const formatDateOnly = (isoString: string | undefined | null): string => {
     }
     const d = new Date(isoString);
     if (isNaN(d.getTime())) return isoString;
-    return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+    return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
   } catch { return isoString; }
 };
 
@@ -507,6 +518,7 @@ export default function App() {
   // 統計頁籤的篩選器
   const [statFilterLoc, setStatFilterLoc] = useState<string>('');
   const [statFilterAct, setStatFilterAct] = useState<string>('');
+  const [statFilterOpt, setStatFilterOpt] = useState<string>(''); // v87.59 新增
   const [statsViewType, setStatsViewType] = useState<'active' | 'completed'>('active');
 
   const [formData, setFormData] = useState(INITIAL_FORM_DATA);
@@ -526,9 +538,47 @@ export default function App() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   
-  // Column resizing state
-  const [colWidths, setColWidths] = useState([200, 250, 230, 230, 160, 100, 80]);
+  // Column resizing state (v87.50)
+  const [colWidths, setColWidths] = useState([200, 250, 230, 230, 160, 100, 80]); // Default Widths
   const resizeRef = useRef<{ index: number; startX: number; startWidth: number } | null>(null);
+
+  const onResize = useCallback((e: MouseEvent) => {
+    if (!resizeRef.current) return;
+    const { index, startX, startWidth } = resizeRef.current;
+    const diff = e.clientX - startX;
+    const newWidth = Math.max(50, startWidth + diff); 
+    setColWidths(prev => {
+       const next = [...prev];
+       next[index] = newWidth;
+       return next;
+    });
+  }, []);
+
+  const endResize = useCallback(() => {
+    resizeRef.current = null;
+    document.removeEventListener('mousemove', onResize);
+    document.removeEventListener('mouseup', endResize);
+    document.body.style.cursor = 'default';
+  }, [onResize]);
+
+  const startResize = (index: number, e: React.MouseEvent) => {
+    e.preventDefault();
+    resizeRef.current = {
+      index,
+      startX: e.clientX,
+      startWidth: colWidths[index],
+    };
+    document.addEventListener('mousemove', onResize);
+    document.addEventListener('mouseup', endResize);
+    document.body.style.cursor = 'col-resize';
+  };
+
+  useEffect(() => {
+      return () => {
+          document.removeEventListener('mousemove', onResize);
+          document.removeEventListener('mouseup', endResize);
+      }
+  }, [onResize, endResize]);
 
   useEffect(() => {
     setTodayDate(getLocalTodayDate());
@@ -619,45 +669,6 @@ export default function App() {
     }
   }, [user, fetchData, supabaseClient]);
 
-  // --- Column Resizing Handlers ---
-  const onResize = useCallback((e: MouseEvent) => {
-    if (!resizeRef.current) return;
-    const { index, startX, startWidth } = resizeRef.current;
-    const diff = e.clientX - startX;
-    const newWidth = Math.max(50, startWidth + diff); 
-    setColWidths(prev => {
-       const next = [...prev];
-       next[index] = newWidth;
-       return next;
-    });
-  }, []);
-
-  const endResize = useCallback(() => {
-    resizeRef.current = null;
-    document.removeEventListener('mousemove', onResize);
-    document.removeEventListener('mouseup', endResize);
-    document.body.style.cursor = 'default';
-  }, [onResize]);
-
-  const startResize = (index: number, e: React.MouseEvent) => {
-    e.preventDefault();
-    resizeRef.current = {
-      index,
-      startX: e.clientX,
-      startWidth: colWidths[index],
-    };
-    document.addEventListener('mousemove', onResize);
-    document.addEventListener('mouseup', endResize);
-    document.body.style.cursor = 'col-resize';
-  };
-
-  useEffect(() => {
-      return () => {
-          document.removeEventListener('mousemove', onResize);
-          document.removeEventListener('mouseup', endResize);
-      }
-  }, [onResize, endResize]);
-
   // --- Auth & other handlers ---
   const handleAuthAction = async () => {
     if (!username || !idLast4) return alert('請輸入姓名與 ID 後四碼');
@@ -741,35 +752,86 @@ export default function App() {
       setLoading(false);
   };
 
-  const locations = useMemo(() => [...new Set(hierarchyData.map(h => h.location).filter(Boolean))].sort(), [hierarchyData]);
-  const availableActivities = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === formData.activity_location && h.activity).map(h => h.activity as string))].sort(), [hierarchyData, formData.activity_location]);
-  const availableOptions = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === formData.activity_location && h.activity === formData.activity_name && h.option).map(h => h.option as string))].sort(), [hierarchyData, formData.activity_location, formData.activity_name]);
-  const availableContents = useMemo(() => hierarchyData.filter(h => h.location === formData.activity_location && h.activity === formData.activity_name && h.option === formData.activity_option && h.content).map(h => h.content as string).sort(), [hierarchyData, formData.activity_location, formData.activity_name, formData.activity_option]);
+  // v87.59: 修改 Locations, Activities 等列表的計算邏輯，支援「自動隱藏已圓滿活動」
+  // 我們將原始 hierarchyData 區分為 activeHierarchy 與 completedHierarchy
+  const hierarchyStatus = useMemo(() => {
+      const active: ActivityHierarchy[] = [];
+      const completed: ActivityHierarchy[] = [];
+      
+      hierarchyData.forEach(h => {
+          // 若有截止日期且小於今天，視為已結束
+          // 注意：通常用 activity_end_date 判斷是否「圓滿」。
+          const endDate = h.option_end_date || h.activity_end_date;
+          if (endDate && endDate < todayDate) {
+              completed.push(h);
+          } else {
+              active.push(h);
+          }
+      });
+      return { active, completed };
+  }, [hierarchyData, todayDate]);
 
-  // 管理後台專用聯動
-  const adminActivities = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity).map(h => h.activity as string))].sort(), [hierarchyData, mgmtSelectedLoc]);
-  const adminOptions = useMemo(() => [...new Set(hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option).map(h => h.option as string))].sort(), [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct]);
-  const adminContents = useMemo(() => hierarchyData.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option === mgmtSelectedOpt && h.content), [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
+  // v87.62: 重新整理已圓滿活動列表的資料結構 (分組顯示)
+  const groupedCompletedActivities = useMemo(() => {
+      const groups: Record<string, ActivityHierarchy[]> = {};
+      hierarchyStatus.completed.forEach(h => {
+          // Key: 地點 | 活動
+          const key = `${h.location} | ${h.activity || '(無活動)'}`;
+          if (!groups[key]) groups[key] = [];
+          groups[key].push(h);
+      });
+      return groups;
+  }, [hierarchyStatus.completed]);
 
-  // 資料篩選專用
+  // 前台表單使用的下拉選單 (應只顯示未圓滿的)
+  const locations = useMemo(() => [...new Set(hierarchyStatus.active.map(h => h.location).filter(Boolean))].sort(), [hierarchyStatus.active]);
+  const availableActivities = useMemo(() => [...new Set(hierarchyStatus.active.filter(h => h.location === formData.activity_location && h.activity).map(h => h.activity as string))].sort(), [hierarchyStatus.active, formData.activity_location]);
+  const availableOptions = useMemo(() => [...new Set(hierarchyStatus.active.filter(h => h.location === formData.activity_location && h.activity === formData.activity_name && h.option).map(h => h.option as string))].sort(), [hierarchyStatus.active, formData.activity_location, formData.activity_name]);
+  const availableContents = useMemo(() => hierarchyStatus.active.filter(h => h.location === formData.activity_location && h.activity === formData.activity_name && h.option === formData.activity_option && h.content).map(h => h.content as string).sort(), [hierarchyStatus.active, formData.activity_location, formData.activity_name, formData.activity_option]);
+
+  // 管理後台設定用的下拉選單 (也只顯示未圓滿，已圓滿移至下方列表)
+  const adminActivities = useMemo(() => [...new Set(hierarchyStatus.active.filter(h => h.location === mgmtSelectedLoc && h.activity).map(h => h.activity as string))].sort(), [hierarchyStatus.active, mgmtSelectedLoc]);
+  const adminOptions = useMemo(() => [...new Set(hierarchyStatus.active.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option).map(h => h.option as string))].sort(), [hierarchyStatus.active, mgmtSelectedLoc, mgmtSelectedAct]);
+  const adminContents = useMemo(() => hierarchyStatus.active.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option === mgmtSelectedOpt && h.content), [hierarchyStatus.active, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
+
+  // 資料篩選專用 (這裡應該包含所有，方便查詢舊資料)
   const filterActivityOptions = useMemo(() => {
-    let source = hierarchyData;
+    let source = hierarchyData; // 包含所有
     if (filterLoc) {
         source = source.filter(h => h.location === filterLoc);
     }
-    // 修正：使用明確的型別判斷 (Type Predicate) 排除 null，解決 TS 錯誤
     return [...new Set(source.map(h => h.activity).filter((a): a is string => !!a))].sort();
   }, [hierarchyData, filterLoc]);
 
-  // 統計篩選專用
+  // 統計篩選專用 (v87.59: 需根據 statsViewType 切換資料源)
   const statActivityOptions = useMemo(() => {
-    let source = hierarchyData;
+    let source = statsViewType === 'active' ? hierarchyStatus.active : hierarchyStatus.completed;
     if (statFilterLoc) {
         source = source.filter(h => h.location === statFilterLoc);
     }
-    // 修正：使用明確的型別判斷
     return [...new Set(source.map(h => h.activity).filter((a): a is string => !!a))].sort();
-  }, [hierarchyData, statFilterLoc]);
+  }, [hierarchyStatus, statFilterLoc, statsViewType]);
+
+  // v87.59: 新增 Option 篩選選單
+  const statOptionOptions = useMemo(() => {
+    let source = statsViewType === 'active' ? hierarchyStatus.active : hierarchyStatus.completed;
+    if (statFilterLoc) source = source.filter(h => h.location === statFilterLoc);
+    if (statFilterAct) source = source.filter(h => h.activity === statFilterAct);
+    
+    return [...new Set(source.map(h => h.option).filter((a): a is string => !!a))].sort();
+  }, [hierarchyStatus, statFilterLoc, statFilterAct, statsViewType]);
+  
+  // v87.59: 取得目前選中活動的結束日期 (用於已圓滿統計顯示)
+  const selectedActivityEndDate = useMemo(() => {
+      if (statsViewType !== 'completed' || !statFilterAct) return null;
+      // 找一筆符合的資料即可
+      const found = hierarchyStatus.completed.find(h => 
+        (statFilterLoc ? h.location === statFilterLoc : true) && 
+        h.activity === statFilterAct
+      );
+      return found?.activity_end_date || found?.option_end_date;
+  }, [hierarchyStatus.completed, statFilterLoc, statFilterAct, statsViewType]);
+
 
   const filteredTransportOptions = useMemo(() => {
     const all = ["大車-精舍統一行程", "小車-自訂抵離寺", "自行前往-自訂抵離寺"];
@@ -840,7 +902,23 @@ export default function App() {
       
       return { endDate, deadline };
   };
+  
+  // v87.55: 用於判斷單筆資料的圓滿狀態
+  const getNoteStatus = useCallback((note: Note) => {
+      let isEnded = false;
+      
+      // 優先使用資料快照
+      if (note.saved_end_date) {
+           isEnded = todayDate > note.saved_end_date;
+      } else {
+           // 舊資料使用目前 hierarchy 設定
+           const { endDate } = getHierarchyDates(note.activity_location, note.activity_name, note.activity_option);
+           isEnded = endDate ? todayDate > endDate : false;
+      }
+      return { isEnded };
+  }, [hierarchyData, todayDate]);
 
+  // 用於判斷目前選單選項的狀態 (報名時)
   const getRestrictionStatus = useCallback((loc: string, act: string, opt: string) => {
       const { endDate, deadline } = getHierarchyDates(loc, act, opt);
       const isEnded = endDate ? todayDate > endDate : false;
@@ -976,6 +1054,15 @@ export default function App() {
         finalData.stay_end_date = '';
     }
 
+    // v87.56: 寫入活動關聯 ID 與快照
+    const exactNode = hierarchyData.find(h => 
+        h.location === finalData.activity_location && 
+        h.activity === finalData.activity_name &&
+        h.option === finalData.activity_option
+    );
+
+    const { endDate, deadline } = getHierarchyDates(finalData.activity_location, finalData.activity_name, finalData.activity_option);
+
     const payload = { 
         ...finalData, 
         user_id: user?.id, 
@@ -989,7 +1076,12 @@ export default function App() {
         arrival_datetime: safeDateToISO(finalData.arrival_datetime),
         departure_datetime: safeDateToISO(finalData.departure_datetime),
         sign_name: signName, 
-        id_2: id2            
+        id_2: id2,
+        
+        // v87.56 Additions
+        activity_id: exactNode?.id || null, 
+        saved_end_date: endDate,
+        saved_deadline: deadline
     };
 
     if (!supabaseClient) return alert('系統未連線');
@@ -1114,7 +1206,7 @@ export default function App() {
     }
 
     const exportData = filteredAdminNotes.map(n => {
-        const { isEnded } = getRestrictionStatus(n.activity_location, n.activity_name, n.activity_option);
+        const { isEnded } = getNoteStatus(n); 
         
         const rawContents: any = n.selected_contents;
         let safeContents: string[] = [];
@@ -1315,8 +1407,8 @@ export default function App() {
       if (historyFilterLoc) filtered = filtered.filter(n => n.activity_location === historyFilterLoc);
       
       return filtered.sort((a, b) => {
-          const statusA = getRestrictionStatus(a.activity_location, a.activity_name, a.activity_option);
-          const statusB = getRestrictionStatus(b.activity_location, b.activity_name, b.activity_option);
+          const statusA = getNoteStatus(a); 
+          const statusB = getNoteStatus(b); 
           const aIsExpired = statusA.isEnded;
           const bIsExpired = statusB.isEnded;
           const aIsDeleted = a.is_deleted;
@@ -1329,11 +1421,11 @@ export default function App() {
           const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
           return dateB - dateA;
       });
-  }, [notes, user, historyFilterLoc, todayDate, hierarchyData]);
+  }, [notes, user, historyFilterLoc, todayDate, hierarchyData, getNoteStatus]);
 
   const getCardStatus = (note: Note) => {
       if (note.is_deleted) return { text: '刪除', color: 'bg-red-500', isInactive: true };
-      const { isEnded } = getRestrictionStatus(note.activity_location, note.activity_name, note.activity_option);
+      const { isEnded } = getNoteStatus(note); 
       if (isEnded) return { text: '已圓滿', color: 'bg-stone-400', isInactive: true };
       
       return { 
@@ -1358,7 +1450,7 @@ export default function App() {
   const filteredAdminNotes = useMemo(() => {
     return notes.filter(n => {
         // v87.52 新增篩選邏輯：已圓滿 vs 未圓滿
-        const { isEnded } = getRestrictionStatus(n.activity_location, n.activity_name, n.activity_option); 
+        const { isEnded } = getNoteStatus(n); 
         
         if (dataViewType === 'active') {
             // 顯示未圓滿 (isEnded = false)
@@ -1383,7 +1475,7 @@ export default function App() {
         // v87.45 排序邏輯
         const getStatusVal = (note: Note) => { 
             if (note.is_deleted) return 2; 
-            const { isEnded } = getRestrictionStatus(note.activity_location, note.activity_name, note.activity_option); 
+            const { isEnded } = getNoteStatus(note); 
             if (isEnded) return 1; 
             return 0; 
         };
@@ -1395,15 +1487,17 @@ export default function App() {
         if (a.activity_name !== b.activity_name) return String(a.activity_name || '').localeCompare(String(b.activity_name || ''));
 
         // 重複資料置底邏輯
-        const activeNotes = notes.filter(n => !n.is_deleted && !getRestrictionStatus(n.activity_location, n.activity_name, n.activity_option).isEnded);
+        const activeNotes = notes.filter(n => !n.is_deleted && !getNoteStatus(n).isEnded);
         const activeDupMap: Record<string, number> = {};
         activeNotes.forEach(n => {
-             const k = `${n.activity_location}|${n.activity_name}|${n.real_name}`;
+             // v87.55: 重複判斷 Key 加入 option
+             const k = `${n.activity_location}|${n.activity_name}|${n.activity_option}|${n.real_name}`;
              activeDupMap[k] = (activeDupMap[k] || 0) + 1;
         });
         
-        const isDupA = valA === 0 && (activeDupMap[`${a.activity_location}|${a.activity_name}|${a.real_name}`] || 0) > 1;
-        const isDupB = valB === 0 && (activeDupMap[`${b.activity_location}|${b.activity_name}|${b.real_name}`] || 0) > 1;
+        // v87.55: 判斷 Key 更新
+        const isDupA = valA === 0 && (activeDupMap[`${a.activity_location}|${a.activity_name}|${a.activity_option}|${a.real_name}`] || 0) > 1;
+        const isDupB = valB === 0 && (activeDupMap[`${b.activity_location}|${b.activity_name}|${b.activity_option}|${b.real_name}`] || 0) > 1;
         
         if (isDupA !== isDupB) return isDupA ? 1 : -1;
 
@@ -1411,14 +1505,15 @@ export default function App() {
         if (a.transportation !== b.transportation) return String(a.transportation || '').localeCompare(String(b.transportation || ''));
         return String(a.real_name || '').localeCompare(String(b.real_name || ''));
     });
-  }, [notes, filterLoc, filterAct, searchText, getRestrictionStatus, dataViewType]); 
+  }, [notes, filterLoc, filterAct, searchText, getNoteStatus, dataViewType]); 
 
   // --- 重複資料計算 ---
   const duplicateMap = useMemo(() => {
     const counts: Record<string, number> = {};
     filteredAdminNotes.forEach(n => {
         if (!n.is_deleted) {
-            const key = `${n.activity_location}|${n.activity_name}|${n.real_name}`;
+            // v87.55: Key 加入 option
+            const key = `${n.activity_location}|${n.activity_name}|${n.activity_option}|${n.real_name}`;
             counts[key] = (counts[key] || 0) + 1;
         }
     });
@@ -1437,13 +1532,16 @@ export default function App() {
   const statisticsData = useMemo(() => {
     const baseData = notes.filter(n => !n.is_deleted);
     const filtered = baseData.filter(n => {
-        // v87.52 新增：圓滿狀態篩選
-        const { isEnded } = getRestrictionStatus(n.activity_location, n.activity_name, n.activity_option);
+        // v87.55: 使用 getNoteStatus
+        const { isEnded } = getNoteStatus(n);
         if (statsViewType === 'active' && isEnded) return false;
         if (statsViewType === 'completed' && !isEnded) return false;
 
         if (statFilterLoc && n.activity_location !== statFilterLoc) return false;
         if (statFilterAct && n.activity_name !== statFilterAct) return false;
+        // v87.59: 新增行程篩選 (statFilterOpt)
+        if (statFilterOpt && n.activity_option !== statFilterOpt) return false;
+        
         return true;
     });
 
@@ -1497,7 +1595,7 @@ export default function App() {
         byTransport: aggregate(n => n.transportation),
         byContent: contentStats
     };
-  }, [notes, statFilterLoc, statFilterAct, statsViewType, getRestrictionStatus]);
+  }, [notes, statFilterLoc, statFilterAct, statFilterOpt, statsViewType, getNoteStatus]);
 
   const statsOverview = useMemo(() => {
       let total = 0;
@@ -1506,13 +1604,15 @@ export default function App() {
       
       const baseData = notes.filter(n => !n.is_deleted);
       const filtered = baseData.filter(n => {
-          // v87.52 圓滿篩選
-          const { isEnded } = getRestrictionStatus(n.activity_location, n.activity_name, n.activity_option);
+          // v87.55: 使用 getNoteStatus
+          const { isEnded } = getNoteStatus(n);
           if (statsViewType === 'active' && isEnded) return false;
           if (statsViewType === 'completed' && !isEnded) return false;
 
           if (statFilterLoc && n.activity_location !== statFilterLoc) return false;
           if (statFilterAct && n.activity_name !== statFilterAct) return false;
+          // v87.59
+          if (statFilterOpt && n.activity_option !== statFilterOpt) return false;
           return true;
       });
 
@@ -1523,7 +1623,7 @@ export default function App() {
       });
 
       return { total, dharma, vol };
-  }, [notes, statFilterLoc, statFilterAct, statsViewType, getRestrictionStatus]);
+  }, [notes, statFilterLoc, statFilterAct, statFilterOpt, statsViewType, getNoteStatus]);
 
   const submitStatus = getSubmitButtonStatus();
 
@@ -1849,6 +1949,7 @@ export default function App() {
                     </div>
                  )}
                  
+                 {/* 其他備註 */}
                  <div className="pt-4 border-t border-stone-100">
                     <label className="text-sm font-bold text-[#4f093c] ml-1 mb-2 block">其他備註</label>
                     <textarea rows={2} className="w-full p-3 text-lg border border-stone-200 rounded-xl bg-white" placeholder="其他備註..." value={formData.memo} onChange={e=>setFormData({...formData, memo: e.target.value})} />
@@ -2017,6 +2118,12 @@ export default function App() {
                     <option value="">{statFilterLoc ? '所有活動' : '請先選地點'}</option>
                     {statActivityOptions.map(a => <option key={a} value={a}>{a}</option>)}
                 </select>
+                {/* 第三層篩選：行程 (v87.59) */}
+                <select className="p-2 bg-white border-none rounded-xl text-base font-bold text-stone-600 outline-none max-w-[12rem] truncate" value={statFilterOpt} onChange={e => setStatFilterOpt(e.target.value)} disabled={!statFilterAct}>
+                    <option value="">{statFilterAct ? '所有行程' : '請先選活動'}</option>
+                    {statOptionOptions.map(o => <option key={o} value={o}>{o}</option>)}
+                </select>
+
                 <button 
                     onClick={() => downloadPDF('stats-content-area', `${statFilterLoc || '所有地點'} - ${statFilterAct || '所有活動'} 統計表`)}
                     className="bg-stone-100 hover:bg-stone-200 text-stone-600 px-5 py-2 rounded-xl text-lg font-bold flex items-center gap-2 transition-colors shadow-sm ml-2"
@@ -2027,6 +2134,15 @@ export default function App() {
             </div>
 
             <div id="stats-content-area">
+                {/* v87.59: 顯示圓滿日期 */}
+                {selectedActivityEndDate && (
+                    <div className="mb-4 text-center">
+                        <span className="bg-stone-600 text-white px-4 py-1 rounded-full text-sm font-bold">
+                            圓滿日期: {selectedActivityEndDate}
+                        </span>
+                    </div>
+                )}
+
                 {/* 總數概覽卡片 */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
                     <OverviewCard title="總報名人數" count={statsOverview.total} icon={Users} color="bg-[#4f093c]" />
@@ -2128,7 +2244,7 @@ export default function App() {
                 </thead>
                 <tbody className="divide-y divide-white">
                   {filteredAdminNotes.map(n => {
-                      const { isEnded } = getRestrictionStatus(n.activity_location, n.activity_name, n.activity_option); 
+                      const { isEnded } = getNoteStatus(n); 
                       const rawContents: any = n.selected_contents;
                       let safeContents: string[] = [];
                       if (Array.isArray(rawContents)) {
@@ -2165,7 +2281,9 @@ export default function App() {
                         boldStyle = "font-bold text-xl text-stone-400"; 
                       } else if(isEnded) { 
                         statusBadge = <span className="px-2 py-0.5 rounded text-xs font-bold w-fit bg-stone-200 text-stone-600">已圓滿</span>; 
+                        // v87.52: 已圓滿資料背景微調，文字不反灰
                         rowStyle = "bg-stone-50/50 border-b border-white"; 
+                        // 維持正常顏色
                         textStyle = "text-slate-800"; 
                         subTextStyle = "text-stone-600"; 
                         boldStyle = "font-bold text-xl text-slate-800"; 
@@ -2175,7 +2293,8 @@ export default function App() {
                         rowStyleObj = { backgroundColor: CARD_BG_COLOR };
                       } 
 
-                      const dupKey = `${n.activity_location}|${n.activity_name}|${n.real_name}`;
+                      // v87.55: 重複判斷 Key 加入 option
+                      const dupKey = `${n.activity_location}|${n.activity_name}|${n.activity_option}|${n.real_name}`;
                       const isDuplicate = !n.is_deleted && (duplicateMap[dupKey] || 0) > 1;
 
                       return (
@@ -2187,6 +2306,7 @@ export default function App() {
                         </td>
                         <td className="p-4 align-top overflow-hidden break-words">
                           <div className={boldStyle}>{n.real_name}</div>
+                          {/* 法名無括號，前加 / */}
                           <div className={`text-sm font-bold mt-1 ${subTextStyle}`}>{n.dharma_name ? ` / ${n.dharma_name}` : ' / (無)'} / {n.gender}</div>
                           <div className={subTextStyle}>{n.registrant_type}</div>
                           <div className={`${n.is_deleted ? 'text-stone-400' : 'text-[#4f093c]'} font-bold`}>{n.identity}</div>
@@ -2347,13 +2467,13 @@ export default function App() {
           </div>
         )}
 
-        {/* Admin Settings Tab */}
+        {/* Admin Settings Tab (Updated v87.59: Auto Hide Completed + Completed List + Backfill) */}
         {activeTab === 'admin_settings' && isAdmin && (
            <div className={`p-10 rounded-[40px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}>
               <div className="flex justify-between items-start mb-8">
                  <div>
                     <h3 className="text-3xl font-bold text-[#4f093c] mb-2">1、報名行程設定</h3>
-                    <p className="text-sm text-stone-400 mb-10">設定地點、活動、行程層級與日期控制</p>
+                    <p className="text-sm text-stone-400 mb-10">設定地點、活動、行程層級與日期控制 (已自動隱藏圓滿活動)</p>
                  </div>
                  <button onClick={handlePublishSettings} className="bg-[#4f093c] text-white px-6 py-3 rounded-xl font-bold text-base shadow-md hover:bg-[#3d072e] flex items-center gap-2 transition-all shrink-0">
                     <UploadCloud className="w-5 h-5" /> 發佈設定
@@ -2450,6 +2570,43 @@ export default function App() {
                             </div>
                         ))}
                     </div>
+                 </div>
+              </div>
+
+              {/* v87.59 新增：已圓滿活動列表 */}
+              <div className="mt-12 bg-white rounded-3xl p-8 border border-stone-200">
+                 <h4 className="font-bold text-[#4f093c] text-xl mb-6 flex items-center gap-2"><Archive className="w-6 h-6"/> 已圓滿活動列表 (唯讀)</h4>
+                 <div className="overflow-x-auto rounded-2xl border border-stone-200">
+                   <table className="w-full text-left border-collapse">
+                      <thead className="bg-stone-50 border-b border-stone-200 text-stone-600">
+                          <tr>
+                            <th className="p-4 font-bold text-lg">地點 / 活動</th>
+                            <th className="p-4 font-bold text-lg">行程 & 截止/結束日期</th>
+                          </tr>
+                      </thead>
+                      <tbody className="divide-y divide-stone-100">
+                        {Object.entries(groupedCompletedActivities).map(([key, items]) => (
+                            <tr key={key} className="hover:bg-stone-50/30">
+                                <td className="p-4 font-bold text-lg text-slate-800 align-top w-1/3 border-r border-stone-100">{key}</td>
+                                <td className="p-4 align-top text-slate-800">
+                                    <div className="space-y-3">
+                                      {items.map(i => (
+                                        <div key={i.id} className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-4 p-2 rounded-lg bg-stone-50 border border-stone-100">
+                                            <span className="font-bold text-base">{i.option || '(無行程)'}</span>
+                                            <span className="text-sm font-mono text-stone-500 whitespace-nowrap">
+                                                截止: {i.option_deadline || i.activity_deadline || '-'} <span className="mx-1 text-stone-300">|</span> 結束: {i.option_end_date || i.activity_end_date}
+                                            </span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                </td>
+                            </tr>
+                        ))}
+                        {Object.keys(groupedCompletedActivities).length === 0 && (
+                            <tr><td colSpan={2} className="p-8 text-center text-stone-400 italic">目前尚無已圓滿活動</td></tr>
+                        )}
+                      </tbody>
+                   </table>
                  </div>
               </div>
 
