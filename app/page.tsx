@@ -10,16 +10,15 @@ import {
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * 系統版本：v87.64 (重複宣告與遺留按鈕修復版)
+ * 系統版本：v87.81 (編譯錯誤終極修復版)
  * 修正說明：
- * 1. [Fix] 移除 App 元件底部重複宣告的 `colWidths`, `resizeRef`, `onResize`, `endResize`, `startResize`，解決編譯錯誤。
- * 2. [Remove] 移除「修復資料 ID」功能與按鈕 (依據 v87.62 需求)。
- * 3. [System] 完整保留 v87.62 所有功能：
- * - 「已圓滿活動列表」優化為表格呈現 (黑字、自動分組)。
- * - 報名分流 (activity_id)。
- * - 統計頁籤完整篩選 (地點/活動/行程/狀態)。
- * - PDF 匯出 (含標題)。
- * - 資料表欄寬拖曳。
+ * 1. [Fix] 徹底清除檔案中重複宣告的變數與函式 (fetchData, handleAuthAction 等)，解決編譯失敗。
+ * 2. [Confirm] 確認已移除「資料」頁籤的欄寬調整功能。
+ * 3. [System] 完整保留 v87.65 功能：
+ * - 移除「修復資料 ID」功能。
+ * - 「已圓滿活動列表」新增「圓滿年/月」篩選，未選不顯示。
+ * - 「已圓滿活動列表」同一行程且同一圓滿日者自動合併。
+ * - 「已圓滿活動列表」樣式調整為表格，字體改為黑色。
  */
 
 // --- 主色系設定 ---
@@ -521,6 +520,9 @@ export default function App() {
   const [statFilterOpt, setStatFilterOpt] = useState<string>(''); // v87.59 新增
   const [statsViewType, setStatsViewType] = useState<'active' | 'completed'>('active');
 
+  // v87.65: 已圓滿活動列表篩選器
+  const [completedFilterDate, setCompletedFilterDate] = useState<string>('');
+
   const [formData, setFormData] = useState(INITIAL_FORM_DATA);
 
   // 管理後台設定用
@@ -537,48 +539,6 @@ export default function App() {
   const [newUser, setNewUser] = useState({ name: '', id4: '', pwd: '' });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
-  // Column resizing state (v87.50)
-  const [colWidths, setColWidths] = useState([200, 250, 230, 230, 160, 100, 80]); // Default Widths
-  const resizeRef = useRef<{ index: number; startX: number; startWidth: number } | null>(null);
-
-  const onResize = useCallback((e: MouseEvent) => {
-    if (!resizeRef.current) return;
-    const { index, startX, startWidth } = resizeRef.current;
-    const diff = e.clientX - startX;
-    const newWidth = Math.max(50, startWidth + diff); 
-    setColWidths(prev => {
-       const next = [...prev];
-       next[index] = newWidth;
-       return next;
-    });
-  }, []);
-
-  const endResize = useCallback(() => {
-    resizeRef.current = null;
-    document.removeEventListener('mousemove', onResize);
-    document.removeEventListener('mouseup', endResize);
-    document.body.style.cursor = 'default';
-  }, [onResize]);
-
-  const startResize = (index: number, e: React.MouseEvent) => {
-    e.preventDefault();
-    resizeRef.current = {
-      index,
-      startX: e.clientX,
-      startWidth: colWidths[index],
-    };
-    document.addEventListener('mousemove', onResize);
-    document.addEventListener('mouseup', endResize);
-    document.body.style.cursor = 'col-resize';
-  };
-
-  useEffect(() => {
-      return () => {
-          document.removeEventListener('mousemove', onResize);
-          document.removeEventListener('mouseup', endResize);
-      }
-  }, [onResize, endResize]);
 
   useEffect(() => {
     setTodayDate(getLocalTodayDate());
@@ -771,17 +731,47 @@ export default function App() {
       return { active, completed };
   }, [hierarchyData, todayDate]);
 
-  // v87.62: 重新整理已圓滿活動列表的資料結構 (分組顯示)
-  const groupedCompletedActivities = useMemo(() => {
-      const groups: Record<string, ActivityHierarchy[]> = {};
+  // v87.65: 取得已圓滿活動的所有 "圓滿年/月" 列表
+  const completedDates = useMemo(() => {
+      const dates = new Set<string>();
       hierarchyStatus.completed.forEach(h => {
-          // Key: 地點 | 活動
+          const date = h.option_end_date || h.activity_end_date;
+          if (date) dates.add(date.substring(0, 7)); // YYYY-MM
+      });
+      return [...dates].sort().reverse();
+  }, [hierarchyStatus.completed]);
+
+  // v87.65: 重新整理已圓滿活動列表的資料結構 (分組顯示 + 篩選 + 合併)
+  const groupedCompletedActivities = useMemo(() => {
+      // 需求4: 未下拉篩選時，不要出現資料
+      if (!completedFilterDate) return {};
+      
+      const groups: Record<string, ActivityHierarchy[]> = {};
+      
+      // 1. 篩選日期
+      const filtered = hierarchyStatus.completed.filter(h => {
+          const date = h.option_end_date || h.activity_end_date;
+          return date && date.startsWith(completedFilterDate);
+      });
+
+      // 2. 依地點|活動分組，並合併相同行程且相同圓滿日的項目
+      filtered.forEach(h => {
           const key = `${h.location} | ${h.activity || '(無活動)'}`;
           if (!groups[key]) groups[key] = [];
-          groups[key].push(h);
+          
+          // 合併邏輯: 檢查是否已存在相同 option 且相同 end_date 的項目
+          const existing = groups[key].find(e => 
+              e.option === h.option && 
+              (e.option_end_date || e.activity_end_date) === (h.option_end_date || h.activity_end_date)
+          );
+
+          if (!existing) {
+              groups[key].push(h);
+          }
       });
+      
       return groups;
-  }, [hierarchyStatus.completed]);
+  }, [hierarchyStatus.completed, completedFilterDate]);
 
   // 前台表單使用的下拉選單 (應只顯示未圓滿的)
   const locations = useMemo(() => [...new Set(hierarchyStatus.active.map(h => h.location).filter(Boolean))].sort(), [hierarchyStatus.active]);
@@ -1449,7 +1439,6 @@ export default function App() {
 
   const filteredAdminNotes = useMemo(() => {
     return notes.filter(n => {
-        // v87.52 新增篩選邏輯：已圓滿 vs 未圓滿
         const { isEnded } = getNoteStatus(n); 
         
         if (dataViewType === 'active') {
@@ -2175,7 +2164,7 @@ export default function App() {
           </div>
         )}
 
-        {/* Admin Data Tab (Updated v87.52) */}
+        {/* Admin Data Tab (Updated v87.52 & v87.80) */}
         {activeTab === 'admin_data' && isAdmin && (
           <div className={`p-8 rounded-[32px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}>
             <div className="flex justify-between items-center mb-8">
@@ -2197,48 +2186,20 @@ export default function App() {
               </div>
             </div>
             
-            {/* Table with resizable columns (table-fixed) */}
+            {/* Table (v87.80: Removed Resizing, Reverted to Table-Fixed) */}
             <div className="overflow-x-auto rounded-2xl border border-stone-100">
               <table className="w-full text-left text-sm bg-white table-fixed">
                 <thead className="bg-[#4f093c] text-white font-bold">
                   <tr>
-                      {/* Column 1: 活動行程 */}
-                      <th style={{ width: colWidths[0] }} className="p-4 relative group">
-                          活動行程
-                          <div className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 group-hover:bg-white/20" onMouseDown={(e) => startResize(0, e)} />
-                      </th>
-                      {/* Column 2: 基本資料 */}
-                      <th style={{ width: colWidths[1] }} className="p-4 relative group">
-                          基本資料
-                          <div className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 group-hover:bg-white/20" onMouseDown={(e) => startResize(1, e)} />
-                      </th>
-                      {/* Column 3: 交通/住宿 */}
-                      <th style={{ width: colWidths[2] }} className="p-4 relative group">
-                          交通/住宿
-                          <div className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 group-hover:bg-white/20" onMouseDown={(e) => startResize(2, e)} />
-                      </th>
-                      {/* Column 4: 義工資訊 */}
-                      <th style={{ width: colWidths[3] }} className="p-4 relative group">
-                          義工資訊
-                          <div className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 group-hover:bg-white/20" onMouseDown={(e) => startResize(3, e)} />
-                      </th>
-                      {/* Column 5: 備註 */}
-                      <th style={{ width: colWidths[4] }} className="p-4 relative group">
-                          備註
-                          <div className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 group-hover:bg-white/20" onMouseDown={(e) => startResize(4, e)} />
-                      </th>
-                      {/* Column 6: 狀態 */}
-                      <th style={{ width: colWidths[5] }} className="p-4 relative group">
-                          狀態
-                          <div className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 group-hover:bg-white/20" onMouseDown={(e) => startResize(5, e)} />
-                      </th>
-                      {/* Column 7: 刪除 */}
+                      <th className="p-4 w-[200px]">活動行程</th>
+                      <th className="p-4 w-[250px]">基本資料</th>
+                      <th className="p-4 w-[230px]">交通/住宿</th>
+                      <th className="p-4 w-[230px]">義工資訊</th>
+                      <th className="p-4 w-[160px]">備註</th>
+                      <th className="p-4 w-[100px]">狀態</th>
                       {/* v87.52: 僅在未圓滿 (active) 狀態下顯示刪除欄位 */}
                       {dataViewType === 'active' && (
-                          <th style={{ width: colWidths[6] }} className="p-4 text-center relative group">
-                              刪除
-                              <div className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 group-hover:bg-white/20" onMouseDown={(e) => startResize(6, e)} />
-                          </th>
+                          <th className="p-4 text-center w-[80px]">刪除</th>
                       )}
                   </tr>
                 </thead>
@@ -2341,8 +2302,8 @@ export default function App() {
                             <span className="opacity-50">-</span>
                           )}
                         </td>
-                        <td className="p-4 align-top overflow-hidden break-words">
-                          <div className="flex flex-col gap-1 leading-tight">
+                        <td className="p-4 align-top w-40 max-w-[10rem]">
+                          <div className="flex flex-col gap-1 break-words whitespace-normal leading-tight">
                             {mergedRemarks.length > 0 && <div className={subTextStyle}>{mergedRemarks.join(' / ')}</div>}
                             {hasMemo && <div className={`${subTextStyle} mt-2 pt-2 border-t border-stone-200/50 border-dashed`}>{n.memo}</div>}
                           </div>
@@ -2530,11 +2491,7 @@ export default function App() {
                  {/* Column 3: Option */}
                  <div className="flex flex-col bg-white/50 rounded-3xl border border-stone-100 overflow-hidden">
                     <div className="p-3 border-b border-stone-100 bg-white"><h4 className="font-bold text-slate-700 flex items-center gap-2"><div className="w-2 h-6 bg-[#4f093c] rounded-full"></div>行程</h4></div>
-                    
-                    {/* 新增輸入框 - p-2 */}
                     <div className="p-2 flex gap-2 border-b border-stone-100"><input className="flex-1 p-2 text-sm border rounded-lg" placeholder="新行程..." disabled={!mgmtSelectedAct} value={newOption} onChange={e=>setNewOption(e.target.value)} /><button onClick={addOption} className="bg-[#4f093c] text-white p-2 rounded-lg hover:bg-[#3d072e] disabled:opacity-50 shrink-0"><Plus/></button></div>
-
-                    {/* Date Settings for Option */}
                     <div className="px-3 pt-3 pb-2 space-y-3 bg-white border-b border-stone-100">
                         <div className="space-y-1">
                             <label className="text-sm font-bold text-red-600 uppercase tracking-wider">截止報名</label>
@@ -2558,8 +2515,6 @@ export default function App() {
                  {/* Column 4: Content */}
                  <div className="flex flex-col bg-white/50 rounded-3xl border border-stone-100 overflow-hidden">
                     <div className="p-3 border-b border-stone-100 bg-white"><h4 className="font-bold text-slate-700 flex items-center gap-2"><div className="w-2 h-6 bg-[#4f093c] rounded-full"></div>內容</h4></div>
-                    
-                    {/* 新增輸入框 - p-2 */}
                     <div className="p-2 flex gap-2 border-b border-stone-100"><input className="flex-1 p-2 text-sm border rounded-lg" placeholder="新內容..." disabled={!mgmtSelectedOpt} value={newContent} onChange={e=>setNewContent(e.target.value)} /><button onClick={addContent} className="bg-[#4f093c] text-white p-2 rounded-lg hover:bg-[#3d072e] disabled:opacity-50 shrink-0"><Plus/></button></div>
 
                     <div className="flex-1 overflow-y-auto p-2 space-y-1">
@@ -2573,9 +2528,21 @@ export default function App() {
                  </div>
               </div>
 
-              {/* v87.59 新增：已圓滿活動列表 */}
+              {/* v87.59 新增：已圓滿活動列表 (v87.65 Optimized) */}
               <div className="mt-12 bg-white rounded-3xl p-8 border border-stone-200">
-                 <h4 className="font-bold text-[#4f093c] text-xl mb-6 flex items-center gap-2"><Archive className="w-6 h-6"/> 已圓滿活動列表 (唯讀)</h4>
+                 <div className="flex justify-between items-center mb-6">
+                    <h4 className="font-bold text-[#4f093c] text-xl flex items-center gap-2"><Archive className="w-6 h-6"/> 已圓滿活動列表 (唯讀)</h4>
+                    {/* v87.65: 新增篩選器 */}
+                    <select 
+                      className="p-2 border border-stone-300 rounded-lg text-sm text-slate-700 bg-white hover:bg-stone-50 cursor-pointer outline-none focus:ring-2 focus:ring-[#4f093c]/20 transition-all"
+                      value={completedFilterDate}
+                      onChange={(e) => setCompletedFilterDate(e.target.value)}
+                    >
+                      <option value="">請選擇圓滿年/月...</option>
+                      {completedDates.map(date => <option key={date} value={date}>{date}</option>)}
+                    </select>
+                 </div>
+
                  <div className="overflow-x-auto rounded-2xl border border-stone-200">
                    <table className="w-full text-left border-collapse">
                       <thead className="bg-stone-50 border-b border-stone-200 text-stone-600">
@@ -2603,7 +2570,7 @@ export default function App() {
                             </tr>
                         ))}
                         {Object.keys(groupedCompletedActivities).length === 0 && (
-                            <tr><td colSpan={2} className="p-8 text-center text-stone-400 italic">目前尚無已圓滿活動</td></tr>
+                            <tr><td colSpan={2} className="p-8 text-center text-stone-400 italic">{completedFilterDate ? '查無符合資料' : '請選擇日期以檢視資料'}</td></tr>
                         )}
                       </tbody>
                    </table>
@@ -2613,9 +2580,11 @@ export default function App() {
               <div className="mt-20">
                  <div className="flex justify-between items-center mb-6">
                     <h3 className="text-3xl font-bold text-[#4f093c]">2、欄位管理</h3>
-                    <button onClick={handlePublishSettings} className="bg-[#4f093c] text-white px-6 py-3 rounded-xl font-bold text-base shadow-md hover:bg-[#3d072e] flex items-center gap-2 transition-all shrink-0">
-                      <UploadCloud className="w-5 h-5" /> 發佈設定
-                    </button>
+                    <div className="flex gap-2">
+                        <button onClick={handlePublishSettings} className="bg-[#4f093c] text-white px-6 py-3 rounded-xl font-bold text-base shadow-md hover:bg-[#3d072e] flex items-center gap-2 transition-all shrink-0">
+                          <UploadCloud className="w-5 h-5" /> 發佈設定
+                        </button>
+                    </div>
                  </div>
                  <div className="overflow-x-auto rounded-[40px] border border-stone-100 shadow-sm">
                     <table className="w-full text-left text-sm bg-white">
