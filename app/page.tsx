@@ -5,7 +5,7 @@ import {
   Bell, FileText, History, Settings, Shield, LogOut, Plus, Trash2, Check, 
   Edit, User, MapPin, Tag, ListFilter, Save, Database, Clock, Car, Info, 
   Home, UserCheck, AlertCircle, Briefcase, Layers, 
-  CheckCircle2, CheckSquare, FileSpreadsheet, Megaphone, ClipboardCheck, UserCog, Share2, Lock, Eye, EyeOff, Users, ArrowRight, RefreshCw, AlertTriangle, Image as ImageIcon, Table as TableIcon, Calendar, Filter, UploadCloud, ChevronRight, Search, KeyRound, BarChart3, PieChart, TrendingUp, Download, Archive
+  CheckCircle2, CheckSquare, FileSpreadsheet, Megaphone, ClipboardCheck, UserCog, Share2, Lock, Eye, EyeOff, Users, ArrowRight, RefreshCw, AlertTriangle, Image as ImageIcon, Table as TableIcon, Calendar, Filter, UploadCloud, ChevronRight, Search, KeyRound, BarChart3, PieChart, TrendingUp, Download, Archive, ServerCrash
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
@@ -457,13 +457,10 @@ const StatsBarChart = ({ title, data }: { title: string, data: Record<string, { 
 // 4. 主元件 App (Main Component)
 // ============================================================================
 export default function App() {
-  // ----------------------------------------------------------------------------
   // 1. Hooks & State
-  // ----------------------------------------------------------------------------
   const [supabaseClient, setSupabaseClient] = useState<any>(null);
   const [user, setUser] = useState<any>(null);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
-  const [isMock, setIsMock] = useState<boolean>(true);
   const [loading, setLoading] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<string>('bulletin');
 
@@ -493,9 +490,8 @@ export default function App() {
   const [filterAct, setFilterAct] = useState<string>(''); 
   const [searchText, setSearchText] = useState<string>('');
   
-  // 資料狀態篩選
-  // Removed toggle, default to 'active' for Admin Data tab
-  const [dataViewType, setDataViewType] = useState<'active' | 'completed'>('active');
+  // 資料狀態篩選 (Admin Data Tab)
+  // const [dataViewType, setDataViewType] = useState<'active' | 'completed'>('active'); // Removed as requested
 
   // 統計頁籤的篩選器
   const [statFilterLoc, setStatFilterLoc] = useState<string>('');
@@ -540,23 +536,15 @@ export default function App() {
           try {
             const client = window.supabase.createClient(url, key);
             setSupabaseClient(client);
-            setIsMock(false);
-          } catch (err) { setIsMock(true); }
-        } else { setIsMock(true); }
+          } catch (err) { console.error("Supabase init error:", err); }
+        }
         setLoading(false);
       };
-      script.onerror = () => { setIsMock(true); setLoading(false); };
+      script.onerror = () => { setLoading(false); };
       document.body.appendChild(script);
     };
     loadSupabase();
   }, []);
-
-  // Update isAdmin when isMock changes
-  useEffect(() => {
-    if (isMock && user) {
-        setIsAdmin(true);
-    }
-  }, [isMock, user]);
 
   const fetchFieldConfigs = useCallback(async () => {
     if (!supabaseClient) return;
@@ -573,41 +561,6 @@ export default function App() {
   }, [supabaseClient]);
 
   const fetchData = useCallback(async () => {
-    if (isMock) { 
-      // Generate full mock data for all tabs
-      setBulletins([{ id: '1', content: "🎉 歡迎使用 (展示模式)", created_at: new Date().toISOString() }]);
-      setHierarchyData([
-          { id: '1', location: "中台", activity: "禪修", option: "一般", content: null },
-          // 已圓滿的活動架構
-          { id: '2', location: "中台", activity: "已圓滿活動", option: "梯次A", content: null, option_end_date: "2023-01-01" },
-          { id: '3', location: "中台", activity: "已圓滿活動", option: "梯次B", content: null, option_end_date: "2023-01-01" }
-      ]);
-      setNotes([
-          {
-            id: '1', user_id: 'mock_uid', real_name: '測試員', dharma_name: '', gender: '男', registrant_type: '禪修班學員', registration_option: '新增',
-            activity_location: '中台', activity_name: '禪修', activity_option: '一般', selected_contents: [], other_remarks: '', memo: '', identity: '參加法會', 
-            volunteer_type: null, transportation: '自行前往', arrival_datetime: null, departure_datetime: null, volunteer_group: null, start_date: null, end_date: null, accommodation_option: '不安單', stay_start_date: null, stay_end_date: null,
-            is_deleted: false, audit_status: '免審核', created_at: new Date().toISOString()
-          },
-          // 已圓滿的報名資料
-          {
-            id: '2', user_id: 'mock_uid', real_name: '舊學員', dharma_name: '', gender: '女', registrant_type: '上過課學員', registration_option: '新增',
-            activity_location: '中台', activity_name: '已圓滿活動', activity_option: '梯次A', selected_contents: [], other_remarks: '', memo: '', identity: '參加法會',
-            volunteer_type: null, transportation: '大車', arrival_datetime: null, departure_datetime: null, volunteer_group: null, start_date: null, end_date: null, accommodation_option: '不安單', stay_start_date: null, stay_end_date: null,
-            is_deleted: false, audit_status: '免審核', created_at: "2022-12-31T00:00:00.000Z", saved_end_date: "2023-01-01"
-          },
-          // 已刪除的資料
-          {
-            id: '3', user_id: 'mock_uid', real_name: '刪除者', dharma_name: '', gender: '男', registrant_type: '禪修班學員', registration_option: '新增',
-            activity_location: '中台', activity_name: '禪修', activity_option: '一般', selected_contents: [], other_remarks: '', memo: '', identity: '參加法會', 
-            volunteer_type: null, transportation: '自行前往', arrival_datetime: null, departure_datetime: null, volunteer_group: null, start_date: null, end_date: null, accommodation_option: '不安單', stay_start_date: null, stay_end_date: null,
-            is_deleted: true, audit_status: '免審核', created_at: "2023-12-31T00:00:00.000Z"
-          }
-      ]);
-      setAllUsers([{ id: '1', email: 'admin@test.com', user_name: '管理員', id_last4: '0000', is_admin: true, is_disabled: false, uid: 'mock_admin' }]);
-      setResetRequests([{ id: '1', user_name: '申請人', id_last4: '1234', uid: 'mock_req', status: 'pending', created_at: new Date().toISOString() }]);
-      return; 
-    }
     if (!supabaseClient) return;
     try {
       const { data: bData } = await supabaseClient.from('bulletins').select('*').order('created_at', { ascending: false });
@@ -621,8 +574,35 @@ export default function App() {
       const { data: rData } = await supabaseClient.from('reset_requests').select('*').order('created_at', { ascending: false });
       if (rData) setResetRequests(rData);
       await fetchFieldConfigs();
-    } catch (err) { }
-  }, [supabaseClient, isMock, fetchFieldConfigs]);
+    } catch (err) { console.error(err); }
+  }, [supabaseClient, fetchFieldConfigs]);
+
+  useEffect(() => {
+    if (user && supabaseClient) {
+      fetchData();
+      supabaseClient.from('user_permissions').select('is_admin').eq('uid', user.id).maybeSingle()
+      .then(({ data }: any) => { if (data) setIsAdmin(data.is_admin === true); });
+      
+      const metaName = user.user_metadata?.user_name;
+      const metaId4 = user.user_metadata?.id_last4;
+      if (metaName && metaId4) {
+           supabaseClient.from('user_permissions').select('id, id_last4').eq('uid', user.id).maybeSingle()
+           .then(async ({ data: existing }: any) => {
+               if (!existing || existing.id_last4 !== metaId4) {
+                   if(existing) await supabaseClient.from('user_permissions').delete().eq('uid', user.id);
+                   await supabaseClient.from('user_permissions').insert([{
+                       uid: user.id, email: user.email, user_name: metaName, id_last4: metaId4,
+                       is_admin: false, is_disabled: false, created_at: new Date().toISOString()
+                   }]);
+               }
+           });
+      }
+      const channel = supabaseClient.channel('db-all-sync')
+        .on('postgres_changes', { event: '*', schema: 'public', table: '*' }, fetchData)
+        .subscribe();
+      return () => { supabaseClient.removeChannel(channel); };
+    }
+  }, [user, fetchData, supabaseClient]);
 
   // ----------------------------------------------------------------------------
   // 3. Memos (Computations for Logic) - Defined BEFORE usage
@@ -653,7 +633,42 @@ export default function App() {
     return all;
   }, [formData.activity_option]);
 
-  // UseEffect for Transport Auto-select (Needs filteredTransportOptions)
+  const fieldVisibility = useMemo(() => {
+    const isJingshe = formData.activity_location === '精舍';
+    const isZhongtai = formData.activity_location === '中台';
+    const isVolunteer = formData.identity === '發心義工';
+    const isBus = formData.transportation === '大車-精舍統一行程';
+    const isOneDay = formData.activity_option.includes('當天來回');
+    const needsAccommodation = formData.accommodation_option === '須安單';
+
+    return {
+      transportation: !isJingshe,
+      volunteerGroup: isVolunteer,
+      volunteerType: isZhongtai && isVolunteer,
+      volunteerDates: !isJingshe && isVolunteer, 
+      arrivalDeparture: !isJingshe && !isBus,    
+      accommodation: !isJingshe && !isBus && !isOneDay,
+      accommodationDates: (!isJingshe && !isBus && !isOneDay) && needsAccommodation 
+    };
+  }, [formData]);
+
+  const adminActivities = useMemo(() => [...new Set(hierarchyStatus.active.filter(h => h.location === mgmtSelectedLoc && h.activity).map(h => h.activity as string))].sort(), [hierarchyStatus.active, mgmtSelectedLoc]);
+  const adminOptions = useMemo(() => [...new Set(hierarchyStatus.active.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option).map(h => h.option as string))].sort(), [hierarchyStatus.active, mgmtSelectedLoc, mgmtSelectedAct]);
+  const adminContents = useMemo(() => hierarchyStatus.active.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option === mgmtSelectedOpt && h.content), [hierarchyStatus.active, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
+
+  const currentActivityDates = useMemo(() => {
+    if (!mgmtSelectedLoc || !mgmtSelectedAct) return { end: '', dead: '' };
+    const found = hierarchyData.find(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && (h.activity_end_date || h.activity_deadline));
+    return { end: found?.activity_end_date || '', dead: found?.activity_deadline || '' };
+  }, [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct]);
+
+  const currentOptionDates = useMemo(() => {
+    if (!mgmtSelectedLoc || !mgmtSelectedAct || !mgmtSelectedOpt) return { end: '', dead: '' };
+    const found = hierarchyData.find(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option === mgmtSelectedOpt && (h.option_end_date || h.option_deadline));
+    return { end: found?.option_end_date || '', dead: found?.option_deadline || '' };
+  }, [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
+
+  // UseEffect for Transport Auto-select
   useEffect(() => {
     const hasLargeBus = filteredTransportOptions.some(o => o.includes("大車"));
     setFormData(prev => ({ ...prev, transportation: hasLargeBus ? "大車-精舍統一行程" : "小車-自訂抵離寺" }));
@@ -675,81 +690,6 @@ export default function App() {
           setFormData(p => ({ ...p, end_date: p.end_date || fullDateTime, stay_end_date: p.stay_end_date || dateOnly }));
       }
   }, [formData.departure_datetime]);
-
-  const fieldVisibility = useMemo(() => {
-    const isJingshe = formData.activity_location === '精舍';
-    const isZhongtai = formData.activity_location === '中台';
-    const isVolunteer = formData.identity === '發心義工';
-    const isBus = formData.transportation === '大車-精舍統一行程';
-    const isOneDay = formData.activity_option.includes('當天來回');
-    const needsAccommodation = formData.accommodation_option === '須安單';
-
-    return {
-      transportation: !isJingshe,
-      volunteerGroup: isVolunteer,
-      volunteerType: isZhongtai && isVolunteer,
-      volunteerDates: !isJingshe && isVolunteer, 
-      arrivalDeparture: !isJingshe && !isBus,    
-      accommodation: !isJingshe && !isBus && !isOneDay,
-      accommodationDates: (!isJingshe && !isBus && !isOneDay) && needsAccommodation 
-    };
-  }, [formData]);
-
-  const availableCompletedMonths = useMemo(() => {
-      const dates = new Set<string>();
-      hierarchyStatus.completed.forEach(h => {
-          const date = h.option_end_date || h.activity_end_date;
-          if (date) dates.add(date.substring(0, 7)); // YYYY-MM
-      });
-      return [...dates].sort().reverse();
-  }, [hierarchyStatus.completed]);
-
-  const availableCompletedLocActs = useMemo(() => {
-      if (!completedFilterMonth) return [];
-      const locActs = new Set<string>();
-      hierarchyStatus.completed.forEach(h => {
-          const date = h.option_end_date || h.activity_end_date;
-          if (date && date.startsWith(completedFilterMonth)) {
-              locActs.add(`${h.location} | ${h.activity}`);
-          }
-      });
-      return [...locActs].sort();
-  }, [hierarchyStatus.completed, completedFilterMonth]);
-
-  const adminActivities = useMemo(() => [...new Set(hierarchyStatus.active.filter(h => h.location === mgmtSelectedLoc && h.activity).map(h => h.activity as string))].sort(), [hierarchyStatus.active, mgmtSelectedLoc]);
-  const adminOptions = useMemo(() => [...new Set(hierarchyStatus.active.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option).map(h => h.option as string))].sort(), [hierarchyStatus.active, mgmtSelectedLoc, mgmtSelectedAct]);
-  const adminContents = useMemo(() => hierarchyStatus.active.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option === mgmtSelectedOpt && h.content), [hierarchyStatus.active, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
-
-  const filterActivityOptions = useMemo(() => {
-    let source = hierarchyData;
-    if (filterLoc) source = source.filter(h => h.location === filterLoc);
-    return [...new Set(source.map(h => h.activity).filter((a): a is string => !!a))].sort();
-  }, [hierarchyData, filterLoc]);
-
-  const statActivityOptions = useMemo(() => {
-    let source = hierarchyStatus.active; 
-    if (statFilterLoc) source = source.filter(h => h.location === statFilterLoc);
-    return [...new Set(source.map(h => h.activity).filter((a): a is string => !!a))].sort();
-  }, [hierarchyStatus.active, statFilterLoc]);
-
-  const statOptionOptions = useMemo(() => {
-    let source = hierarchyStatus.active;
-    if (statFilterLoc) source = source.filter(h => h.location === statFilterLoc);
-    if (statFilterAct) source = source.filter(h => h.activity === statFilterAct);
-    return [...new Set(source.map(h => h.option).filter((a): a is string => !!a))].sort();
-  }, [hierarchyStatus.active, statFilterLoc, statFilterAct]);
-
-  const currentActivityDates = useMemo(() => {
-    if (!mgmtSelectedLoc || !mgmtSelectedAct) return { end: '', dead: '' };
-    const found = hierarchyData.find(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && (h.activity_end_date || h.activity_deadline));
-    return { end: found?.activity_end_date || '', dead: found?.activity_deadline || '' };
-  }, [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct]);
-
-  const currentOptionDates = useMemo(() => {
-    if (!mgmtSelectedLoc || !mgmtSelectedAct || !mgmtSelectedOpt) return { end: '', dead: '' };
-    const found = hierarchyData.find(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option === mgmtSelectedOpt && (h.option_end_date || h.option_deadline));
-    return { end: found?.option_end_date || '', dead: found?.option_deadline || '' };
-  }, [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
 
   // ----------------------------------------------------------------------------
   // 4. Logic Callbacks
@@ -873,7 +813,8 @@ export default function App() {
 
   const handleAuthAction = async () => {
     if (!username || !idLast4) return alert('請輸入姓名與 ID 後四碼');
-    if (!supabaseClient && !isMock) return alert('系統未連線至資料庫');
+    if (!supabaseClient) return alert('系統未連線至資料庫');
+    
     setLoading(true);
     const email = encodeName(username + idLast4) + FAKE_DOMAIN;
     const finalIdLast4 = idLast4.trim();
@@ -886,7 +827,6 @@ export default function App() {
             if (error) throw error;
             setUser(data.user);
             setFormData(prev => ({ ...prev, real_name: username }));
-            if (isMock) setIsAdmin(true); 
 
         } else if (authMode === 'signup') {
             if (!password) { setLoading(false); return alert('請設定密碼'); }
@@ -902,7 +842,6 @@ export default function App() {
                 if (data.session) {
                     setUser(data.user);
                     setFormData(prev => ({ ...prev, real_name: finalUsername }));
-                    if(isMock) setIsAdmin(true);
                 } else { alert('請檢查信箱並點擊驗證連結。'); }
             }
         } else if (authMode === 'forgot') {
@@ -1043,7 +982,6 @@ export default function App() {
   };
 
   const handleCreateUser = async () => {
-    if (isMock) { setAllUsers(p => [{ id: String(Date.now()), email: 'new@test.com', user_name: newUser.name, id_last4: newUser.id4, is_admin: false, is_disabled: false }, ...p]); setNewUser({name:'', id4:'', pwd:''}); return; }
     if (!newUser.name || !newUser.id4 || !newUser.pwd) { alert('請輸入完整資料 (姓名、ID、密碼)'); return; }
     const email = encodeName(newUser.name + newUser.id4) + FAKE_DOMAIN;
     const url = typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_SUPABASE_URL : '';
@@ -1117,6 +1055,27 @@ export default function App() {
   // ----------------------------------------------------------------------------
   // 7. More Memos & Render Variables (Must be after Handlers/Helpers)
   // ----------------------------------------------------------------------------
+  const availableCompletedMonths = useMemo(() => {
+      const dates = new Set<string>();
+      hierarchyStatus.completed.forEach(h => {
+          const date = h.option_end_date || h.activity_end_date;
+          if (date) dates.add(date.substring(0, 7)); // YYYY-MM
+      });
+      return [...dates].sort().reverse();
+  }, [hierarchyStatus.completed]);
+
+  const availableCompletedLocActs = useMemo(() => {
+      if (!completedFilterMonth) return [];
+      const locActs = new Set<string>();
+      hierarchyStatus.completed.forEach(h => {
+          const date = h.option_end_date || h.activity_end_date;
+          if (date && date.startsWith(completedFilterMonth)) {
+              locActs.add(`${h.location} | ${h.activity}`);
+          }
+      });
+      return [...locActs].sort();
+  }, [hierarchyStatus.completed, completedFilterMonth]);
+
   const selectedCompletedHierarchy = useMemo(() => {
      if (!completedFilterMonth || !completedFilterLocAct) return [];
      const [loc, act] = completedFilterLocAct.split(' | ');
@@ -1186,6 +1145,25 @@ export default function App() {
       }).sort((a, b) => String(a.activity_option || '').localeCompare(String(b.activity_option || '')));
   }, [notes, completedFilterMonth, completedFilterLocAct, hierarchyData]);
 
+  const filterActivityOptions = useMemo(() => {
+    let source = hierarchyData;
+    if (filterLoc) source = source.filter(h => h.location === filterLoc);
+    return [...new Set(source.map(h => h.activity).filter((a): a is string => !!a))].sort();
+  }, [hierarchyData, filterLoc]);
+
+  const statActivityOptions = useMemo(() => {
+    let source = hierarchyStatus.active; 
+    if (statFilterLoc) source = source.filter(h => h.location === statFilterLoc);
+    return [...new Set(source.map(h => h.activity).filter((a): a is string => !!a))].sort();
+  }, [hierarchyStatus.active, statFilterLoc]);
+
+  const statOptionOptions = useMemo(() => {
+    let source = hierarchyStatus.active;
+    if (statFilterLoc) source = source.filter(h => h.location === statFilterLoc);
+    if (statFilterAct) source = source.filter(h => h.activity === statFilterAct);
+    return [...new Set(source.map(h => h.option).filter((a): a is string => !!a))].sort();
+  }, [hierarchyStatus.active, statFilterLoc, statFilterAct]);
+
   const filteredAdminNotes = useMemo(() => {
     return notes.filter(n => {
         const { isEnded } = getNoteStatus(n); 
@@ -1217,16 +1195,20 @@ export default function App() {
       if (historyFilterLoc) filtered = filtered.filter(n => n.activity_location === historyFilterLoc);
       
       return filtered.sort((a, b) => {
-          // 排序: 進行中 (0) -> 已圓滿 (1) -> 已刪除 (2)
-          const getWeight = (n: Note) => {
-             if (n.is_deleted) return 2;
-             const { isEnded } = getNoteStatus(n);
-             return isEnded ? 1 : 0;
+          // 排序順序: 進行中 (0) -> 已圓滿 (1) -> 已刪除 (2)
+          const getStatusWeight = (n: Note) => {
+              if (n.is_deleted) return 2;
+              const { isEnded } = getNoteStatus(n);
+              if (isEnded) return 1;
+              return 0;
           };
-          const wA = getWeight(a);
-          const wB = getWeight(b);
-          if (wA !== wB) return wA - wB;
           
+          const weightA = getStatusWeight(a);
+          const weightB = getStatusWeight(b);
+          
+          if (weightA !== weightB) return weightA - weightB;
+
+          // 同狀態下，依時間倒序
           const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
           const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
           return dateB - dateA;
@@ -1319,6 +1301,17 @@ export default function App() {
              <h2 className="text-xl font-bold text-[#4f093c] mb-2">學員登記系統</h2>
              <p className="text-sm text-slate-400 font-bold">{authMode === 'login' ? '會員登入' : authMode === 'signup' ? '註冊新帳號' : '密碼重設申請'}</p>
           </div>
+          
+          {/* Missing Supabase Client Warning */}
+          {!supabaseClient && (
+            <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl text-sm font-bold flex items-start gap-2">
+               <ServerCrash className="w-5 h-5 shrink-0 mt-0.5" />
+               <div>
+                  系統無法連線至資料庫。<br/>
+                  <span className="text-xs font-normal text-red-500">請確認環境變數 (URL/KEY) 設定正確。</span>
+               </div>
+            </div>
+          )}
           
           <div className="space-y-4">
              <div>
@@ -1934,7 +1927,7 @@ export default function App() {
                         </td>
                         <td className="p-4 align-top w-40 max-w-[10rem]">
                           <div className="flex flex-col gap-1 break-words whitespace-normal leading-tight">
-                            {mergedRemarks.length > 0 && <div className={subTextStyle}>{mergedRemarks.join(' / ')}</div>}
+                            {mergedRemarks.join(' / ')}
                             {hasMemo && <div className={`${subTextStyle} mt-2 pt-2 border-t border-stone-200/50 border-dashed`}>{String(n.memo)}</div>}
                           </div>
                         </td>
@@ -1963,6 +1956,141 @@ export default function App() {
                 </tbody>
               </table>
             </div>
+          </div>
+        )}
+
+        {/* New Completed Cases Tab */}
+        {activeTab === 'completed_cases' && isAdmin && (
+          <div className="space-y-8 animate-in fade-in">
+             <div className={`p-10 rounded-[40px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}>
+                 <div className="flex justify-between items-center mb-8">
+                     <h3 className="text-3xl font-bold text-[#4f093c] flex items-center gap-2"><Archive className="w-8 h-8"/> 已圓滿案件</h3>
+                     <div className="flex gap-3">
+                         <select 
+                             className="p-3 border-none rounded-xl text-base font-bold text-stone-600 outline-none bg-white shadow-sm"
+                             value={completedFilterMonth}
+                             onChange={(e) => { setCompletedFilterMonth(e.target.value); setCompletedFilterLocAct(''); }}
+                         >
+                             <option value="">請選擇年月...</option>
+                             {availableCompletedMonths.map(m => <option key={m} value={m}>{m}</option>)}
+                         </select>
+
+                         <select 
+                             className="p-3 border-none rounded-xl text-base font-bold text-stone-600 outline-none bg-white shadow-sm max-w-[15rem] truncate"
+                             value={completedFilterLocAct}
+                             onChange={(e) => setCompletedFilterLocAct(e.target.value)}
+                             disabled={!completedFilterMonth}
+                         >
+                             <option value="">請選擇活動...</option>
+                             {availableCompletedLocActs.map(la => <option key={la} value={la}>{la}</option>)}
+                         </select>
+                     </div>
+                 </div>
+
+                 {/* Summary Table */}
+                 <div className="bg-white rounded-3xl p-6 border border-stone-200 mb-10 overflow-hidden">
+                     <h4 className="font-bold text-[#4f093c] text-xl mb-4 pl-2 border-l-4 border-[#4f093c]">活動行程總表</h4>
+                     {selectedCompletedHierarchy.length > 0 ? (
+                         <div className="overflow-x-auto rounded-xl border border-stone-100">
+                             <table className="w-full text-left text-sm">
+                                 <thead className="bg-[#4f093c] text-white font-bold">
+                                     <tr>
+                                         <th className="p-4">行程</th>
+                                         <th className="p-4">截止 / 結束日期</th>
+                                         <th className="p-4 text-center">總人數</th>
+                                         <th className="p-4 text-center">義工</th>
+                                         <th className="p-4 text-center">法會</th>
+                                     </tr>
+                                 </thead>
+                                 <tbody>
+                                     {selectedCompletedHierarchy.map((item, idx) => (
+                                         <tr key={idx} className={`${idx % 2 === 0 ? 'bg-white' : 'bg-stone-100'} hover:bg-stone-200 transition-colors`}>
+                                             <td className="p-4 font-bold text-slate-800">{item.node.option || '(無行程)'}</td>
+                                             <td className="p-4 font-mono text-stone-500">
+                                                 {item.node.option_deadline || item.node.activity_deadline || '-'} / {item.node.option_end_date || item.node.activity_end_date}
+                                             </td>
+                                             <td className="p-4 text-center font-bold text-lg text-slate-800">{item.counts.total}</td>
+                                             <td className="p-4 text-center font-bold text-orange-600">{item.counts.vol}</td>
+                                             <td className="p-4 text-center font-bold text-blue-600">{item.counts.dharma}</td>
+                                         </tr>
+                                     ))}
+                                 </tbody>
+                             </table>
+                         </div>
+                     ) : (
+                         <div className="text-center py-10 text-stone-400 font-bold">請選擇上方篩選條件以檢視資料</div>
+                     )}
+                 </div>
+
+                 {/* Detail Data Table */}
+                 {selectedCompletedHierarchy.length > 0 && (
+                     <div className="bg-white rounded-3xl p-6 border border-stone-200">
+                         <div className="flex justify-between items-center mb-6 pl-2 border-l-4 border-[#4f093c]">
+                             <h4 className="font-bold text-[#4f093c] text-xl">詳細報名資料列表</h4>
+                             <button onClick={() => {/* Reuse existing export logic but pass filtered data */}} className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-emerald-700 shadow-sm flex items-center gap-1">
+                                 <Download className="w-4 h-4"/> 匯出此表
+                             </button>
+                         </div>
+                         
+                         <div className="overflow-x-auto rounded-xl border border-stone-100">
+                             <table className="w-full text-left text-sm table-fixed">
+                                 <thead className="bg-stone-100 text-stone-600 font-bold">
+                                     <tr>
+                                         <th className="p-3 w-[150px]">行程</th>
+                                         <th className="p-3 w-[200px]">姓名資料</th>
+                                         <th className="p-3 w-[200px]">交通住宿</th>
+                                         <th className="p-3 w-[200px]">義工資訊</th>
+                                         <th className="p-3 w-[150px]">備註</th>
+                                         <th className="p-3 w-[120px]">填表資訊</th>
+                                     </tr>
+                                 </thead>
+                                 <tbody className="divide-y divide-stone-100">
+                                     {selectedCompletedNotes.map(n => {
+                                         const rawContents: any = n.selected_contents;
+                                         const safeContents = safeRenderContents(rawContents);
+                                         
+                                         return (
+                                             <tr key={n.id} className="hover:bg-stone-50 transition-colors">
+                                                 <td className="p-3 align-top font-bold text-blue-600">{n.activity_option}</td>
+                                                 <td className="p-3 align-top">
+                                                     <div className="font-bold text-slate-800 text-base">{n.real_name}</div>
+                                                     <div className="text-stone-500 text-xs mt-1">{n.dharma_name ? `${n.dharma_name} / ` : ''}{n.gender} / {n.registrant_type}</div>
+                                                     <div className="text-[#4f093c] font-bold text-xs mt-1">{n.identity}</div>
+                                                 </td>
+                                                 <td className="p-3 align-top text-xs text-stone-600">
+                                                     <div className="font-bold">{n.transportation}</div>
+                                                     {(n.arrival_datetime || n.departure_datetime) && <div className="mt-1">抵: {formatDateTime(n.arrival_datetime)?.split(' ')[1]}<br/>離: {formatDateTime(n.departure_datetime)?.split(' ')[1]}</div>}
+                                                     <div className="mt-1 border-t border-stone-100 pt-1">{n.accommodation_option}</div>
+                                                 </td>
+                                                 <td className="p-3 align-top text-xs text-stone-600">
+                                                     {n.identity === '發心義工' ? (
+                                                         <>
+                                                             <div className="font-bold">{simplifyVolunteerType(n.volunteer_type)}</div>
+                                                             <div>{n.volunteer_group}</div>
+                                                             {(n.start_date || n.end_date) && <div className="mt-1 text-stone-400">起: {formatDateTime(n.start_date)?.split(' ')[0]}<br/>迄: {formatDateTime(n.end_date)?.split(' ')[0]}</div>}
+                                                         </>
+                                                     ) : '-'}
+                                                 </td>
+                                                 <td className="p-3 align-top text-xs text-stone-600">
+                                                     {safeContents.length > 0 && <div className="mb-1 text-orange-600 font-bold">{safeContents}</div>}
+                                                     {n.other_remarks && <div className="mb-1">自訂: {String(n.other_remarks)}</div>}
+                                                     {n.memo && <div className="italic text-stone-400">備註: {String(n.memo)}</div>}
+                                                 </td>
+                                                 <td className="p-3 align-top text-xs text-stone-400">
+                                                     <div>{n.sign_name}</div>
+                                                     <div>{formatDateTime(n.created_at)?.split(' ')[0]}</div>
+                                                     <div className={`mt-1 font-bold ${n.registration_option === '新增' ? 'text-emerald-500' : 'text-amber-500'}`}>{n.registration_option}</div>
+                                                 </td>
+                                             </tr>
+                                         );
+                                     })}
+                                     {selectedCompletedNotes.length === 0 && <tr><td colSpan={6} className="p-4 text-center text-stone-400">此條件下無報名資料</td></tr>}
+                                 </tbody>
+                             </table>
+                         </div>
+                     </div>
+                 )}
+             </div>
           </div>
         )}
 
