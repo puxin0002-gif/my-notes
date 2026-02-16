@@ -9,29 +9,69 @@ import {
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
-/**
- * 系統版本：v87.81 (編譯錯誤終極修復版)
- * 修正說明：
- * 1. [Fix] 徹底清除檔案中重複宣告的變數與函式 (fetchData, handleAuthAction 等)，解決編譯失敗。
- * 2. [Confirm] 確認已移除「資料」頁籤的欄寬調整功能。
- * 3. [System] 完整保留 v87.65 功能：
- * - 移除「修復資料 ID」功能。
- * - 「已圓滿活動列表」新增「圓滿年/月」篩選，未選不顯示。
- * - 「已圓滿活動列表」同一行程且同一圓滿日者自動合併。
- * - 「已圓滿活動列表」樣式調整為表格，字體改為黑色。
- */
+// ============================================================================
+// 1. 全域型別與常數 (Global Types & Constants)
+// ============================================================================
+declare global {
+  interface Window {
+    supabase: any;
+    XLSX: any;
+    html2canvas: any;
+    jspdf: any;
+  }
+}
 
-// --- 主色系設定 ---
+const FAKE_DOMAIN = "@my-notes.com";
 const PRIMARY_COLOR = "#4f093c"; 
-const BG_WARM_BEIGE = "#FDFCF8"; // 背景色
-const CARD_BG_COLOR = "#f0e6d5"; // 內容區塊底色
+const BG_WARM_BEIGE = "#FDFCF8";
+const CARD_BG_COLOR = "#f0e6d5";
 
-// --- 內嵌 Logo ---
-const CustomLogo = ({ className }: { className?: string }) => (
-  <img src="/logo.png" alt="Logo" className={`${className} rounded-full object-cover border-2 border-white/20 shadow-md`} />
-);
+const INITIAL_FORM_DATA = {
+  real_name: '', dharma_name: '', gender: '', registrant_type: '禪修班學員', registration_option: '新增',
+  activity_location: '', activity_name: '', activity_option: '',
+  selected_contents: [] as string[], 
+  other_remarks: '', memo: '',
+  identity: '參加法會', 
+  volunteer_type: '一般義工-精舍設定組別', transportation: '',
+  arrival_datetime: '', departure_datetime: '', volunteer_group: '', 
+  start_date: '', end_date: '', accommodation_option: '不安單', 
+  stay_start_date: '', stay_end_date: ''
+};
 
-// --- 型別定義 ---
+interface FieldDefinition {
+  id?: string;
+  field_key: string;
+  field_label: string;
+  field_type: string;
+  is_required: boolean;
+  description: string;
+}
+
+const DEFAULT_FIELD_DEFINITIONS: FieldDefinition[] = [
+  { field_key: 'real_name', field_label: '姓名', field_type: '文字', is_required: true, description: '真實姓名' },
+  { field_key: 'dharma_name', field_label: '法名', field_type: '文字', is_required: false, description: '' },
+  { field_key: 'gender', field_label: '性別', field_type: '文字', is_required: true, description: '男/女' },
+  { field_key: 'registrant_type', field_label: '屬性', field_type: '文字', is_required: true, description: '學員身分' },
+  { field_key: 'registration_option', field_label: '報名選項', field_type: '文字', is_required: true, description: '新增或異動' },
+  { field_key: 'activity_location', field_label: '活動地點', field_type: '文字', is_required: true, description: '' },
+  { field_key: 'activity_name', field_label: '活動名稱', field_type: '文字', is_required: true, description: '' },
+  { field_key: 'activity_option', field_label: '活動行程', field_type: '文字', is_required: true, description: '' },
+  { field_key: 'selected_contents', field_label: '勾選內容', field_type: '文字陣列', is_required: false, description: '' },
+  { field_key: 'other_remarks', field_label: '自訂備註', field_type: '文字', is_required: false, description: '僅自訂行程出現' },
+  { field_key: 'identity', field_label: '身分', field_type: '文字', is_required: true, description: '法會或義工' },
+  { field_key: 'volunteer_type', field_label: '義工選項', field_type: '文字', is_required: false, description: '' },
+  { field_key: 'transportation', field_label: '交通', field_type: '文字', is_required: false, description: '' },
+  { field_key: 'arrival_datetime', field_label: '抵寺時間', field_type: '日期', is_required: false, description: '' },
+  { field_key: 'departure_datetime', field_label: '離寺時間', field_type: '日期', is_required: false, description: '' },
+  { field_key: 'volunteer_group', field_label: '義工組別', field_type: '文字', is_required: false, description: '' },
+  { field_key: 'start_date', field_label: '發心開始', field_type: '日期', is_required: false, description: '' },
+  { field_key: 'end_date', field_label: '發心結束', field_type: '日期', is_required: false, description: '' },
+  { field_key: 'accommodation_option', field_label: '安單選項', field_type: '文字', is_required: false, description: '' },
+  { field_key: 'stay_start_date', field_label: '安單開始', field_type: '日期', is_required: false, description: '' },
+  { field_key: 'stay_end_date', field_label: '安單結束', field_type: '日期', is_required: false, description: '' },
+  { field_key: 'memo', field_label: '其他備註', field_type: '文字', is_required: false, description: '固定顯示' },
+];
+
 interface ActivityHierarchy {
   id: string;
   location: string;
@@ -49,25 +89,22 @@ interface Note {
   user_id: string;
   real_name: string;
   dharma_name?: string;
-  gender: string; // 性別
+  gender: string;
   registrant_type: string;
   registration_option: string;
   activity_location: string;
   activity_name: string;
   activity_option: string;
-  
-  // 新增活動關聯 ID
   activity_id?: string;
-
   selected_contents: string[];
   other_remarks?: string;
   memo?: string;
   identity: string;
-  volunteer_type?: string;
+  volunteer_type?: string | null;
   transportation: string;
   arrival_datetime: string | null;
   departure_datetime: string | null;
-  volunteer_group?: string;
+  volunteer_group?: string | null;
   start_date: string | null;
   end_date: string | null;
   accommodation_option: string;
@@ -108,59 +145,18 @@ interface ResetRequest {
   created_at: string;
 }
 
-// 欄位定義
-interface FieldDefinition {
-  id?: string;
-  field_key: string;
-  field_label: string;
-  field_type: string;
-  is_required: boolean;
-  description: string;
-}
+// ============================================================================
+// 2. 輔助函式 (Helper Functions)
+// ============================================================================
 
-const DEFAULT_FIELD_DEFINITIONS: FieldDefinition[] = [
-  { field_key: 'real_name', field_label: '姓名', field_type: '文字', is_required: true, description: '真實姓名' },
-  { field_key: 'dharma_name', field_label: '法名', field_type: '文字', is_required: false, description: '' },
-  { field_key: 'gender', field_label: '性別', field_type: '文字', is_required: true, description: '男/女' },
-  { field_key: 'registrant_type', field_label: '屬性', field_type: '文字', is_required: true, description: '學員身分' },
-  { field_key: 'registration_option', field_label: '報名選項', field_type: '文字', is_required: true, description: '新增或異動' },
-  { field_key: 'activity_location', field_label: '活動地點', field_type: '文字', is_required: true, description: '' },
-  { field_key: 'activity_name', field_label: '活動名稱', field_type: '文字', is_required: true, description: '' },
-  { field_key: 'activity_option', field_label: '活動行程', field_type: '文字', is_required: true, description: '' },
-  { field_key: 'selected_contents', field_label: '勾選內容', field_type: '文字陣列', is_required: false, description: '' },
-  { field_key: 'other_remarks', field_label: '自訂備註', field_type: '文字', is_required: false, description: '僅自訂行程出現' },
-  { field_key: 'identity', field_label: '身分', field_type: '文字', is_required: true, description: '法會或義工' },
-  { field_key: 'volunteer_type', field_label: '義工選項', field_type: '文字', is_required: false, description: '' },
-  { field_key: 'transportation', field_label: '交通', field_type: '文字', is_required: false, description: '' },
-  { field_key: 'arrival_datetime', field_label: '抵寺時間', field_type: '日期', is_required: false, description: '' },
-  { field_key: 'departure_datetime', field_label: '離寺時間', field_type: '日期', is_required: false, description: '' },
-  { field_key: 'volunteer_group', field_label: '義工組別', field_type: '文字', is_required: false, description: '' },
-  { field_key: 'start_date', field_label: '發心開始', field_type: '日期', is_required: false, description: '' },
-  { field_key: 'end_date', field_label: '發心結束', field_type: '日期', is_required: false, description: '' },
-  { field_key: 'accommodation_option', field_label: '安單選項', field_type: '文字', is_required: false, description: '' },
-  { field_key: 'stay_start_date', field_label: '安單開始', field_type: '日期', is_required: false, description: '' },
-  { field_key: 'stay_end_date', field_label: '安單結束', field_type: '日期', is_required: false, description: '' },
-  { field_key: 'memo', field_label: '其他備註', field_type: '文字', is_required: false, description: '固定顯示' },
-];
-
-declare global {
-  interface Window {
-    supabase: any;
-    XLSX: any;
-    html2canvas: any;
-    jspdf: any;
-  }
-}
-
-const FAKE_DOMAIN = "@my-notes.com";
-
-// --- 輔助函式 ---
 const encodeName = (name: string): string => {
   try { let hex = ''; for (let i = 0; i < name.length; i++) hex += ('0000' + name.charCodeAt(i).toString(16)).slice(-4); return hex; } catch { return name; }
 };
+
 const decodeName = (email: string): string => {
   try { const hex = email.split('@')[0]; let str = ''; for (let i = 0; i < hex.length; i += 4) str += String.fromCharCode(parseInt(hex.substr(i, 4), 16)); return str; } catch { return email?.split('@')[0] || ''; }
 };
+
 const getDisplayNameOnly = (email: string | undefined | null): string => {
   if (!email) return 'User';
   try {
@@ -170,6 +166,7 @@ const getDisplayNameOnly = (email: string | undefined | null): string => {
     return str.length > 4 ? str.slice(0, -4) : str;
   } catch { return email.split('@')[0]; }
 };
+
 const getIdLast4FromEmail = (email: string | undefined | null): string => {
   if (!email) return '0000';
   try {
@@ -192,18 +189,6 @@ const formatDateTime = (isoString: string | undefined | null): string => {
   } catch { return isoString || '-'; }
 };
 
-const formatDateOnly = (isoString: string | undefined | null): string => {
-  if (!isoString) return '-';
-  try {
-    if (isoString.length === 10 && !isoString.includes('T') && !isoString.includes(' ')) {
-        return isoString.replace(/-/g, '/');
-    }
-    const d = new Date(isoString);
-    if (isNaN(d.getTime())) return isoString;
-    return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
-  } catch { return isoString; }
-};
-
 const simplifyVolunteerType = (type: string | undefined | null) => {
   if (!type) return '';
   if (type.includes('一般義工')) return '一般義工';
@@ -224,37 +209,33 @@ const renderBulletinContent = (content: string) => {
   });
 };
 
-const INITIAL_FORM_DATA = {
-  real_name: '', dharma_name: '', gender: '', registrant_type: '禪修班學員', registration_option: '新增',
-  activity_location: '', activity_name: '', activity_option: '',
-  selected_contents: [] as string[], 
-  other_remarks: '', memo: '',
-  identity: '參加法會', 
-  volunteer_type: '一般義工-精舍設定組別', transportation: '',
-  arrival_datetime: '', departure_datetime: '', volunteer_group: '', 
-  start_date: '', end_date: '', accommodation_option: '不安單', 
-  stay_start_date: '', stay_end_date: ''
-};
-
 const getLocalTodayDate = () => {
   const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 };
 
 const getLocalTodayDateTime = () => {
   const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  const hours = String(now.getHours()).padStart(2, '0');
-  const minutes = String(now.getMinutes()).padStart(2, '0');
-  return `${year}-${month}-${day}T${hours}:${minutes}`;
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}T${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 };
 
-// --- PDF 匯出工具函式 ---
+const safeRenderContents = (contents: any): string => {
+    if (!contents) return '';
+    if (Array.isArray(contents)) {
+        return contents.map(c => typeof c === 'string' ? c : JSON.stringify(c)).join('、');
+    }
+    if (typeof contents === 'string') {
+        if (contents.startsWith('[') && contents.endsWith(']')) {
+            try {
+                const parsed = JSON.parse(contents);
+                if (Array.isArray(parsed)) return parsed.join('、');
+            } catch (e) { return contents; }
+        }
+        return contents;
+    }
+    return JSON.stringify(contents);
+};
+
 const downloadPDF = async (elementId: string, title: string) => {
     if (!window.html2canvas || !window.jspdf) {
         try {
@@ -291,12 +272,7 @@ const downloadPDF = async (elementId: string, title: string) => {
     try {
         const titleDiv = document.createElement('div');
         titleDiv.innerText = title;
-        titleDiv.style.textAlign = 'center';
-        titleDiv.style.fontSize = '24px';
-        titleDiv.style.fontWeight = 'bold';
-        titleDiv.style.marginBottom = '20px';
-        titleDiv.style.color = '#4f093c';
-        titleDiv.style.fontFamily = 'sans-serif'; 
+        Object.assign(titleDiv.style, { textAlign: 'center', fontSize: '24px', fontWeight: 'bold', marginBottom: '20px', color: '#4f093c', fontFamily: 'sans-serif' });
         
         element.insertBefore(titleDiv, element.firstChild);
         await new Promise(r => setTimeout(r, 100));
@@ -315,12 +291,9 @@ const downloadPDF = async (elementId: string, title: string) => {
         const pdf = new jsPDF('p', 'mm', 'a4');
         const pdfWidth = pdf.internal.pageSize.getWidth();
         const pdfHeight = pdf.internal.pageSize.getHeight();
-        
-        const imgProps = pdf.getImageProperties(imgData);
-        const imgHeight = (imgProps.height * pdfWidth) / imgProps.width;
+        const imgHeight = (pdf.getImageProperties(imgData).height * pdfWidth) / pdf.getImageProperties(imgData).width;
         
         const pageHeight = pdfHeight - 20;
-
         let heightLeft = imgHeight;
         let position = 10; 
         let pageNum = 1;
@@ -345,67 +318,24 @@ const downloadPDF = async (elementId: string, title: string) => {
     } catch (err) {
         console.error(err);
         alert('匯出 PDF 失敗');
-        const element = document.getElementById(elementId);
-        if (element && element.firstChild && element.firstChild.textContent === title) {
-             element.removeChild(element.firstChild);
-        }
     }
 };
 
-// --- 統計圖表組件 ---
-const StatsBarChart = ({ title, data }: { title: string, data: Record<string, { dharma_m: number, dharma_f: number, vol_m: number, vol_f: number }> }) => {
-  const keys = Object.keys(data).sort((a, b) => {
-      const totalA = data[a].dharma_m + data[a].dharma_f + data[a].vol_m + data[a].vol_f;
-      const totalB = data[b].dharma_m + data[b].dharma_f + data[b].vol_m + data[b].vol_f;
-      return totalB - totalA;
-  });
+// ============================================================================
+// 3. 子組件 (Sub-Components)
+// ============================================================================
 
-  return (
-    <div className="bg-white p-8 rounded-3xl shadow-sm border border-stone-100 h-auto break-inside-avoid">
-      <h4 className="font-bold text-[#4f093c] text-2xl mb-8 flex items-center gap-2">
-        <BarChart3 className="w-6 h-6"/> {title}
-      </h4>
-      <div className="space-y-8">
-        {keys.length === 0 ? (
-           <div className="text-center text-stone-300 py-10 font-bold text-xl">無資料</div>
-        ) : (
-           keys.map(key => {
-             const d = data[key];
-             const total = d.dharma_m + d.dharma_f + d.vol_m + d.vol_f;
-             if (total === 0) return null;
-             
-             const getPct = (val: number) => total > 0 ? (val / total) * 100 : 0;
+const CustomLogo = ({ className }: { className?: string }) => (
+  <img src="/logo.png" alt="Logo" className={`${className} rounded-full object-cover border-2 border-white/20 shadow-md`} />
+);
 
-             return (
-               <div key={key} className="space-y-3 pb-6 border-b border-stone-100 last:border-0 last:pb-0 break-inside-avoid">
-                 <div className="flex justify-between items-end pb-2">
-                   <span className="font-bold text-slate-700 text-xl max-w-[70%] leading-normal whitespace-normal">{key || '未指定'}</span>
-                   <span className="font-black text-[#4f093c] text-3xl whitespace-nowrap">{total} <span className="text-sm font-bold text-slate-400">人</span></span>
-                 </div>
-                 
-                 <div className="h-6 w-full bg-stone-100 rounded-lg overflow-hidden flex shadow-inner">
-                   {d.dharma_m > 0 && <div style={{ width: `${getPct(d.dharma_m)}%` }} className="bg-blue-600 h-full" />}
-                   {d.dharma_f > 0 && <div style={{ width: `${getPct(d.dharma_f)}%` }} className="bg-blue-300 h-full" />}
-                   {d.vol_m > 0 && <div style={{ width: `${getPct(d.vol_m)}%` }} className="bg-orange-500 h-full" />}
-                   {d.vol_f > 0 && <div style={{ width: `${getPct(d.vol_f)}%` }} className="bg-orange-300 h-full" />}
-                 </div>
-
-                 <div className="grid grid-cols-4 gap-2 text-center bg-stone-50 p-3 rounded-xl border border-stone-100">
-                    <div className="flex flex-col"><span className="text-blue-700 font-bold text-base">法會(男)</span><span className="text-slate-700 font-bold text-xl">{d.dharma_m}</span></div>
-                    <div className="flex flex-col border-l border-stone-200"><span className="text-blue-400 font-bold text-base">法會(女)</span><span className="text-slate-700 font-bold text-xl">{d.dharma_f}</span></div>
-                    <div className="flex flex-col border-l border-stone-200"><span className="text-orange-600 font-bold text-base">義工(男)</span><span className="text-slate-700 font-bold text-xl">{d.vol_m}</span></div>
-                    <div className="flex flex-col border-l border-stone-200"><span className="text-orange-400 font-bold text-base">義工(女)</span><span className="text-slate-700 font-bold text-xl">{d.vol_f}</span></div>
-                 </div>
-               </div>
-             );
-           })
-        )}
-      </div>
+const OverviewCard = ({ title, count, icon: Icon, color }: { title: string, count: number, icon: any, color: string }) => (
+    <div className="bg-white p-6 rounded-2xl shadow-sm border border-stone-100 flex items-center gap-5 break-inside-avoid">
+        <div className={`p-4 rounded-full ${color} text-white`}><Icon className="w-8 h-8"/></div>
+        <div><p className="text-base text-stone-400 font-bold">{title}</p><p className="text-4xl font-black text-slate-800">{count}</p></div>
     </div>
-  );
-};
+);
 
-// --- 身分比例結構圖 ---
 const IdentityRatioChart = ({ data }: { data: Record<string, { dharma_m: number, dharma_f: number, vol_m: number, vol_f: number }> }) => {
     
     const dharmaData = data['參加法會'] || { dharma_m: 0, dharma_f: 0, vol_m: 0, vol_f: 0 };
@@ -470,14 +400,66 @@ const IdentityRatioChart = ({ data }: { data: Record<string, { dharma_m: number,
     );
 };
 
-const OverviewCard = ({ title, count, icon: Icon, color }: { title: string, count: number, icon: any, color: string }) => (
-    <div className="bg-white p-6 rounded-2xl shadow-sm border border-stone-100 flex items-center gap-5 break-inside-avoid">
-        <div className={`p-4 rounded-full ${color} text-white`}><Icon className="w-8 h-8"/></div>
-        <div><p className="text-base text-stone-400 font-bold">{title}</p><p className="text-4xl font-black text-slate-800">{count}</p></div>
-    </div>
-);
+const StatsBarChart = ({ title, data }: { title: string, data: Record<string, { dharma_m: number, dharma_f: number, vol_m: number, vol_f: number }> }) => {
+  const keys = Object.keys(data).sort((a, b) => {
+      const totalA = data[a].dharma_m + data[a].dharma_f + data[a].vol_m + data[a].vol_f;
+      const totalB = data[b].dharma_m + data[b].dharma_f + data[b].vol_m + data[b].vol_f;
+      return totalB - totalA;
+  });
 
+  return (
+    <div className="bg-white p-8 rounded-3xl shadow-sm border border-stone-100 h-auto break-inside-avoid">
+      <h4 className="font-bold text-[#4f093c] text-2xl mb-8 flex items-center gap-2">
+        <BarChart3 className="w-6 h-6"/> {title}
+      </h4>
+      <div className="space-y-8">
+        {keys.length === 0 ? (
+           <div className="text-center text-stone-300 py-10 font-bold text-xl">無資料</div>
+        ) : (
+           keys.map(key => {
+             const d = data[key];
+             const total = d.dharma_m + d.dharma_f + d.vol_m + d.vol_f;
+             if (total === 0) return null;
+             
+             const getPct = (val: number) => total > 0 ? (val / total) * 100 : 0;
+
+             return (
+               <div key={key} className="space-y-3 pb-6 border-b border-stone-100 last:border-0 last:pb-0 break-inside-avoid">
+                 <div className="flex justify-between items-end pb-2">
+                   <span className="font-bold text-slate-700 text-xl max-w-[70%] leading-normal whitespace-normal">{key || '未指定'}</span>
+                   <span className="font-black text-[#4f093c] text-3xl whitespace-nowrap">{total} <span className="text-sm font-bold text-slate-400">人</span></span>
+                 </div>
+                 
+                 <div className="h-6 w-full bg-stone-100 rounded-lg overflow-hidden flex shadow-inner">
+                   {d.dharma_m > 0 && <div style={{ width: `${getPct(d.dharma_m)}%` }} className="bg-blue-600 h-full" />}
+                   {d.dharma_f > 0 && <div style={{ width: `${getPct(d.dharma_f)}%` }} className="bg-blue-300 h-full" />}
+                   {d.vol_m > 0 && <div style={{ width: `${getPct(d.vol_m)}%` }} className="bg-orange-500 h-full" />}
+                   {d.vol_f > 0 && <div style={{ width: `${getPct(d.vol_f)}%` }} className="bg-orange-300 h-full" />}
+                 </div>
+
+                 <div className="grid grid-cols-4 gap-2 text-center bg-stone-50 p-3 rounded-xl border border-stone-100">
+                    <div className="flex flex-col"><span className="text-blue-700 font-bold text-base">法會(男)</span><span className="text-slate-700 font-bold text-xl">{d.dharma_m}</span></div>
+                    <div className="flex flex-col border-l border-stone-200"><span className="text-blue-400 font-bold text-base">法會(女)</span><span className="text-slate-700 font-bold text-xl">{d.dharma_f}</span></div>
+                    <div className="flex flex-col border-l border-stone-200"><span className="text-orange-600 font-bold text-base">義工(男)</span><span className="text-slate-700 font-bold text-xl">{d.vol_m}</span></div>
+                    <div className="flex flex-col border-l border-stone-200"><span className="text-orange-400 font-bold text-base">義工(女)</span><span className="text-slate-700 font-bold text-xl">{d.vol_f}</span></div>
+                 </div>
+               </div>
+             );
+           })
+        )}
+      </div>
+    </div>
+  );
+};
+
+
+// ============================================================================
+// 4. 主元件 App (Main Component)
+// ============================================================================
 export default function App() {
+  // ----------------------------------------------------------------------------
+  // 1. Hooks & State
+  // ----------------------------------------------------------------------------
   const [supabaseClient, setSupabaseClient] = useState<any>(null);
   const [user, setUser] = useState<any>(null);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
@@ -512,16 +494,18 @@ export default function App() {
   const [searchText, setSearchText] = useState<string>('');
   
   // 資料狀態篩選
+  // Removed toggle, default to 'active' for Admin Data tab
   const [dataViewType, setDataViewType] = useState<'active' | 'completed'>('active');
 
   // 統計頁籤的篩選器
   const [statFilterLoc, setStatFilterLoc] = useState<string>('');
   const [statFilterAct, setStatFilterAct] = useState<string>('');
-  const [statFilterOpt, setStatFilterOpt] = useState<string>(''); // v87.59 新增
+  const [statFilterOpt, setStatFilterOpt] = useState<string>('');
   const [statsViewType, setStatsViewType] = useState<'active' | 'completed'>('active');
 
-  // v87.65: 已圓滿活動列表篩選器
-  const [completedFilterDate, setCompletedFilterDate] = useState<string>('');
+  // 結案頁籤篩選器
+  const [completedFilterMonth, setCompletedFilterMonth] = useState<string>('');
+  const [completedFilterLocAct, setCompletedFilterLocAct] = useState<string>('');
 
   const [formData, setFormData] = useState(INITIAL_FORM_DATA);
 
@@ -540,6 +524,7 @@ export default function App() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // 2. Effects
   useEffect(() => {
     setTodayDate(getLocalTodayDate());
     setCurrentDateTime(getLocalTodayDateTime());
@@ -566,6 +551,13 @@ export default function App() {
     loadSupabase();
   }, []);
 
+  // Update isAdmin when isMock changes
+  useEffect(() => {
+    if (isMock && user) {
+        setIsAdmin(true);
+    }
+  }, [isMock, user]);
+
   const fetchFieldConfigs = useCallback(async () => {
     if (!supabaseClient) return;
     const { data } = await supabaseClient.from('field_definitions').select('*').order('field_key');
@@ -582,8 +574,38 @@ export default function App() {
 
   const fetchData = useCallback(async () => {
     if (isMock) { 
+      // Generate full mock data for all tabs
       setBulletins([{ id: '1', content: "🎉 歡迎使用 (展示模式)", created_at: new Date().toISOString() }]);
-      setHierarchyData([{ id: '1', location: "中台", activity: "禪修", option: "一般", content: null }]);
+      setHierarchyData([
+          { id: '1', location: "中台", activity: "禪修", option: "一般", content: null },
+          // 已圓滿的活動架構
+          { id: '2', location: "中台", activity: "已圓滿活動", option: "梯次A", content: null, option_end_date: "2023-01-01" },
+          { id: '3', location: "中台", activity: "已圓滿活動", option: "梯次B", content: null, option_end_date: "2023-01-01" }
+      ]);
+      setNotes([
+          {
+            id: '1', user_id: 'mock_uid', real_name: '測試員', dharma_name: '', gender: '男', registrant_type: '禪修班學員', registration_option: '新增',
+            activity_location: '中台', activity_name: '禪修', activity_option: '一般', selected_contents: [], other_remarks: '', memo: '', identity: '參加法會', 
+            volunteer_type: null, transportation: '自行前往', arrival_datetime: null, departure_datetime: null, volunteer_group: null, start_date: null, end_date: null, accommodation_option: '不安單', stay_start_date: null, stay_end_date: null,
+            is_deleted: false, audit_status: '免審核', created_at: new Date().toISOString()
+          },
+          // 已圓滿的報名資料
+          {
+            id: '2', user_id: 'mock_uid', real_name: '舊學員', dharma_name: '', gender: '女', registrant_type: '上過課學員', registration_option: '新增',
+            activity_location: '中台', activity_name: '已圓滿活動', activity_option: '梯次A', selected_contents: [], other_remarks: '', memo: '', identity: '參加法會',
+            volunteer_type: null, transportation: '大車', arrival_datetime: null, departure_datetime: null, volunteer_group: null, start_date: null, end_date: null, accommodation_option: '不安單', stay_start_date: null, stay_end_date: null,
+            is_deleted: false, audit_status: '免審核', created_at: "2022-12-31T00:00:00.000Z", saved_end_date: "2023-01-01"
+          },
+          // 已刪除的資料
+          {
+            id: '3', user_id: 'mock_uid', real_name: '刪除者', dharma_name: '', gender: '男', registrant_type: '禪修班學員', registration_option: '新增',
+            activity_location: '中台', activity_name: '禪修', activity_option: '一般', selected_contents: [], other_remarks: '', memo: '', identity: '參加法會', 
+            volunteer_type: null, transportation: '自行前往', arrival_datetime: null, departure_datetime: null, volunteer_group: null, start_date: null, end_date: null, accommodation_option: '不安單', stay_start_date: null, stay_end_date: null,
+            is_deleted: true, audit_status: '免審核', created_at: "2023-12-31T00:00:00.000Z"
+          }
+      ]);
+      setAllUsers([{ id: '1', email: 'admin@test.com', user_name: '管理員', id_last4: '0000', is_admin: true, is_disabled: false, uid: 'mock_admin' }]);
+      setResetRequests([{ id: '1', user_name: '申請人', id_last4: '1234', uid: 'mock_req', status: 'pending', created_at: new Date().toISOString() }]);
       return; 
     }
     if (!supabaseClient) return;
@@ -602,34 +624,253 @@ export default function App() {
     } catch (err) { }
   }, [supabaseClient, isMock, fetchFieldConfigs]);
 
-  useEffect(() => {
-    if (user && supabaseClient) {
-      fetchData();
-      supabaseClient.from('user_permissions').select('is_admin').eq('uid', user.id).maybeSingle()
-      .then(({ data }: any) => { if (data) setIsAdmin(data.is_admin === true); });
-      
-      const metaName = user.user_metadata?.user_name;
-      const metaId4 = user.user_metadata?.id_last4;
-      if (metaName && metaId4) {
-           supabaseClient.from('user_permissions').select('id, id_last4').eq('uid', user.id).maybeSingle()
-           .then(async ({ data: existing }: any) => {
-               if (!existing || existing.id_last4 !== metaId4) {
-                   if(existing) await supabaseClient.from('user_permissions').delete().eq('uid', user.id);
-                   await supabaseClient.from('user_permissions').insert([{
-                       uid: user.id, email: user.email, user_name: metaName, id_last4: metaId4,
-                       is_admin: false, is_disabled: false, created_at: new Date().toISOString()
-                   }]);
-               }
-           });
-      }
-      const channel = supabaseClient.channel('db-all-sync')
-        .on('postgres_changes', { event: '*', schema: 'public', table: '*' }, fetchData)
-        .subscribe();
-      return () => { supabaseClient.removeChannel(channel); };
-    }
-  }, [user, fetchData, supabaseClient]);
+  // ----------------------------------------------------------------------------
+  // 3. Memos (Computations for Logic) - Defined BEFORE usage
+  // ----------------------------------------------------------------------------
+  const hierarchyStatus = useMemo(() => {
+      const active: ActivityHierarchy[] = [];
+      const completed: ActivityHierarchy[] = [];
+      hierarchyData.forEach(h => {
+          const endDate = h.option_end_date || h.activity_end_date;
+          if (endDate && endDate < todayDate) completed.push(h);
+          else active.push(h);
+      });
+      return { active, completed };
+  }, [hierarchyData, todayDate]);
 
-  // --- Auth & other handlers ---
+  const locations = useMemo(() => [...new Set(hierarchyStatus.active.map(h => h.location).filter(Boolean))].sort(), [hierarchyStatus.active]);
+  const availableActivities = useMemo(() => [...new Set(hierarchyStatus.active.filter(h => h.location === formData.activity_location && h.activity).map(h => h.activity as string))].sort(), [hierarchyStatus.active, formData.activity_location]);
+  const availableOptions = useMemo(() => [...new Set(hierarchyStatus.active.filter(h => h.location === formData.activity_location && h.activity === formData.activity_name && h.option).map(h => h.option as string))].sort(), [hierarchyStatus.active, formData.activity_location, formData.activity_name]);
+  const availableContents = useMemo(() => hierarchyStatus.active.filter(h => h.location === formData.activity_location && h.activity === formData.activity_name && h.option === formData.activity_option && h.content).map(h => h.content as string).sort(), [hierarchyStatus.active, formData.activity_location, formData.activity_name, formData.activity_option]);
+  
+  const filteredTransportOptions = useMemo(() => {
+    const all = ["大車-精舍統一行程", "小車-自訂抵離寺", "自行前往-自訂抵離寺"];
+    if (formData.activity_option && formData.activity_option.includes('自訂行程')) {
+        const customOptions = all.filter(o => !o.includes("大車"));
+        customOptions.push("其他-自訂抵離寺");
+        return customOptions;
+    }
+    return all;
+  }, [formData.activity_option]);
+
+  // UseEffect for Transport Auto-select (Needs filteredTransportOptions)
+  useEffect(() => {
+    const hasLargeBus = filteredTransportOptions.some(o => o.includes("大車"));
+    setFormData(prev => ({ ...prev, transportation: hasLargeBus ? "大車-精舍統一行程" : "小車-自訂抵離寺" }));
+  }, [filteredTransportOptions]);
+
+  // UseEffect for Date Auto-fill
+  useEffect(() => { 
+      if (formData.arrival_datetime) {
+          const fullDateTime = formData.arrival_datetime;
+          const dateOnly = formData.arrival_datetime.split('T')[0];
+          setFormData(p => ({ ...p, start_date: p.start_date || fullDateTime, stay_start_date: p.stay_start_date || dateOnly }));
+      }
+  }, [formData.arrival_datetime]);
+  
+  useEffect(() => { 
+      if (formData.departure_datetime) {
+          const fullDateTime = formData.departure_datetime;
+          const dateOnly = formData.departure_datetime.split('T')[0];
+          setFormData(p => ({ ...p, end_date: p.end_date || fullDateTime, stay_end_date: p.stay_end_date || dateOnly }));
+      }
+  }, [formData.departure_datetime]);
+
+  const fieldVisibility = useMemo(() => {
+    const isJingshe = formData.activity_location === '精舍';
+    const isZhongtai = formData.activity_location === '中台';
+    const isVolunteer = formData.identity === '發心義工';
+    const isBus = formData.transportation === '大車-精舍統一行程';
+    const isOneDay = formData.activity_option.includes('當天來回');
+    const needsAccommodation = formData.accommodation_option === '須安單';
+
+    return {
+      transportation: !isJingshe,
+      volunteerGroup: isVolunteer,
+      volunteerType: isZhongtai && isVolunteer,
+      volunteerDates: !isJingshe && isVolunteer, 
+      arrivalDeparture: !isJingshe && !isBus,    
+      accommodation: !isJingshe && !isBus && !isOneDay,
+      accommodationDates: (!isJingshe && !isBus && !isOneDay) && needsAccommodation 
+    };
+  }, [formData]);
+
+  const availableCompletedMonths = useMemo(() => {
+      const dates = new Set<string>();
+      hierarchyStatus.completed.forEach(h => {
+          const date = h.option_end_date || h.activity_end_date;
+          if (date) dates.add(date.substring(0, 7)); // YYYY-MM
+      });
+      return [...dates].sort().reverse();
+  }, [hierarchyStatus.completed]);
+
+  const availableCompletedLocActs = useMemo(() => {
+      if (!completedFilterMonth) return [];
+      const locActs = new Set<string>();
+      hierarchyStatus.completed.forEach(h => {
+          const date = h.option_end_date || h.activity_end_date;
+          if (date && date.startsWith(completedFilterMonth)) {
+              locActs.add(`${h.location} | ${h.activity}`);
+          }
+      });
+      return [...locActs].sort();
+  }, [hierarchyStatus.completed, completedFilterMonth]);
+
+  const adminActivities = useMemo(() => [...new Set(hierarchyStatus.active.filter(h => h.location === mgmtSelectedLoc && h.activity).map(h => h.activity as string))].sort(), [hierarchyStatus.active, mgmtSelectedLoc]);
+  const adminOptions = useMemo(() => [...new Set(hierarchyStatus.active.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option).map(h => h.option as string))].sort(), [hierarchyStatus.active, mgmtSelectedLoc, mgmtSelectedAct]);
+  const adminContents = useMemo(() => hierarchyStatus.active.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option === mgmtSelectedOpt && h.content), [hierarchyStatus.active, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
+
+  const filterActivityOptions = useMemo(() => {
+    let source = hierarchyData;
+    if (filterLoc) source = source.filter(h => h.location === filterLoc);
+    return [...new Set(source.map(h => h.activity).filter((a): a is string => !!a))].sort();
+  }, [hierarchyData, filterLoc]);
+
+  const statActivityOptions = useMemo(() => {
+    let source = hierarchyStatus.active; 
+    if (statFilterLoc) source = source.filter(h => h.location === statFilterLoc);
+    return [...new Set(source.map(h => h.activity).filter((a): a is string => !!a))].sort();
+  }, [hierarchyStatus.active, statFilterLoc]);
+
+  const statOptionOptions = useMemo(() => {
+    let source = hierarchyStatus.active;
+    if (statFilterLoc) source = source.filter(h => h.location === statFilterLoc);
+    if (statFilterAct) source = source.filter(h => h.activity === statFilterAct);
+    return [...new Set(source.map(h => h.option).filter((a): a is string => !!a))].sort();
+  }, [hierarchyStatus.active, statFilterLoc, statFilterAct]);
+
+  const currentActivityDates = useMemo(() => {
+    if (!mgmtSelectedLoc || !mgmtSelectedAct) return { end: '', dead: '' };
+    const found = hierarchyData.find(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && (h.activity_end_date || h.activity_deadline));
+    return { end: found?.activity_end_date || '', dead: found?.activity_deadline || '' };
+  }, [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct]);
+
+  const currentOptionDates = useMemo(() => {
+    if (!mgmtSelectedLoc || !mgmtSelectedAct || !mgmtSelectedOpt) return { end: '', dead: '' };
+    const found = hierarchyData.find(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option === mgmtSelectedOpt && (h.option_end_date || h.option_deadline));
+    return { end: found?.option_end_date || '', dead: found?.option_deadline || '' };
+  }, [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
+
+  // ----------------------------------------------------------------------------
+  // 4. Logic Callbacks
+  // ----------------------------------------------------------------------------
+  const getHierarchyDates = useCallback((loc: string, act: string, opt: string) => {
+      const optionNode = hierarchyData.find(h => h.location === loc && h.activity === act && h.option === opt);
+      const activityNode = hierarchyData.find(h => h.location === loc && h.activity === act && h.activity_end_date);
+      return { endDate: optionNode?.option_end_date || activityNode?.activity_end_date || null, deadline: optionNode?.option_deadline || activityNode?.activity_deadline || null };
+  }, [hierarchyData]);
+  
+  const getNoteStatus = useCallback((note: Note) => {
+      let isEnded = false;
+      if (note.saved_end_date) {
+           isEnded = todayDate > note.saved_end_date;
+      } else {
+           const { endDate } = getHierarchyDates(note.activity_location, note.activity_name, note.activity_option);
+           isEnded = endDate ? todayDate > endDate : false;
+      }
+      return { isEnded };
+  }, [getHierarchyDates, todayDate]);
+
+  const getRestrictionStatus = useCallback((loc: string, act: string, opt: string) => {
+      const { endDate, deadline } = getHierarchyDates(loc, act, opt);
+      const isEnded = endDate ? todayDate > endDate : false;
+      const isDeadlined = deadline ? todayDate > deadline : false;
+      return { isEnded, isDeadlined };
+  }, [getHierarchyDates, todayDate]);
+
+  // ----------------------------------------------------------------------------
+  // 5. Form/UI Callbacks (Defined BEFORE Handlers)
+  // ----------------------------------------------------------------------------
+  const getCardStatus = useCallback((note: Note) => {
+      if (note.is_deleted) return { text: '刪除', color: 'bg-red-500', isInactive: true };
+      const { isEnded } = getNoteStatus(note); 
+      if (isEnded) return { text: '已圓滿', color: 'bg-stone-400', isInactive: true };
+      return { 
+        text: note.registration_option, 
+        color: note.registration_option === '新增' ? 'bg-emerald-600' : 'bg-amber-600',
+        isInactive: false 
+      };
+  }, [getNoteStatus]);
+
+  const getSubmitButtonStatus = useCallback(() => {
+      const { isEnded, isDeadlined } = getRestrictionStatus(formData.activity_location, formData.activity_name, formData.activity_option);
+      if (isEnded) return { disabled: true, text: '已圓滿 (無法報名)' };
+      if (isDeadlined) {
+          return isAdmin ? { disabled: false, text: '確認送出 (管理員權限)' } : { disabled: true, text: '已截止報名' };
+      }
+      return { disabled: false, text: '確認送出' };
+  }, [formData, getRestrictionStatus, isAdmin]);
+
+  const getCurrentDeadlineText = useCallback(() => {
+      const { endDate, deadline } = getHierarchyDates(formData.activity_location, formData.activity_name, formData.activity_option);
+      let text = '';
+      if(deadline) text += ` 截止日:${deadline}`;
+      if(endDate) text += ` 結束日:${endDate}`;
+      return text;
+  }, [formData, getHierarchyDates]);
+
+  const validateForm = useCallback(() => {
+    const status = getRestrictionStatus(formData.activity_location, formData.activity_name, formData.activity_option);
+    if (status.isEnded) { alert("此行程已圓滿結束，無法報名"); return false; }
+    if (status.isDeadlined && !isAdmin) { alert("此行程已截止報名"); return false; }
+
+    for (const config of fieldConfigs) {
+      if (config.is_required) {
+        if (config.field_key === 'gender' && !formData.gender) { alert("請選擇性別"); return false; }
+        if (config.field_key === 'transportation' && !fieldVisibility.transportation) continue;
+        if (config.field_key === 'volunteer_group' && !fieldVisibility.volunteerGroup) continue;
+        if (config.field_key === 'volunteer_type' && !fieldVisibility.volunteerType) continue;
+        
+        if (['start_date', 'end_date'].includes(config.field_key)) {
+            if (fieldVisibility.volunteerDates && !formData[config.field_key as keyof typeof formData]) { alert(`請填寫：${config.field_label}`); return false; }
+            continue;
+        }
+        if (['arrival_datetime', 'departure_datetime'].includes(config.field_key)) {
+            if (fieldVisibility.arrivalDeparture && !formData[config.field_key as keyof typeof formData]) { alert(`請填寫：${config.field_label}`); return false; }
+            continue;
+        }
+        if (['stay_start_date', 'stay_end_date'].includes(config.field_key)) {
+            if (fieldVisibility.accommodationDates && !formData[config.field_key as keyof typeof formData]) { alert(`請填寫：${config.field_label}`); return false; }
+            continue;
+        }
+        if ((config.field_key.includes('stay') || config.field_key.includes('accommodation')) && !fieldVisibility.accommodation) continue;
+        
+        const val = formData[config.field_key as keyof typeof formData];
+        if (!val || (typeof val === 'string' && val.trim() === '') || (Array.isArray(val) && val.length === 0)) {
+           alert(`請檢查必填項目：${config.field_label}`);
+           return false;
+        }
+      }
+    }
+    return true;
+  }, [formData, fieldConfigs, fieldVisibility, getRestrictionStatus, isAdmin]);
+
+  const renderActivityOptions = () => {
+      return availableActivities.map(a => {
+         const { isEnded, isDeadlined } = getRestrictionStatus(formData.activity_location, a, '');
+         let label = '(可報名)';
+         if (isEnded) label = '(已圓滿)';
+         else if (isDeadlined) label = isAdmin ? '(已截止-管理員可報)' : '(已截止)';
+         const isDisabled = isEnded || (isDeadlined && !isAdmin);
+         return <option key={a} value={a} disabled={isDisabled}>{a} {label}</option>;
+      });
+  };
+
+  const renderOptionOptions = () => {
+      return availableOptions.map(o => {
+         const { isEnded, isDeadlined } = getRestrictionStatus(formData.activity_location, formData.activity_name, o);
+         let label = '(可報名)';
+         if (isEnded) label = '(已圓滿)';
+         else if (isDeadlined) label = isAdmin ? '(已截止-管理員可報)' : '(已截止)';
+         const isDisabled = isEnded || (isDeadlined && !isAdmin);
+         return <option key={o} value={o} disabled={isDisabled}>{o} {label}</option>;
+      });
+  };
+
+  // ----------------------------------------------------------------------------
+  // 6. Event Handlers
+  // ----------------------------------------------------------------------------
+
   const handleAuthAction = async () => {
     if (!username || !idLast4) return alert('請輸入姓名與 ID 後四碼');
     if (!supabaseClient && !isMock) return alert('系統未連線至資料庫');
@@ -645,6 +886,8 @@ export default function App() {
             if (error) throw error;
             setUser(data.user);
             setFormData(prev => ({ ...prev, real_name: username }));
+            if (isMock) setIsAdmin(true); 
+
         } else if (authMode === 'signup') {
             if (!password) { setLoading(false); return alert('請設定密碼'); }
             if(!confirm(`確認註冊資料：\n姓名：${finalUsername}\nID後4碼：${finalIdLast4}\n\n請確認無誤後送出。`)) { setLoading(false); return; }
@@ -659,6 +902,7 @@ export default function App() {
                 if (data.session) {
                     setUser(data.user);
                     setFormData(prev => ({ ...prev, real_name: finalUsername }));
+                    if(isMock) setIsAdmin(true);
                 } else { alert('請檢查信箱並點擊驗證連結。'); }
             }
         } else if (authMode === 'forgot') {
@@ -712,388 +956,6 @@ export default function App() {
       setLoading(false);
   };
 
-  // v87.59: 修改 Locations, Activities 等列表的計算邏輯，支援「自動隱藏已圓滿活動」
-  // 我們將原始 hierarchyData 區分為 activeHierarchy 與 completedHierarchy
-  const hierarchyStatus = useMemo(() => {
-      const active: ActivityHierarchy[] = [];
-      const completed: ActivityHierarchy[] = [];
-      
-      hierarchyData.forEach(h => {
-          // 若有截止日期且小於今天，視為已結束
-          // 注意：通常用 activity_end_date 判斷是否「圓滿」。
-          const endDate = h.option_end_date || h.activity_end_date;
-          if (endDate && endDate < todayDate) {
-              completed.push(h);
-          } else {
-              active.push(h);
-          }
-      });
-      return { active, completed };
-  }, [hierarchyData, todayDate]);
-
-  // v87.65: 取得已圓滿活動的所有 "圓滿年/月" 列表
-  const completedDates = useMemo(() => {
-      const dates = new Set<string>();
-      hierarchyStatus.completed.forEach(h => {
-          const date = h.option_end_date || h.activity_end_date;
-          if (date) dates.add(date.substring(0, 7)); // YYYY-MM
-      });
-      return [...dates].sort().reverse();
-  }, [hierarchyStatus.completed]);
-
-  // v87.65: 重新整理已圓滿活動列表的資料結構 (分組顯示 + 篩選 + 合併)
-  const groupedCompletedActivities = useMemo(() => {
-      // 需求4: 未下拉篩選時，不要出現資料
-      if (!completedFilterDate) return {};
-      
-      const groups: Record<string, ActivityHierarchy[]> = {};
-      
-      // 1. 篩選日期
-      const filtered = hierarchyStatus.completed.filter(h => {
-          const date = h.option_end_date || h.activity_end_date;
-          return date && date.startsWith(completedFilterDate);
-      });
-
-      // 2. 依地點|活動分組，並合併相同行程且相同圓滿日的項目
-      filtered.forEach(h => {
-          const key = `${h.location} | ${h.activity || '(無活動)'}`;
-          if (!groups[key]) groups[key] = [];
-          
-          // 合併邏輯: 檢查是否已存在相同 option 且相同 end_date 的項目
-          const existing = groups[key].find(e => 
-              e.option === h.option && 
-              (e.option_end_date || e.activity_end_date) === (h.option_end_date || h.activity_end_date)
-          );
-
-          if (!existing) {
-              groups[key].push(h);
-          }
-      });
-      
-      return groups;
-  }, [hierarchyStatus.completed, completedFilterDate]);
-
-  // 前台表單使用的下拉選單 (應只顯示未圓滿的)
-  const locations = useMemo(() => [...new Set(hierarchyStatus.active.map(h => h.location).filter(Boolean))].sort(), [hierarchyStatus.active]);
-  const availableActivities = useMemo(() => [...new Set(hierarchyStatus.active.filter(h => h.location === formData.activity_location && h.activity).map(h => h.activity as string))].sort(), [hierarchyStatus.active, formData.activity_location]);
-  const availableOptions = useMemo(() => [...new Set(hierarchyStatus.active.filter(h => h.location === formData.activity_location && h.activity === formData.activity_name && h.option).map(h => h.option as string))].sort(), [hierarchyStatus.active, formData.activity_location, formData.activity_name]);
-  const availableContents = useMemo(() => hierarchyStatus.active.filter(h => h.location === formData.activity_location && h.activity === formData.activity_name && h.option === formData.activity_option && h.content).map(h => h.content as string).sort(), [hierarchyStatus.active, formData.activity_location, formData.activity_name, formData.activity_option]);
-
-  // 管理後台設定用的下拉選單 (也只顯示未圓滿，已圓滿移至下方列表)
-  const adminActivities = useMemo(() => [...new Set(hierarchyStatus.active.filter(h => h.location === mgmtSelectedLoc && h.activity).map(h => h.activity as string))].sort(), [hierarchyStatus.active, mgmtSelectedLoc]);
-  const adminOptions = useMemo(() => [...new Set(hierarchyStatus.active.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option).map(h => h.option as string))].sort(), [hierarchyStatus.active, mgmtSelectedLoc, mgmtSelectedAct]);
-  const adminContents = useMemo(() => hierarchyStatus.active.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option === mgmtSelectedOpt && h.content), [hierarchyStatus.active, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
-
-  // 資料篩選專用 (這裡應該包含所有，方便查詢舊資料)
-  const filterActivityOptions = useMemo(() => {
-    let source = hierarchyData; // 包含所有
-    if (filterLoc) {
-        source = source.filter(h => h.location === filterLoc);
-    }
-    return [...new Set(source.map(h => h.activity).filter((a): a is string => !!a))].sort();
-  }, [hierarchyData, filterLoc]);
-
-  // 統計篩選專用 (v87.59: 需根據 statsViewType 切換資料源)
-  const statActivityOptions = useMemo(() => {
-    let source = statsViewType === 'active' ? hierarchyStatus.active : hierarchyStatus.completed;
-    if (statFilterLoc) {
-        source = source.filter(h => h.location === statFilterLoc);
-    }
-    return [...new Set(source.map(h => h.activity).filter((a): a is string => !!a))].sort();
-  }, [hierarchyStatus, statFilterLoc, statsViewType]);
-
-  // v87.59: 新增 Option 篩選選單
-  const statOptionOptions = useMemo(() => {
-    let source = statsViewType === 'active' ? hierarchyStatus.active : hierarchyStatus.completed;
-    if (statFilterLoc) source = source.filter(h => h.location === statFilterLoc);
-    if (statFilterAct) source = source.filter(h => h.activity === statFilterAct);
-    
-    return [...new Set(source.map(h => h.option).filter((a): a is string => !!a))].sort();
-  }, [hierarchyStatus, statFilterLoc, statFilterAct, statsViewType]);
-  
-  // v87.59: 取得目前選中活動的結束日期 (用於已圓滿統計顯示)
-  const selectedActivityEndDate = useMemo(() => {
-      if (statsViewType !== 'completed' || !statFilterAct) return null;
-      // 找一筆符合的資料即可
-      const found = hierarchyStatus.completed.find(h => 
-        (statFilterLoc ? h.location === statFilterLoc : true) && 
-        h.activity === statFilterAct
-      );
-      return found?.activity_end_date || found?.option_end_date;
-  }, [hierarchyStatus.completed, statFilterLoc, statFilterAct, statsViewType]);
-
-
-  const filteredTransportOptions = useMemo(() => {
-    const all = ["大車-精舍統一行程", "小車-自訂抵離寺", "自行前往-自訂抵離寺"];
-    if (formData.activity_option && formData.activity_option.includes('自訂行程')) {
-        const customOptions = all.filter(o => !o.includes("大車"));
-        customOptions.push("其他-自訂抵離寺");
-        return customOptions;
-    }
-    return all;
-  }, [formData.activity_option]);
-
-  useEffect(() => {
-    const hasLargeBus = filteredTransportOptions.some(o => o.includes("大車"));
-    setFormData(prev => ({ ...prev, transportation: hasLargeBus ? "大車-精舍統一行程" : "小車-自訂抵離寺" }));
-  }, [filteredTransportOptions]);
-
-  useEffect(() => { 
-      if (formData.arrival_datetime) {
-          const fullDateTime = formData.arrival_datetime;
-          const dateOnly = formData.arrival_datetime.split('T')[0];
-          setFormData(p => ({ 
-              ...p, 
-              start_date: p.start_date ? p.start_date : fullDateTime,
-              stay_start_date: p.stay_start_date ? p.stay_start_date : dateOnly 
-          }));
-      }
-  }, [formData.arrival_datetime]);
-  
-  useEffect(() => { 
-      if (formData.departure_datetime) {
-          const fullDateTime = formData.departure_datetime;
-          const dateOnly = formData.departure_datetime.split('T')[0];
-          setFormData(p => ({ 
-              ...p, 
-              end_date: p.end_date ? p.end_date : fullDateTime,
-              stay_end_date: p.stay_end_date ? p.stay_end_date : dateOnly 
-          }));
-      }
-  }, [formData.departure_datetime]);
-
-  const fieldVisibility = useMemo(() => {
-    const isJingshe = formData.activity_location === '精舍';
-    const isZhongtai = formData.activity_location === '中台';
-    const isVolunteer = formData.identity === '發心義工';
-    const isBus = formData.transportation === '大車-精舍統一行程';
-    const isOneDay = formData.activity_option.includes('當天來回');
-    const needsAccommodation = formData.accommodation_option === '須安單';
-
-    return {
-      transportation: !isJingshe,
-      volunteerGroup: isVolunteer,
-      volunteerType: isZhongtai && isVolunteer,
-      volunteerDates: !isJingshe && isVolunteer, 
-      arrivalDeparture: !isJingshe && !isBus,    
-      accommodation: !isJingshe && !isBus && !isOneDay,
-      accommodationDates: (!isJingshe && !isBus && !isOneDay) && needsAccommodation 
-    };
-  }, [formData]);
-
-  const getFieldConfig = (key: string) => fieldConfigs.find(f => f.field_key === key) || { is_required: false, field_label: key };
-
-  const getHierarchyDates = (loc: string, act: string, opt: string) => {
-      const optionNode = hierarchyData.find(h => h.location === loc && h.activity === act && h.option === opt);
-      const activityNode = hierarchyData.find(h => h.location === loc && h.activity === act && h.activity_end_date);
-      
-      const endDate = optionNode?.option_end_date || activityNode?.activity_end_date || null;
-      const deadline = optionNode?.option_deadline || activityNode?.activity_deadline || null;
-      
-      return { endDate, deadline };
-  };
-  
-  // v87.55: 用於判斷單筆資料的圓滿狀態
-  const getNoteStatus = useCallback((note: Note) => {
-      let isEnded = false;
-      
-      // 優先使用資料快照
-      if (note.saved_end_date) {
-           isEnded = todayDate > note.saved_end_date;
-      } else {
-           // 舊資料使用目前 hierarchy 設定
-           const { endDate } = getHierarchyDates(note.activity_location, note.activity_name, note.activity_option);
-           isEnded = endDate ? todayDate > endDate : false;
-      }
-      return { isEnded };
-  }, [hierarchyData, todayDate]);
-
-  // 用於判斷目前選單選項的狀態 (報名時)
-  const getRestrictionStatus = useCallback((loc: string, act: string, opt: string) => {
-      const { endDate, deadline } = getHierarchyDates(loc, act, opt);
-      const isEnded = endDate ? todayDate > endDate : false;
-      const isDeadlined = deadline ? todayDate > deadline : false;
-      return { isEnded, isDeadlined };
-  }, [hierarchyData, todayDate]);
-
-  const isCurrentSelectionExpired = useMemo(() => {
-      const status = getRestrictionStatus(formData.activity_location, formData.activity_name, formData.activity_option);
-      if (status.isEnded) return true;
-      if (status.isDeadlined) return !isAdmin;
-      return false;
-  }, [formData, getRestrictionStatus, isAdmin]);
-
-  const renderActivityOptions = () => {
-      return availableActivities.map(a => {
-         const { isEnded, isDeadlined } = getRestrictionStatus(formData.activity_location, a, '');
-         let label = '(可報名)';
-         if (isEnded) label = '(已圓滿)';
-         else if (isDeadlined) label = isAdmin ? '(已截止-管理員可報)' : '(已截止)';
-         
-         const isDisabled = isEnded || (isDeadlined && !isAdmin);
-         return <option key={a} value={a} disabled={isDisabled}>{a} {label}</option>;
-      });
-  };
-
-  const renderOptionOptions = () => {
-      return availableOptions.map(o => {
-         const { isEnded, isDeadlined } = getRestrictionStatus(formData.activity_location, formData.activity_name, o);
-         let label = '(可報名)';
-         if (isEnded) label = '(已圓滿)';
-         else if (isDeadlined) label = isAdmin ? '(已截止-管理員可報)' : '(已截止)';
-         
-         const isDisabled = isEnded || (isDeadlined && !isAdmin);
-         return <option key={o} value={o} disabled={isDisabled}>{o} {label}</option>;
-      });
-  };
-
-  const getSubmitButtonStatus = () => {
-      const { isEnded, isDeadlined } = getRestrictionStatus(formData.activity_location, formData.activity_name, formData.activity_option);
-      if (isEnded) return { disabled: true, text: '已圓滿 (無法報名)' };
-      if (isDeadlined) {
-          return isAdmin ? { disabled: false, text: '確認送出 (管理員權限)' } : { disabled: true, text: '已截止報名' };
-      }
-      return { disabled: false, text: '確認送出' };
-  };
-
-  const validateForm = () => {
-    const status = getRestrictionStatus(formData.activity_location, formData.activity_name, formData.activity_option);
-    if (status.isEnded) { alert("此行程已圓滿結束，無法報名"); return false; }
-    if (status.isDeadlined && !isAdmin) { alert("此行程已截止報名"); return false; }
-
-    for (const config of fieldConfigs) {
-      if (config.is_required) {
-        if (config.field_key === 'gender') {
-            if (!formData.gender) { alert("請選擇性別"); return false; }
-            continue;
-        }
-        if (config.field_key === 'transportation' && !fieldVisibility.transportation) continue;
-        if (config.field_key === 'volunteer_group' && !fieldVisibility.volunteerGroup) continue;
-        if (config.field_key === 'volunteer_type' && !fieldVisibility.volunteerType) continue;
-        
-        if (['start_date', 'end_date'].includes(config.field_key)) {
-            if (fieldVisibility.volunteerDates && !formData[config.field_key as keyof typeof formData]) {
-                alert(`請填寫：${config.field_label}`); return false;
-            }
-            continue;
-        }
-        if (['arrival_datetime', 'departure_datetime'].includes(config.field_key)) {
-            if (fieldVisibility.arrivalDeparture && !formData[config.field_key as keyof typeof formData]) {
-                alert(`請填寫：${config.field_label}`); return false;
-            }
-            continue;
-        }
-        if (['stay_start_date', 'stay_end_date'].includes(config.field_key)) {
-            if (fieldVisibility.accommodationDates && !formData[config.field_key as keyof typeof formData]) {
-                alert(`請填寫：${config.field_label}`); return false;
-            }
-            continue;
-        }
-        if (config.field_key.includes('stay') || config.field_key.includes('accommodation')) {
-            if (!fieldVisibility.accommodation) continue;
-        }
-        const val = formData[config.field_key as keyof typeof formData];
-        if (!val || (typeof val === 'string' && val.trim() === '') || (Array.isArray(val) && val.length === 0)) {
-           alert(`請檢查必填項目：${config.field_label}`);
-           return false;
-        }
-      }
-      
-      if (fieldVisibility.volunteerDates && ['start_date', 'end_date'].includes(config.field_key) && !formData[config.field_key as keyof typeof formData]) {
-          alert(`請填寫：${config.field_label}`); return false;
-      }
-      if (fieldVisibility.arrivalDeparture && ['arrival_datetime', 'departure_datetime'].includes(config.field_key) && !formData[config.field_key as keyof typeof formData]) {
-          alert(`請填寫：${config.field_label}`); return false;
-      }
-      if (fieldVisibility.accommodationDates && ['stay_start_date', 'stay_end_date'].includes(config.field_key) && !formData[config.field_key as keyof typeof formData]) {
-          alert(`請填寫：${config.field_label}`); return false;
-      }
-    }
-    return true;
-  };
-
-  const safeDateToISO = (val: string | null | undefined) => {
-    if (!val || val.trim() === '') return null;
-    try {
-        if (val.endsWith('Z')) return val; 
-        const d = new Date(val);
-        if (!isNaN(d.getTime())) return d.toISOString();
-    } catch (e) {}
-    return val;
-  };
-
-  const sanitizeDate = (dateStr: string | null | undefined) => (dateStr && dateStr.trim() !== '') ? dateStr : null;
-
-  const handleSubmitNote = async () => {
-    if (!validateForm()) return;
-    const signName = user?.user_metadata?.user_name || username;
-    const id2 = user?.user_metadata?.id_last4 || idLast4;
-    let finalData = { ...formData };
-
-    if (!fieldVisibility.transportation) finalData.transportation = '';
-    if (!fieldVisibility.volunteerGroup) finalData.volunteer_group = '';
-    if (!fieldVisibility.volunteerType) finalData.volunteer_type = '';
-    if (!fieldVisibility.volunteerDates) { finalData.start_date = ''; finalData.end_date = ''; }
-    if (!fieldVisibility.arrivalDeparture) { finalData.arrival_datetime = ''; finalData.departure_datetime = ''; }
-    if (!fieldVisibility.accommodation) { 
-        finalData.accommodation_option = ''; 
-        finalData.stay_start_date = ''; 
-        finalData.stay_end_date = ''; 
-    } else if (!fieldVisibility.accommodationDates) {
-        finalData.stay_start_date = '';
-        finalData.stay_end_date = '';
-    }
-
-    // v87.56: 寫入活動關聯 ID 與快照
-    const exactNode = hierarchyData.find(h => 
-        h.location === finalData.activity_location && 
-        h.activity === finalData.activity_name &&
-        h.option === finalData.activity_option
-    );
-
-    const { endDate, deadline } = getHierarchyDates(finalData.activity_location, finalData.activity_name, finalData.activity_option);
-
-    const payload = { 
-        ...finalData, 
-        user_id: user?.id, 
-        audit_status: '免審核',
-        is_deleted: false, 
-        created_at: new Date().toISOString(),
-        start_date: safeDateToISO(finalData.start_date),
-        end_date: safeDateToISO(finalData.end_date),
-        stay_start_date: sanitizeDate(finalData.stay_start_date),
-        stay_end_date: sanitizeDate(finalData.stay_end_date),
-        arrival_datetime: safeDateToISO(finalData.arrival_datetime),
-        departure_datetime: safeDateToISO(finalData.departure_datetime),
-        sign_name: signName, 
-        id_2: id2,
-        
-        // v87.56 Additions
-        activity_id: exactNode?.id || null, 
-        saved_end_date: endDate,
-        saved_deadline: deadline
-    };
-
-    if (!supabaseClient) return alert('系統未連線');
-    const { audit_status, ...finalPayload } = payload as any;
-    const { error } = await supabaseClient.from('notes').insert([finalPayload]);
-    if (error) { 
-        console.error("Submit error:", error);
-        alert('提交失敗: ' + error.message); 
-    } else { 
-        alert('已送出申請'); 
-        setFormData(INITIAL_FORM_DATA); 
-        await fetchData();
-        setActiveTab('history'); 
-    }
-  };
-
-  const handleToggleDeleteNote = async (id: string, status: boolean) => {
-    if (!supabaseClient) return;
-    await supabaseClient.from('notes').update({ is_deleted: !status }).eq('id', id);
-    fetchData();
-  };
-
   const handleAddBulletin = async () => {
     if (!newBulletin || !supabaseClient) return;
     await supabaseClient.from('bulletins').insert([{ content: newBulletin, created_at: new Date().toISOString() }]);
@@ -1111,10 +973,7 @@ export default function App() {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
-      reader.onloadend = () => {
-        const base64 = reader.result as string;
-        setNewBulletin(prev => prev + `\n[img:${base64}]`);
-      };
+      reader.onloadend = () => { setNewBulletin(prev => prev + `\n[img:${reader.result}]`); };
       reader.readAsDataURL(file);
     }
   };
@@ -1123,414 +982,266 @@ export default function App() {
     fileInputRef.current?.click();
   };
 
-  const addLocation = async () => {
-    if(!newLocation || !supabaseClient) return;
-    const { error } = await supabaseClient.from('activity_hierarchy').insert([{ location: newLocation, activity: null, option: null, content: null }]);
-    if (error) alert("新增失敗：" + error.message); else { setNewLocation(''); fetchData(); }
-  };
-  const addActivity = async () => {
-    if(!newActivity || !mgmtSelectedLoc || !supabaseClient) return;
-    const { error } = await supabaseClient.from('activity_hierarchy').insert([{ location: mgmtSelectedLoc, activity: newActivity, option: null, content: null }]);
-    if (error) alert("新增失敗：" + error.message); else { setNewActivity(''); fetchData(); }
-  };
-  const addOption = async () => {
-    if(!newOption || !mgmtSelectedAct || !supabaseClient) return;
-    const { error } = await supabaseClient.from('activity_hierarchy').insert([{ location: mgmtSelectedLoc, activity: mgmtSelectedAct, option: newOption, content: null }]);
-    if (error) alert("新增失敗：" + error.message); else { setNewOption(''); fetchData(); }
-  };
-  const addContent = async () => {
-    if(!newContent || !mgmtSelectedOpt || !supabaseClient) return;
-    const { error } = await supabaseClient.from('activity_hierarchy').insert([{ location: mgmtSelectedLoc, activity: mgmtSelectedAct, option: mgmtSelectedOpt, content: newContent }]);
-    if (error) alert("新增失敗：" + error.message); else { setNewContent(''); fetchData(); }
-  };
+  const addLocation = async () => { if(!newLocation || !supabaseClient) return; const { error } = await supabaseClient.from('activity_hierarchy').insert([{ location: newLocation, activity: null, option: null, content: null }]); if (error) alert("新增失敗：" + error.message); else { setNewLocation(''); fetchData(); } };
+  const addActivity = async () => { if(!newActivity || !mgmtSelectedLoc || !supabaseClient) return; const { error } = await supabaseClient.from('activity_hierarchy').insert([{ location: mgmtSelectedLoc, activity: newActivity, option: null, content: null }]); if (error) alert("新增失敗：" + error.message); else { setNewActivity(''); fetchData(); } };
+  const addOption = async () => { if(!newOption || !mgmtSelectedAct || !supabaseClient) return; const { error } = await supabaseClient.from('activity_hierarchy').insert([{ location: mgmtSelectedLoc, activity: mgmtSelectedAct, option: newOption, content: null }]); if (error) alert("新增失敗：" + error.message); else { setNewOption(''); fetchData(); } };
+  const addContent = async () => { if(!newContent || !mgmtSelectedOpt || !supabaseClient) return; const { error } = await supabaseClient.from('activity_hierarchy').insert([{ location: mgmtSelectedLoc, activity: mgmtSelectedAct, option: mgmtSelectedOpt, content: newContent }]); if (error) alert("新增失敗：" + error.message); else { setNewContent(''); fetchData(); } };
 
-  const handleDeleteLocation = async (loc: string) => {
-    if (!supabaseClient) return;
-    if (confirm(`確定刪除地點「${loc}」及其所有下層資料？`)) {
-       await supabaseClient.from('activity_hierarchy').delete().eq('location', loc);
-       fetchData();
-       setMgmtSelectedLoc('');
-    }
-  };
-
-  const handleDeleteActivity = async (act: string) => {
-    if (!supabaseClient) return;
-    if (confirm(`確定刪除活動「${act}」及其所有下層資料？`)) {
-       await supabaseClient.from('activity_hierarchy').delete().eq('location', mgmtSelectedLoc).eq('activity', act);
-       fetchData();
-       setMgmtSelectedAct('');
-    }
-  };
-
-  const handleDeleteOption = async (opt: string) => {
-    if (!supabaseClient) return;
-    if (confirm(`確定刪除行程「${opt}」及其所有下層資料？`)) {
-       await supabaseClient.from('activity_hierarchy').delete().eq('location', mgmtSelectedLoc).eq('activity', mgmtSelectedAct).eq('option', opt);
-       fetchData();
-       setMgmtSelectedOpt('');
-    }
-  };
-
-  const handleDeleteContent = async (id: string) => {
-    if (!supabaseClient) return;
-    if (confirm('確定刪除此內容？')) {
-       await supabaseClient.from('activity_hierarchy').delete().eq('id', id);
-       fetchData();
-    }
-  };
+  const handleDeleteLocation = async (loc: string) => { if (!supabaseClient) return; if (confirm(`確定刪除地點「${loc}」及其所有下層資料？`)) { await supabaseClient.from('activity_hierarchy').delete().eq('location', loc); fetchData(); setMgmtSelectedLoc(''); } };
+  const handleDeleteActivity = async (act: string) => { if (!supabaseClient) return; if (confirm(`確定刪除活動「${act}」及其所有下層資料？`)) { await supabaseClient.from('activity_hierarchy').delete().eq('location', mgmtSelectedLoc).eq('activity', act); fetchData(); setMgmtSelectedAct(''); } };
+  const handleDeleteOption = async (opt: string) => { if (!supabaseClient) return; if (confirm(`確定刪除行程「${opt}」及其所有下層資料？`)) { await supabaseClient.from('activity_hierarchy').delete().eq('location', mgmtSelectedLoc).eq('activity', mgmtSelectedAct).eq('option', opt); fetchData(); setMgmtSelectedOpt(''); } };
+  const handleDeleteContent = async (id: string) => { if (!supabaseClient) return; if (confirm('確定刪除此內容？')) { await supabaseClient.from('activity_hierarchy').delete().eq('id', id); fetchData(); } };
   
   const handleExport = async () => {
     if (!window.XLSX) {
-        try {
-            await new Promise((resolve, reject) => {
-                const script = document.createElement('script');
-                script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
-                script.onload = resolve;
-                script.onerror = reject;
-                document.head.appendChild(script);
-            });
-        } catch (error) {
-            alert('無法載入 Excel 匯出套件，請檢查網路連線。');
-            return;
-        }
+        try { await new Promise((resolve, reject) => { const script = document.createElement('script'); script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'; script.onload = resolve; script.onerror = reject; document.head.appendChild(script); }); } catch (error) { alert('無法載入 Excel 匯出套件。'); return; }
     }
-
     const exportData = filteredAdminNotes.map(n => {
-        const { isEnded } = getNoteStatus(n); 
-        
-        const rawContents: any = n.selected_contents;
-        let safeContents: string[] = [];
-        if (Array.isArray(rawContents)) {
-            safeContents = rawContents.map(s => String(s).replace(/[\[\]"]/g, '').trim()).filter(Boolean);
-        } else if (typeof rawContents === 'string') {
-            let s = rawContents.trim();
-            if (s !== '[]' && s !== '{}' && s !== 'null' && s !== '""') {
-                s = s.replace(/^\[|\]$/g, '').replace(/^\{|\}$/g, '');
-                safeContents = s.split(',').map((item: string) => item.replace(/^"|"$/g, '').replace(/^'|'$/g, '').replace(/[\[\]"]/g, '').trim()).filter(Boolean);
-            }
-        }
-        safeContents = safeContents.filter(s => s && s !== '[]');
-        const finalContentStr = safeContents.length > 0 ? safeContents.join('、') : null;
-
-        const extractDateStr = (val: string | null | undefined) => {
-            const formatted = formatDateTime(val);
-            if (formatted === '-' || !formatted) return '';
-            return formatted.split(' ')[0];
-        };
-        const extractTimeStr = (val: string | null | undefined) => {
-            const formatted = formatDateTime(val);
-            if (formatted === '-' || !formatted) return '';
-            const parts = formatted.split(' ');
-            return parts.length > 1 ? parts[1] : '';
-        };
-
+        const extractDateStr = (val: string | null | undefined) => { const formatted = formatDateTime(val); if (formatted === '-' || !formatted) return ''; return formatted.split(' ')[0]; };
+        const extractTimeStr = (val: string | null | undefined) => { const formatted = formatDateTime(val); if (formatted === '-' || !formatted) return ''; const parts = formatted.split(' '); return parts.length > 1 ? parts[1] : ''; };
         return {
-            "地點": n.activity_location || '',
-            "活動": n.activity_name || '',
-            "行程": n.activity_option || '',
-            "勾選內容": finalContentStr,
-            "姓名": n.real_name || '',
-            "法名": n.dharma_name || '',
-            "性別": n.gender || '',
-            "屬性": n.registrant_type || '',
-            "身分": n.identity || '',
-            "交通": n.transportation || '',
-            "抵達日期": extractDateStr(n.arrival_datetime),
-            "抵達時間": extractTimeStr(n.arrival_datetime),
-            "離開日期": extractDateStr(n.departure_datetime),
-            "離開時間": extractTimeStr(n.departure_datetime),
-            "義工選項": simplifyVolunteerType(n.volunteer_type),
-            "義工組別": n.volunteer_group || '',
-            "發心始日期": extractDateStr(n.start_date),
-            "發心始時間": extractTimeStr(n.start_date),
-            "發心終日期": extractDateStr(n.end_date),
-            "發心終時間": extractTimeStr(n.end_date),
-            "安單選項": n.accommodation_option || '',
-            "安單起日": n.stay_start_date || '',
-            "安單迄日": n.stay_end_date || '',
-            "自訂備註": n.other_remarks || '',
-            "備註": n.memo || '',
-            "選項": n.registration_option || '',
-            "狀態": n.is_deleted ? '已刪除' : (isEnded ? '已圓滿' : '正常'),
-            "填表人": n.sign_name || '',
-            "填表時間": n.created_at?.replace('T', ' ').slice(0, 16) || ''
+            "地點": n.activity_location || '', "活動": n.activity_name || '', "行程": n.activity_option || '', 
+            "勾選內容": safeRenderContents(n.selected_contents),
+            "姓名": n.real_name || '', "法名": n.dharma_name || '', "性別": n.gender || '', "屬性": n.registrant_type || '',
+            "身分": n.identity || '', "交通": n.transportation || '',
+            "抵達日期": extractDateStr(n.arrival_datetime), "抵達時間": extractTimeStr(n.arrival_datetime),
+            "離開日期": extractDateStr(n.departure_datetime), "離開時間": extractTimeStr(n.departure_datetime),
+            "義工選項": simplifyVolunteerType(n.volunteer_type), "義工組別": n.volunteer_group || '',
+            "發心始日期": extractDateStr(n.start_date), "發心始時間": extractTimeStr(n.start_date),
+            "發心終日期": extractDateStr(n.end_date), "發心終時間": extractTimeStr(n.end_date),
+            "安單選項": n.accommodation_option || '', "安單起日": n.stay_start_date || '', "安單迄日": n.stay_end_date || '',
+            "自訂備註": String(n.other_remarks || ''), "備註": String(n.memo || ''), "選項": n.registration_option || '',
+            "狀態": n.is_deleted ? '已刪除' : '正常', "填表人": n.sign_name || '', "填表時間": n.created_at?.replace('T', ' ').slice(0, 16) || ''
         };
     });
-
     const worksheet = window.XLSX.utils.json_to_sheet(exportData);
     const workbook = window.XLSX.utils.book_new();
     window.XLSX.utils.book_append_sheet(workbook, worksheet, "報名資料");
     window.XLSX.writeFile(workbook, `學員登記表_${new Date().toISOString().slice(0,10)}.xlsx`);
   };
 
-  const handleToggleUserStatus = async (uid: string, currentStatus: boolean) => {
-    if (!supabaseClient) return;
-    await supabaseClient.from('user_permissions').update({ is_disabled: !currentStatus }).eq('uid', uid);
-    fetchData();
-  };
-
-  const handleToggleAdmin = async (uid: string, currentStatus: boolean) => {
-    if (!supabaseClient) return;
-    const { error } = await supabaseClient.from('user_permissions').update({ is_admin: !currentStatus }).eq('uid', uid);
-    if (error) alert("更新失敗：" + error.message); else fetchData();
-  };
+  const handleToggleUserStatus = async (uid: string, currentStatus: boolean) => { if (!supabaseClient) return; await supabaseClient.from('user_permissions').update({ is_disabled: !currentStatus }).eq('uid', uid); fetchData(); };
+  const handleToggleAdmin = async (uid: string, currentStatus: boolean) => { if (!supabaseClient) return; const { error } = await supabaseClient.from('user_permissions').update({ is_admin: !currentStatus }).eq('uid', uid); if (error) alert("更新失敗：" + error.message); else fetchData(); };
 
   const handleResetAction = async (req: ResetRequest, action: 'approve' | 'reject') => {
     if (!supabaseClient) return;
-    
     if (action === 'approve') {
-        if (!req.uid) {
-            alert("此申請缺少 UID，無法處理密碼重設。");
-            return;
-        }
-
+        if (!req.uid) return alert("此申請缺少 UID，無法處理密碼重設。");
         const tempPwd = Math.floor(100000 + Math.random() * 900000).toString();
-        
         try {
             const url = typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_SUPABASE_URL : '';
             const serviceKey = typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY : '';
-
-            if (!serviceKey) {
-                throw new Error("前端未配置 NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY，無法跨權限修改。");
-            }
-
-            const adminClient = window.supabase.createClient(url, serviceKey, {
-                auth: { autoRefreshToken: false, persistSession: false }
-            });
-
+            if (!serviceKey) throw new Error("前端未配置 NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY，無法跨權限修改。");
+            const adminClient = window.supabase.createClient(url, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
             const { error: updateErr } = await adminClient.auth.admin.updateUserById(req.uid, { password: tempPwd });
-            
             if (updateErr) throw updateErr;
-
             await supabaseClient.from('reset_requests').update({ status: 'completed' }).eq('id', req.id);
             setResetPwdResult({ user: req.user_name, pwd: tempPwd });
-
-        } catch (e: any) {
-            alert(`密碼重設失敗！\n錯誤原因：${e.message}\n\n提醒：前端需配置 Service Role Key 才能跨權限修改他人密碼。`);
-            return;
-        }
-    } else {
-        await supabaseClient.from('reset_requests').update({ status: 'rejected' }).eq('id', req.id);
-    }
-    
+        } catch (e: any) { alert(`密碼重設失敗！\n錯誤原因：${e.message}\n\n提醒：前端需配置 Service Role Key 才能跨權限修改他人密碼。`); return; }
+    } else { await supabaseClient.from('reset_requests').update({ status: 'rejected' }).eq('id', req.id); }
     fetchData();
   };
 
   const handleCreateUser = async () => {
-    if (isMock) {
-       setAllUsers(p => [{ id: String(Date.now()), email: 'new@test.com', user_name: newUser.name, id_last4: newUser.id4, is_admin: false, is_disabled: false }, ...p]);
-       setNewUser({name:'', id4:'', pwd:''});
-       return;
-    }
-    
+    if (isMock) { setAllUsers(p => [{ id: String(Date.now()), email: 'new@test.com', user_name: newUser.name, id_last4: newUser.id4, is_admin: false, is_disabled: false }, ...p]); setNewUser({name:'', id4:'', pwd:''}); return; }
     if (!newUser.name || !newUser.id4 || !newUser.pwd) { alert('請輸入完整資料 (姓名、ID、密碼)'); return; }
-    
     const email = encodeName(newUser.name + newUser.id4) + FAKE_DOMAIN;
     const url = typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_SUPABASE_URL : '';
     const key = typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY : '';
-
     if (!url || !key) { alert('環境變數遺失'); return; }
-
-    const tempClient = window.supabase.createClient(url, key, {
-        auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
-    });
-
+    const tempClient = window.supabase.createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } });
     try {
-        const { data, error } = await tempClient.auth.signUp({
-            email, password: newUser.pwd,
-            options: { data: { user_name: newUser.name, id_last4: newUser.id4 } }
-        });
-
+        const { data, error } = await tempClient.auth.signUp({ email, password: newUser.pwd, options: { data: { user_name: newUser.name, id_last4: newUser.id4 } } });
         if (error) throw error;
-
         if (data.user) {
-            const { error: permError } = await supabaseClient.from('user_permissions').upsert([{
-                uid: data.user.id, email: email, user_name: newUser.name, id_last4: newUser.id4,
-                is_admin: false, is_disabled: false, created_at: new Date().toISOString()
-            }], { onConflict: 'email' });
-
+            const { error: permError } = await supabaseClient.from('user_permissions').upsert([{ uid: data.user.id, email: email, user_name: newUser.name, id_last4: newUser.id4, is_admin: false, is_disabled: false, created_at: new Date().toISOString() }], { onConflict: 'email' });
             if (permError) { console.error("Permissions sync error:", permError); alert(`Auth 建立成功，但權限表寫入失敗: ${permError.message}`); } 
             else { alert('使用者建立成功！'); setNewUser({name:'', id4:'', pwd:''}); fetchData(); }
         }
     } catch (err: any) { alert('建立失敗: ' + err.message); }
   };
 
-  const handleUpdateActivityDate = async (field: 'activity_end_date' | 'activity_deadline', val: string) => {
-    if (!supabaseClient || !mgmtSelectedLoc || !mgmtSelectedAct) return;
-    const { error } = await supabaseClient.from('activity_hierarchy')
-        .update({ [field]: val })
-        .eq('location', mgmtSelectedLoc)
-        .eq('activity', mgmtSelectedAct);
-    if(error) console.error(error);
-  };
-
-  const handleUpdateOptionDate = async (field: 'option_end_date' | 'option_deadline', val: string) => {
-    if (!supabaseClient || !mgmtSelectedLoc || !mgmtSelectedAct || !mgmtSelectedOpt) return;
-    const { error } = await supabaseClient.from('activity_hierarchy')
-        .update({ [field]: val })
-        .eq('location', mgmtSelectedLoc)
-        .eq('activity', mgmtSelectedAct)
-        .eq('option', mgmtSelectedOpt);
-    if(error) console.error(error);
+  const handleUpdateActivityDate = async (field: 'activity_end_date' | 'activity_deadline', val: string) => { if (!supabaseClient || !mgmtSelectedLoc || !mgmtSelectedAct) return; const { error } = await supabaseClient.from('activity_hierarchy').update({ [field]: val }).eq('location', mgmtSelectedLoc).eq('activity', mgmtSelectedAct); if(error) console.error(error); };
+  const handleUpdateOptionDate = async (field: 'option_end_date' | 'option_deadline', val: string) => { if (!supabaseClient || !mgmtSelectedLoc || !mgmtSelectedAct || !mgmtSelectedOpt) return; const { error } = await supabaseClient.from('activity_hierarchy').update({ [field]: val }).eq('location', mgmtSelectedLoc).eq('activity', mgmtSelectedAct).eq('option', mgmtSelectedOpt); if(error) console.error(error); };
+  const handlePublishSettings = () => { alert("設定已發佈！前台表單選項已更新。"); fetchData(); };
+  const handleUpdateFieldConfig = async (key: string, field: string, value: any) => { if (!supabaseClient) return; setFieldConfigs(prev => prev.map(f => f.field_key === key ? { ...f, [field]: value } : f)); const current = fieldConfigs.find(f => f.field_key === key); if (current) { await supabaseClient.from('field_definitions').upsert({ ...current, [field]: value }, { onConflict: 'field_key' }); } };
+  
+  const handleToggleDeleteNote = async (id: string, status: boolean) => {
+    if (!supabaseClient) return;
+    await supabaseClient.from('notes').update({ is_deleted: !status }).eq('id', id);
     fetchData();
   };
 
-  const handlePublishSettings = () => {
-      alert("設定已發佈！前台表單選項已更新。");
-      fetchData();
+  const handleSubmitNote = async () => {
+    if (!validateForm()) return;
+    const signName = user?.user_metadata?.user_name || username;
+    const id2 = user?.user_metadata?.id_last4 || idLast4;
+    let finalData = { ...formData };
+
+    if (!fieldVisibility.transportation) finalData.transportation = '';
+    if (!fieldVisibility.volunteerGroup) finalData.volunteer_group = '';
+    if (!fieldVisibility.volunteerType) finalData.volunteer_type = '';
+    if (!fieldVisibility.volunteerDates) { finalData.start_date = ''; finalData.end_date = ''; }
+    if (!fieldVisibility.arrivalDeparture) { finalData.arrival_datetime = ''; finalData.departure_datetime = ''; }
+    if (!fieldVisibility.accommodation) { finalData.accommodation_option = ''; finalData.stay_start_date = ''; finalData.stay_end_date = ''; } 
+    else if (!fieldVisibility.accommodationDates) { finalData.stay_start_date = ''; finalData.stay_end_date = ''; }
+
+    const exactNode = hierarchyData.find(h => h.location === finalData.activity_location && h.activity === finalData.activity_name && h.option === finalData.activity_option);
+    const { endDate, deadline } = getHierarchyDates(finalData.activity_location, finalData.activity_name, finalData.activity_option);
+    const safeDateToISO = (val: string | null | undefined) => { if (!val || val.trim() === '') return null; try { if (val.endsWith('Z')) return val; const d = new Date(val); if (!isNaN(d.getTime())) return d.toISOString(); } catch (e) {} return val; };
+    const sanitizeDate = (dateStr: string | null | undefined) => (dateStr && dateStr.trim() !== '') ? dateStr : null;
+
+    const payload = { 
+        ...finalData, 
+        user_id: user?.id, 
+        audit_status: '免審核',
+        is_deleted: false, 
+        created_at: new Date().toISOString(),
+        start_date: safeDateToISO(finalData.start_date),
+        end_date: safeDateToISO(finalData.end_date),
+        stay_start_date: sanitizeDate(finalData.stay_start_date),
+        stay_end_date: sanitizeDate(finalData.stay_end_date),
+        arrival_datetime: safeDateToISO(finalData.arrival_datetime),
+        departure_datetime: safeDateToISO(finalData.departure_datetime),
+        sign_name: signName, id_2: id2,
+        activity_id: exactNode?.id || null, saved_end_date: endDate, saved_deadline: deadline
+    };
+
+    if (!supabaseClient) return alert('系統未連線');
+    const { audit_status, ...finalPayload } = payload as any;
+    const { error } = await supabaseClient.from('notes').insert([finalPayload]);
+    if (error) { console.error("Submit error:", error); alert('提交失敗: ' + error.message); } 
+    else { alert('已送出申請'); setFormData(INITIAL_FORM_DATA); await fetchData(); setActiveTab('history'); }
   };
 
-  const handleUpdateFieldConfig = async (key: string, field: string, value: any) => {
-    if (!supabaseClient) return;
-    setFieldConfigs(prev => prev.map(f => f.field_key === key ? { ...f, [field]: value } : f));
-    const current = fieldConfigs.find(f => f.field_key === key);
-    if (current) {
-        await supabaseClient.from('field_definitions').upsert({
-            ...current,
-            [field]: value
-        }, { onConflict: 'field_key' });
-    }
-  };
+  // ----------------------------------------------------------------------------
+  // 7. More Memos & Render Variables (Must be after Handlers/Helpers)
+  // ----------------------------------------------------------------------------
+  const selectedCompletedHierarchy = useMemo(() => {
+     if (!completedFilterMonth || !completedFilterLocAct) return [];
+     const [loc, act] = completedFilterLocAct.split(' | ');
+     
+     const filtered = hierarchyStatus.completed.filter(h => {
+         const date = h.option_end_date || h.activity_end_date;
+         return date && date.startsWith(completedFilterMonth) && h.location === loc && h.activity === act;
+     });
+     
+     const merged: { node: ActivityHierarchy, counts: { total: number, vol: number, dharma: number } }[] = [];
+     const groups: Record<string, ActivityHierarchy[]> = {};
+     filtered.forEach(h => {
+         const key = `${h.option || '(無行程)'}`;
+         if (!groups[key]) groups[key] = [];
+         groups[key].push(h);
+     });
+
+     Object.values(groups).forEach(groupNodes => {
+         const repNode = groupNodes[0];
+         let total = 0, vol = 0, dharma = 0;
+         
+         const targetNotes = notes.filter(n => {
+             if (n.is_deleted) return false;
+             
+             const isMatch = (n.activity_location === repNode.location) && 
+                             (n.activity_name === repNode.activity) && 
+                             (n.activity_option === repNode.option);
+
+             let isEnded = false;
+             if (n.saved_end_date) {
+                 isEnded = n.saved_end_date.startsWith(completedFilterMonth);
+             } else {
+                 const hDate = repNode.option_end_date || repNode.activity_end_date;
+                 isEnded = hDate ? hDate.startsWith(completedFilterMonth) : false;
+             }
+             
+             return isMatch && isEnded;
+         });
+
+         total = targetNotes.length;
+         vol = targetNotes.filter(n => n.identity === '發心義工').length;
+         dharma = targetNotes.filter(n => n.identity === '參加法會').length;
+
+         merged.push({ node: repNode, counts: { total, vol, dharma } });
+     });
+
+     return merged.sort((a, b) => (a.node.option || '').localeCompare(b.node.option || ''));
+  }, [hierarchyStatus.completed, completedFilterMonth, completedFilterLocAct, notes]);
+
+  const selectedCompletedNotes = useMemo(() => {
+      if (!completedFilterMonth || !completedFilterLocAct) return [];
+      const [loc, act] = completedFilterLocAct.split(' | ');
+
+      return notes.filter(n => {
+          if (n.is_deleted) return false;
+          if (n.activity_location !== loc || n.activity_name !== act) return false;
+          
+          let endDate = n.saved_end_date;
+          if (!endDate) {
+               const hNode = hierarchyData.find(h => h.location === n.activity_location && h.activity === n.activity_name && h.option === n.activity_option);
+               endDate = hNode?.option_end_date || hNode?.activity_end_date;
+          }
+          
+          if (!endDate) return false;
+          // Filter by month match
+          return endDate.startsWith(completedFilterMonth);
+      }).sort((a, b) => String(a.activity_option || '').localeCompare(String(b.activity_option || '')));
+  }, [notes, completedFilterMonth, completedFilterLocAct, hierarchyData]);
+
+  const filteredAdminNotes = useMemo(() => {
+    return notes.filter(n => {
+        const { isEnded } = getNoteStatus(n); 
+        // Admin Data 只顯示進行中 (未圓滿)
+        if (isEnded) return false;
+        
+        if (filterLoc && n.activity_location !== filterLoc) return false;
+        if (filterAct && n.activity_name !== filterAct) return false; 
+        if (searchText) { const search = searchText.toLowerCase(); return ( String(n.real_name || '').toLowerCase().includes(search) || String(n.dharma_name || '').toLowerCase().includes(search) || String(n.other_remarks || '').toLowerCase().includes(search) ); }
+        return true;
+    }).sort((a, b) => {
+        const getStatusVal = (note: Note) => { if (note.is_deleted) return 2; const { isEnded } = getNoteStatus(note); if (isEnded) return 1; return 0; };
+        const valA = getStatusVal(a); const valB = getStatusVal(b);
+        if (valA !== valB) return valA - valB;
+        if (a.activity_location !== b.activity_location) return String(a.activity_location || '').localeCompare(String(b.activity_location || ''));
+        if (a.activity_name !== b.activity_name) return String(a.activity_name || '').localeCompare(String(b.activity_name || ''));
+        return String(a.real_name || '').localeCompare(String(b.real_name || ''));
+    });
+  }, [notes, filterLoc, filterAct, searchText, getNoteStatus]); 
+
+  const duplicateMap = useMemo(() => {
+    const counts: Record<string, number> = {};
+    filteredAdminNotes.forEach(n => { if (!n.is_deleted) { const key = `${n.activity_location}|${n.activity_name}|${n.activity_option}|${n.real_name}`; counts[key] = (counts[key] || 0) + 1; } });
+    return counts;
+  }, [filteredAdminNotes]);
 
   const sortedHistoryNotes = useMemo(() => {
       let filtered = notes.filter(n => n.user_id === user?.id);
       if (historyFilterLoc) filtered = filtered.filter(n => n.activity_location === historyFilterLoc);
       
       return filtered.sort((a, b) => {
-          const statusA = getNoteStatus(a); 
-          const statusB = getNoteStatus(b); 
-          const aIsExpired = statusA.isEnded;
-          const bIsExpired = statusB.isEnded;
-          const aIsDeleted = a.is_deleted;
-          const bIsDeleted = b.is_deleted;
-          
-          if (aIsDeleted !== bIsDeleted) return aIsDeleted ? 1 : -1;
-          if (aIsExpired !== bIsExpired) return aIsExpired ? 1 : -1;
+          // 排序: 進行中 (0) -> 已圓滿 (1) -> 已刪除 (2)
+          const getWeight = (n: Note) => {
+             if (n.is_deleted) return 2;
+             const { isEnded } = getNoteStatus(n);
+             return isEnded ? 1 : 0;
+          };
+          const wA = getWeight(a);
+          const wB = getWeight(b);
+          if (wA !== wB) return wA - wB;
           
           const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
           const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
           return dateB - dateA;
       });
-  }, [notes, user, historyFilterLoc, todayDate, hierarchyData, getNoteStatus]);
+  }, [notes, user, historyFilterLoc, getNoteStatus]);
 
-  const getCardStatus = (note: Note) => {
-      if (note.is_deleted) return { text: '刪除', color: 'bg-red-500', isInactive: true };
-      const { isEnded } = getNoteStatus(note); 
-      if (isEnded) return { text: '已圓滿', color: 'bg-stone-400', isInactive: true };
-      
-      return { 
-        text: note.registration_option, 
-        color: note.registration_option === '新增' ? 'bg-emerald-600' : 'bg-amber-600',
-        isInactive: false 
-      };
-  };
-
-  const currentActivityDates = useMemo(() => {
-    if (!mgmtSelectedLoc || !mgmtSelectedAct) return { end: '', dead: '' };
-    const found = hierarchyData.find(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && (h.activity_end_date || h.activity_deadline));
-    return { end: found?.activity_end_date || '', dead: found?.activity_deadline || '' };
-  }, [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct]);
-
-  const currentOptionDates = useMemo(() => {
-    if (!mgmtSelectedLoc || !mgmtSelectedAct || !mgmtSelectedOpt) return { end: '', dead: '' };
-    const found = hierarchyData.find(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option === mgmtSelectedOpt && (h.option_end_date || h.option_deadline));
-    return { end: found?.option_end_date || '', dead: found?.option_deadline || '' };
-  }, [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
-
-  const filteredAdminNotes = useMemo(() => {
-    return notes.filter(n => {
-        const { isEnded } = getNoteStatus(n); 
-        
-        if (dataViewType === 'active') {
-            // 顯示未圓滿 (isEnded = false)
-            if (isEnded) return false;
-        } else {
-            // 顯示已圓滿 (isEnded = true)
-            if (!isEnded) return false;
-        }
-
-        if (filterLoc && n.activity_location !== filterLoc) return false;
-        if (filterAct && n.activity_name !== filterAct) return false; 
-        if (searchText) {
-            const search = searchText.toLowerCase();
-            return (
-                String(n.real_name || '').toLowerCase().includes(search) ||
-                String(n.dharma_name || '').toLowerCase().includes(search) ||
-                String(n.other_remarks || '').toLowerCase().includes(search)
-            );
-        }
-        return true;
-    }).sort((a, b) => {
-        // v87.45 排序邏輯
-        const getStatusVal = (note: Note) => { 
-            if (note.is_deleted) return 2; 
-            const { isEnded } = getNoteStatus(note); 
-            if (isEnded) return 1; 
-            return 0; 
-        };
-        const valA = getStatusVal(a);
-        const valB = getStatusVal(b);
-        if (valA !== valB) return valA - valB;
-
-        if (a.activity_location !== b.activity_location) return String(a.activity_location || '').localeCompare(String(b.activity_location || ''));
-        if (a.activity_name !== b.activity_name) return String(a.activity_name || '').localeCompare(String(b.activity_name || ''));
-
-        // 重複資料置底邏輯
-        const activeNotes = notes.filter(n => !n.is_deleted && !getNoteStatus(n).isEnded);
-        const activeDupMap: Record<string, number> = {};
-        activeNotes.forEach(n => {
-             // v87.55: 重複判斷 Key 加入 option
-             const k = `${n.activity_location}|${n.activity_name}|${n.activity_option}|${n.real_name}`;
-             activeDupMap[k] = (activeDupMap[k] || 0) + 1;
-        });
-        
-        // v87.55: 判斷 Key 更新
-        const isDupA = valA === 0 && (activeDupMap[`${a.activity_location}|${a.activity_name}|${a.activity_option}|${a.real_name}`] || 0) > 1;
-        const isDupB = valB === 0 && (activeDupMap[`${b.activity_location}|${b.activity_name}|${b.activity_option}|${b.real_name}`] || 0) > 1;
-        
-        if (isDupA !== isDupB) return isDupA ? 1 : -1;
-
-        if (a.activity_option !== b.activity_option) return String(a.activity_option || '').localeCompare(String(b.activity_option || ''));
-        if (a.transportation !== b.transportation) return String(a.transportation || '').localeCompare(String(b.transportation || ''));
-        return String(a.real_name || '').localeCompare(String(b.real_name || ''));
-    });
-  }, [notes, filterLoc, filterAct, searchText, getNoteStatus, dataViewType]); 
-
-  // --- 重複資料計算 ---
-  const duplicateMap = useMemo(() => {
-    const counts: Record<string, number> = {};
-    filteredAdminNotes.forEach(n => {
-        if (!n.is_deleted) {
-            // v87.55: Key 加入 option
-            const key = `${n.activity_location}|${n.activity_name}|${n.activity_option}|${n.real_name}`;
-            counts[key] = (counts[key] || 0) + 1;
-        }
-    });
-    return counts;
-  }, [filteredAdminNotes]);
-
-  const getCurrentDeadlineText = () => {
-      const { endDate, deadline } = getHierarchyDates(formData.activity_location, formData.activity_name, formData.activity_option);
-      let text = '';
-      if(deadline) text += ` 截止日:${deadline}`;
-      if(endDate) text += ` 結束日:${endDate}`;
-      return text;
-  };
-
-  // --- 統計數據計算 (v87.52: 支援圓滿篩選 & 勾選內容統計) ---
   const statisticsData = useMemo(() => {
     const baseData = notes.filter(n => !n.is_deleted);
     const filtered = baseData.filter(n => {
-        // v87.55: 使用 getNoteStatus
         const { isEnded } = getNoteStatus(n);
         if (statsViewType === 'active' && isEnded) return false;
         if (statsViewType === 'completed' && !isEnded) return false;
-
         if (statFilterLoc && n.activity_location !== statFilterLoc) return false;
         if (statFilterAct && n.activity_name !== statFilterAct) return false;
-        // v87.59: 新增行程篩選 (statFilterOpt)
         if (statFilterOpt && n.activity_option !== statFilterOpt) return false;
-        
         return true;
     });
 
@@ -1539,43 +1250,27 @@ export default function App() {
         filtered.forEach(n => {
             const key = groupBy(n) || '未指定';
             if (!result[key]) result[key] = { dharma_m: 0, dharma_f: 0, vol_m: 0, vol_f: 0 };
-            
             const isDharma = n.identity === '參加法會';
             const isMale = n.gender === '男';
-            
-            if (isDharma && isMale) result[key].dharma_m++;
-            else if (isDharma && !isMale) result[key].dharma_f++;
-            else if (!isDharma && isMale) result[key].vol_m++;
-            else if (!isDharma && !isMale) result[key].vol_f++;
+            if (isDharma && isMale) result[key].dharma_m++; else if (isDharma && !isMale) result[key].dharma_f++; else if (!isDharma && isMale) result[key].vol_m++; else if (!isDharma && !isMale) result[key].vol_f++;
         });
         return result;
     };
 
-    // v87.52 新增：勾選內容統計 - 修正型別問題 v87.54
     const contentStats: Record<string, { dharma_m: number, dharma_f: number, vol_m: number, vol_f: number }> = {};
     filtered.forEach(n => {
         let contents: string[] = [];
-        const raw = n.selected_contents as any; // Cast to any
+        const raw = n.selected_contents as any;
         if (Array.isArray(raw)) contents = raw.map((s: any) => String(s).replace(/[\[\]"]/g, '').trim()).filter(Boolean);
-        else if (typeof raw === 'string') {
-            let s = raw.trim();
-            if (s !== '[]' && s !== '{}' && s !== 'null' && s !== '""') {
-                s = s.replace(/^\[|\]$/g, '').replace(/^\{|\}$/g, '');
-                contents = s.split(',').map((item: string) => item.replace(/^"|"$/g, '').replace(/^'|'$/g, '').replace(/[\[\]"]/g, '').trim()).filter(Boolean);
-            }
-        }
+        else if (typeof raw === 'string') { let s = raw.trim(); if (s !== '[]' && s !== '{}' && s !== 'null' && s !== '""') { s = s.replace(/^\[|\]$/g, '').replace(/^\{|\}$/g, ''); contents = s.split(',').map((item: string) => item.replace(/^"|"$/g, '').replace(/^'|'$/g, '').replace(/[\[\]"]/g, '').trim()).filter(Boolean); } }
         
         contents.forEach(c => {
              if (!contentStats[c]) contentStats[c] = { dharma_m: 0, dharma_f: 0, vol_m: 0, vol_f: 0 };
              const isDharma = n.identity === '參加法會';
              const isMale = n.gender === '男';
-             if (isDharma && isMale) contentStats[c].dharma_m++;
-             else if (isDharma && !isMale) contentStats[c].dharma_f++;
-             else if (!isDharma && isMale) contentStats[c].vol_m++;
-             else if (!isDharma && !isMale) contentStats[c].vol_f++;
+             if (isDharma && isMale) contentStats[c].dharma_m++; else if (isDharma && !isMale) contentStats[c].dharma_f++; else if (!isDharma && isMale) contentStats[c].vol_m++; else if (!isDharma && !isMale) contentStats[c].vol_f++;
         });
     });
-
 
     return {
         byLocationActivity: aggregate(n => `${n.activity_location}-${n.activity_name}`),
@@ -1587,33 +1282,22 @@ export default function App() {
   }, [notes, statFilterLoc, statFilterAct, statFilterOpt, statsViewType, getNoteStatus]);
 
   const statsOverview = useMemo(() => {
-      let total = 0;
-      let dharma = 0;
-      let vol = 0;
-      
+      let total = 0; let dharma = 0; let vol = 0;
       const baseData = notes.filter(n => !n.is_deleted);
       const filtered = baseData.filter(n => {
-          // v87.55: 使用 getNoteStatus
           const { isEnded } = getNoteStatus(n);
           if (statsViewType === 'active' && isEnded) return false;
           if (statsViewType === 'completed' && !isEnded) return false;
-
           if (statFilterLoc && n.activity_location !== statFilterLoc) return false;
           if (statFilterAct && n.activity_name !== statFilterAct) return false;
-          // v87.59
           if (statFilterOpt && n.activity_option !== statFilterOpt) return false;
           return true;
       });
-
-      filtered.forEach(n => {
-          total++;
-          if (n.identity === '參加法會') dharma++;
-          if (n.identity === '發心義工') vol++;
-      });
-
+      filtered.forEach(n => { total++; if (n.identity === '參加法會') dharma++; if (n.identity === '發心義工') vol++; });
       return { total, dharma, vol };
   }, [notes, statFilterLoc, statFilterAct, statFilterOpt, statsViewType, getNoteStatus]);
 
+  // 8. Final Render Variables
   const submitStatus = getSubmitButtonStatus();
 
   if (loading) {
@@ -1704,7 +1388,8 @@ export default function App() {
              { id: 'audit', icon: <ClipboardCheck className="w-5 h-5"/>, label: '審核', admin: true }, 
              { id: 'admin_data', icon: <FileSpreadsheet className="w-5 h-5"/>, label: '資料', admin: true }, 
              { id: 'statistics', icon: <BarChart3 className="w-5 h-5"/>, label: '統計', admin: true },
-             { id: 'admin_settings', icon: <Settings className="w-5 h-5"/>, label: '設定', admin: true }
+             { id: 'admin_settings', icon: <Settings className="w-5 h-5"/>, label: '設定', admin: true },
+             { id: 'completed_cases', icon: <Archive className="w-5 h-5"/>, label: '結案', admin: true }
             ].map((tab) => (
              (!tab.admin || isAdmin) && (
                <button 
@@ -1766,15 +1451,15 @@ export default function App() {
                  <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
                      <div className="md:col-span-3 space-y-1">
                        <label className="text-sm font-bold text-[#4f093c] ml-1">姓名*</label>
-                       <input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.real_name} onChange={e=>setFormData({...formData, real_name: e.target.value})} />
+                       <input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.real_name || ''} onChange={e=>setFormData({...formData, real_name: e.target.value})} />
                      </div>
                      <div className="md:col-span-2 space-y-1">
                        <label className="text-sm font-bold text-[#4f093c] ml-1">法名</label>
-                       <input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.dharma_name} onChange={e=>setFormData({...formData, dharma_name: e.target.value})} />
+                       <input className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.dharma_name || ''} onChange={e=>setFormData({...formData, dharma_name: e.target.value})} />
                      </div>
                      <div className="md:col-span-2 space-y-1">
                         <label className="text-sm font-bold text-[#4f093c] ml-1">性別*</label>
-                        <select className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.gender} onChange={e=>setFormData({...formData, gender: e.target.value})}>
+                        <select className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.gender || ''} onChange={e=>setFormData({...formData, gender: e.target.value})}>
                           <option value="">請選擇</option>
                           <option value="男">男</option>
                           <option value="女">女</option>
@@ -1782,14 +1467,14 @@ export default function App() {
                      </div>
                      <div className="md:col-span-2 space-y-1">
                        <label className="text-sm font-bold text-[#4f093c] ml-1">報名選項*</label>
-                       <select className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.registration_option} onChange={e=>setFormData({...formData, registration_option: e.target.value})}>
+                       <select className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.registration_option || ''} onChange={e=>setFormData({...formData, registration_option: e.target.value})}>
                          <option value="新增">新增</option>
                          <option value="異動">異動</option>
                        </select>
                      </div>
                      <div className="md:col-span-3 space-y-1">
                        <label className="text-sm font-bold text-[#4f093c] ml-1">屬性*</label>
-                       <select className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.registrant_type} onChange={e=>setFormData({...formData, registrant_type: e.target.value})}>
+                       <select className="w-full p-2 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.registrant_type || ''} onChange={e=>setFormData({...formData, registrant_type: e.target.value})}>
                          <option value="禪修班學員">禪修班學員</option>
                          <option value="上過課學員">上過課學員</option>
                          <option value="學員家人">學員家人</option>
@@ -1810,21 +1495,21 @@ export default function App() {
                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                         <div className="space-y-2">
                           <label className="text-sm font-bold text-[#4f093c] ml-1">1. 地點*</label>
-                          <select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.activity_location} onChange={e=>setFormData({...formData, activity_location: e.target.value, activity_name: '', activity_option: '', selected_contents: []})}>
+                          <select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" value={formData.activity_location || ''} onChange={e=>setFormData({...formData, activity_location: e.target.value, activity_name: '', activity_option: '', selected_contents: []})}>
                             <option value="">請選擇地點</option>
                             {locations.map(l => <option key={l} value={l}>{l}</option>)}
                           </select>
                         </div>
                         <div className="space-y-2">
                           <label className="text-sm font-bold text-[#4f093c] ml-1">2. 活動*</label>
-                          <select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" disabled={!formData.activity_location} value={formData.activity_name} onChange={e=>setFormData({...formData, activity_name: e.target.value, activity_option: '', selected_contents: []})}>
+                          <select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" disabled={!formData.activity_location} value={formData.activity_name || ''} onChange={e=>setFormData({...formData, activity_name: e.target.value, activity_option: '', selected_contents: []})}>
                             <option value="">請選擇活動</option>
                             {renderActivityOptions()}
                           </select>
                         </div>
                         <div className="space-y-2">
                           <label className="text-sm font-bold text-[#4f093c] ml-1">3. 行程</label>
-                          <select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" disabled={!formData.activity_name} value={formData.activity_option} onChange={e=>setFormData({...formData, activity_option: e.target.value, selected_contents: []})}>
+                          <select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl focus:ring-2 focus:ring-[#4f093c]/20 bg-white" disabled={!formData.activity_name} value={formData.activity_option || ''} onChange={e=>setFormData({...formData, activity_option: e.target.value, selected_contents: []})}>
                             <option value="">請選擇行程</option>
                             {renderOptionOptions()}
                           </select>
@@ -1834,7 +1519,7 @@ export default function App() {
                  {formData.activity_option.includes('自訂') && (
                    <div className="space-y-2">
                      <label className="text-sm font-bold text-[#4f093c] ml-1">自訂備註*</label>
-                     <textarea rows={2} className="w-full p-3 text-lg border border-orange-200 rounded-xl focus:ring-2 focus:ring-orange-200 bg-white" value={formData.other_remarks} onChange={e=>setFormData({...formData, other_remarks: e.target.value})} />
+                     <textarea rows={2} className="w-full p-3 text-lg border border-orange-200 rounded-xl focus:ring-2 focus:ring-orange-200 bg-white" value={formData.other_remarks || ''} onChange={e=>setFormData({...formData, other_remarks: e.target.value})} />
                    </div>
                  )}
 
@@ -1858,7 +1543,7 @@ export default function App() {
                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div className="space-y-2">
                           <label className="text-sm font-bold text-[#4f093c] ml-1">身分*</label>
-                          <select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl bg-white" value={formData.identity} onChange={e=>setFormData({...formData, identity: e.target.value})}>
+                          <select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl bg-white" value={formData.identity || ''} onChange={e=>setFormData({...formData, identity: e.target.value})}>
                             <option value="">請選擇</option>
                             <option value="參加法會">參加法會</option>
                             <option value="發心義工">發心義工</option>
@@ -1867,7 +1552,7 @@ export default function App() {
                         {fieldVisibility.transportation && (
                           <div className="space-y-2">
                             <label className="text-sm font-bold text-[#4f093c] ml-1">交通*</label>
-                            <select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl bg-white" value={formData.transportation} onChange={e=>setFormData({...formData, transportation: e.target.value})}>
+                            <select className="w-full p-3 text-lg font-bold border border-stone-200 rounded-xl bg-white" value={formData.transportation || ''} onChange={e=>setFormData({...formData, transportation: e.target.value})}>
                               <option value="">請選擇</option>
                               {filteredTransportOptions.map(o => <option key={o} value={o}>{o}</option>)}
                             </select>
@@ -1891,14 +1576,14 @@ export default function App() {
                  {fieldVisibility.volunteerGroup && (
                    <div className="space-y-2">
                      <label className="text-sm font-bold text-[#4f093c] ml-1">義工組別*</label>
-                     <input className="w-full p-3 text-lg border border-stone-200 rounded-xl bg-white" value={formData.volunteer_group} onChange={e=>setFormData({...formData, volunteer_group: e.target.value})} />
+                     <input className="w-full p-3 text-lg border border-stone-200 rounded-xl bg-white" value={formData.volunteer_group || ''} onChange={e=>setFormData({...formData, volunteer_group: e.target.value})} />
                    </div>
                  )}
                  
                  {fieldVisibility.volunteerType && (
                    <div className="space-y-2">
                      <label className="text-sm font-bold text-[#4f093c] ml-1">義工選項*</label>
-                     <select className="w-full p-3 text-lg border border-stone-200 rounded-xl bg-white" value={formData.volunteer_type} onChange={e=>setFormData({...formData, volunteer_type: e.target.value})}>
+                     <select className="w-full p-3 text-lg border border-stone-200 rounded-xl bg-white" value={formData.volunteer_type || ''} onChange={e=>setFormData({...formData, volunteer_type: e.target.value})}>
                        <option value="">請選擇</option>
                        <option value="一般義工-精舍設定組別">一般義工-精舍設定組別</option>
                        <option value="長期義工-請至平台報名">長期義工-請至平台報名</option>
@@ -1924,7 +1609,7 @@ export default function App() {
                     <div className="p-4 bg-white/50 rounded-xl border border-stone-200 space-y-4">
                         <div className="space-y-2">
                           <label className="text-sm font-bold text-[#4f093c]">安單選項</label>
-                          <select className="w-full p-3 text-lg border rounded-xl bg-white" value={formData.accommodation_option} onChange={e=>setFormData({...formData, accommodation_option: e.target.value})}>
+                          <select className="w-full p-3 text-lg border rounded-xl bg-white" value={formData.accommodation_option || ''} onChange={e=>setFormData({...formData, accommodation_option: e.target.value})}>
                             <option value="不安單">不安單</option>
                             <option value="須安單">須安單</option>
                           </select>
@@ -1941,7 +1626,7 @@ export default function App() {
                  {/* 其他備註 */}
                  <div className="pt-4 border-t border-stone-100">
                     <label className="text-sm font-bold text-[#4f093c] ml-1 mb-2 block">其他備註</label>
-                    <textarea rows={2} className="w-full p-3 text-lg border border-stone-200 rounded-xl bg-white" placeholder="其他備註..." value={formData.memo} onChange={e=>setFormData({...formData, memo: e.target.value})} />
+                    <textarea rows={2} className="w-full p-3 text-lg border border-stone-200 rounded-xl bg-white" placeholder="其他備註..." value={formData.memo || ''} onChange={e=>setFormData({...formData, memo: e.target.value})} />
                  </div>
 
                  <button onClick={handleSubmitNote} disabled={loading || submitStatus.disabled} className={`w-full py-4 rounded-2xl font-bold text-xl shadow-lg transition-transform active:scale-[0.99] ${submitStatus.disabled ? 'bg-stone-300 text-stone-500 cursor-not-allowed' : 'bg-[#4f093c] text-white hover:bg-[#3d072e] shadow-[#4f093c]/20'}`}>
@@ -1971,19 +1656,10 @@ export default function App() {
                  const isInactive = status.isInactive;
                  
                  const rawContents: any = n.selected_contents;
-                 let safeContents: string[] = [];
-                 if (Array.isArray(rawContents)) {
-                     safeContents = rawContents.map((s: any) => String(s).replace(/[\[\]"]/g, '').trim()).filter(Boolean);
-                 } else if (typeof rawContents === 'string') {
-                     let s = rawContents.trim();
-                     if (s !== '[]' && s !== '{}' && s !== 'null' && s !== '""') {
-                         s = s.replace(/^\[|\]$/g, '').replace(/^\{|\}$/g, '');
-                         safeContents = s.split(',').map((item: string) => item.replace(/^"|"$/g, '').replace(/^'|'$/g, '').replace(/[\[\]"]/g, '').trim()).filter(Boolean);
-                     }
-                 }
-                 safeContents = safeContents.filter(s => s && s !== '[]');
+                 const safeContents = safeRenderContents(rawContents);
                  const hasContents = safeContents.length > 0;
                  const hasRemarks = typeof n.other_remarks === 'string' && n.other_remarks.trim().length > 0 && n.other_remarks !== 'null';
+                 const hasMemo = typeof n.memo === 'string' && n.memo.trim().length > 0 && n.memo !== 'null';
 
                  return (
                    <div key={n.id} className={`rounded-[24px] shadow-sm border overflow-hidden ${isInactive ? 'bg-stone-50 border-stone-200' : 'hover:shadow-md transition-all border-stone-100'}`} style={{ backgroundColor: isInactive ? '#f5f5f4' : CARD_BG_COLOR }}>
@@ -2023,13 +1699,13 @@ export default function App() {
                                     {hasContents && (
                                         <div className={`text-sm font-bold flex items-start gap-1 ${isInactive ? 'text-stone-400' : 'text-orange-800'}`}>
                                             <span className={`px-1.5 py-0.5 rounded text-[11px] shrink-0 mt-0.5 ${isInactive ? 'bg-stone-200 text-stone-500' : 'bg-white/60 text-orange-600'}`}>內容</span> 
-                                            <span>{safeContents.join('、')}</span>
+                                            <span>{safeContents}</span>
                                         </div>
                                     )}
                                     {hasRemarks && (
                                         <div className={`text-sm font-bold flex items-start gap-1 ${isInactive ? 'text-stone-400' : 'text-orange-800'}`}>
                                             <span className={`px-1.5 py-0.5 rounded text-[11px] shrink-0 mt-0.5 ${isInactive ? 'bg-stone-200 text-stone-500' : 'bg-white/60 text-orange-600'}`}>備註</span>
-                                            <span>{n.other_remarks}</span>
+                                            <span>{String(n.other_remarks)}</span>
                                         </div>
                                     )}
                                 </div>
@@ -2060,7 +1736,7 @@ export default function App() {
                                 )}
                                 <p className={`mt-1 ${isInactive ? 'text-stone-400' : 'text-stone-600'}`}><span className="font-bold opacity-70">安單：</span> {n.accommodation_option || '不安單'} {n.accommodation_option === '須安單' ? `(${n.stay_start_date} ~ ${n.stay_end_date})` : ''}</p>
                                 
-                                {n.memo && <div className={`mt-2 text-xs italic ${isInactive ? 'text-stone-300' : 'text-stone-400'}`}>其他備註: {n.memo}</div>}
+                                {n.memo && <div className={`mt-2 text-xs italic ${isInactive ? 'text-stone-300' : 'text-stone-400'}`}>其他備註: {String(n.memo)}</div>}
                              </div>
                              
                              <div className="pt-2 flex justify-between items-end">
@@ -2091,14 +1767,9 @@ export default function App() {
         {activeTab === 'statistics' && isAdmin && (
           <div className={`p-8 rounded-[32px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}>
             <div className="flex justify-between items-center mb-8">
-              <h3 className="text-3xl font-bold text-[#4f093c]">報名統計</h3>
+              <h3 className="text-3xl font-bold text-[#4f093c]">報名統計 (進行中)</h3>
               <div className="flex gap-3 items-center">
-                {/* 狀態切換按鈕 (v87.52) */}
-                <div className="flex bg-stone-200 rounded-lg p-1 mr-2">
-                    <button onClick={() => setStatsViewType('active')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${statsViewType === 'active' ? 'bg-white text-[#4f093c] shadow-sm' : 'text-stone-500 hover:text-stone-700'}`}>未圓滿</button>
-                    <button onClick={() => setStatsViewType('completed')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${statsViewType === 'completed' ? 'bg-white text-[#4f093c] shadow-sm' : 'text-stone-500 hover:text-stone-700'}`}>已圓滿</button>
-                </div>
-                {/* 雙重篩選：地點 + 活動 */}
+                {/* 狀態切換按鈕移除，預設只顯示進行中 */}
                 <select className="p-2 bg-white border-none rounded-xl text-base font-bold text-stone-600 outline-none" value={statFilterLoc} onChange={e => { setStatFilterLoc(e.target.value); setStatFilterAct(''); }}>
                   <option value="">所有地點</option>
                   {locations.map(l => <option key={l} value={l}>{l}</option>)}
@@ -2107,7 +1778,6 @@ export default function App() {
                     <option value="">{statFilterLoc ? '所有活動' : '請先選地點'}</option>
                     {statActivityOptions.map(a => <option key={a} value={a}>{a}</option>)}
                 </select>
-                {/* 第三層篩選：行程 (v87.59) */}
                 <select className="p-2 bg-white border-none rounded-xl text-base font-bold text-stone-600 outline-none max-w-[12rem] truncate" value={statFilterOpt} onChange={e => setStatFilterOpt(e.target.value)} disabled={!statFilterAct}>
                     <option value="">{statFilterAct ? '所有行程' : '請先選活動'}</option>
                     {statOptionOptions.map(o => <option key={o} value={o}>{o}</option>)}
@@ -2123,28 +1793,16 @@ export default function App() {
             </div>
 
             <div id="stats-content-area">
-                {/* v87.59: 顯示圓滿日期 */}
-                {selectedActivityEndDate && (
-                    <div className="mb-4 text-center">
-                        <span className="bg-stone-600 text-white px-4 py-1 rounded-full text-sm font-bold">
-                            圓滿日期: {selectedActivityEndDate}
-                        </span>
-                    </div>
-                )}
-
-                {/* 總數概覽卡片 */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
                     <OverviewCard title="總報名人數" count={statsOverview.total} icon={Users} color="bg-[#4f093c]" />
                     <OverviewCard title="參加法會" count={statsOverview.dharma} icon={UserCheck} color="bg-blue-600" />
                     <OverviewCard title="發心義工" count={statsOverview.vol} icon={Briefcase} color="bg-orange-500" />
                 </div>
 
-                {/* 身分比例結構圖 (Main Proportion Chart) */}
                 <div className="mb-10">
                     <IdentityRatioChart data={statisticsData.byIdentity} />
                 </div>
 
-                {/* Vertical stack, full width charts, auto height based on content */}
                 <div className="space-y-10">
                    <div>
                        <StatsBarChart title="各場人數 (地點活動)" data={statisticsData.byLocationActivity} />
@@ -2155,7 +1813,6 @@ export default function App() {
                    <div>
                        <StatsBarChart title="交通方式人數" data={statisticsData.byTransport} />
                    </div>
-                   {/* v87.52 新增：勾選內容統計 */}
                    <div>
                        <StatsBarChart title="勾選內容統計" data={statisticsData.byContent} />
                    </div>
@@ -2164,18 +1821,12 @@ export default function App() {
           </div>
         )}
 
-        {/* Admin Data Tab (Updated v87.52 & v87.80) */}
+        {/* Admin Data Tab (Removed Completed toggle) */}
         {activeTab === 'admin_data' && isAdmin && (
           <div className={`p-8 rounded-[32px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}>
             <div className="flex justify-between items-center mb-8">
-              <h3 className="text-3xl font-bold text-[#4f093c]">資料總覽-所有報名資料</h3>
+              <h3 className="text-3xl font-bold text-[#4f093c]">資料總覽 (進行中)</h3>
               <div className="flex gap-3 items-center">
-                {/* v87.52 新增狀態篩選切換 */}
-                <div className="flex bg-stone-200 rounded-lg p-1 mr-2">
-                    <button onClick={() => setDataViewType('active')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${dataViewType === 'active' ? 'bg-white text-[#4f093c] shadow-sm' : 'text-stone-500 hover:text-stone-700'}`}>未圓滿</button>
-                    <button onClick={() => setDataViewType('completed')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${dataViewType === 'completed' ? 'bg-white text-[#4f093c] shadow-sm' : 'text-stone-500 hover:text-stone-700'}`}>已圓滿</button>
-                </div>
-
                 <select className="p-2 bg-white border-none rounded-xl text-base font-bold text-stone-600 outline-none" value={filterLoc} onChange={e => { setFilterLoc(e.target.value); setFilterAct(''); }}><option value="">所有地點</option>{locations.map(l => <option key={l} value={l}>{l}</option>)}</select>
                 <select className="p-2 bg-white border-none rounded-xl text-base font-bold text-stone-600 outline-none max-w-[12rem] truncate" value={filterAct} onChange={e => setFilterAct(e.target.value)} disabled={!filterLoc}><option value="">{filterLoc ? '所有活動' : '請先選地點'}</option>{filterActivityOptions.map(a => <option key={a} value={a}>{a}</option>)}</select>
                 <div className="relative">
@@ -2186,7 +1837,7 @@ export default function App() {
               </div>
             </div>
             
-            {/* Table (v87.80: Removed Resizing, Reverted to Table-Fixed) */}
+            {/* Table (Reverted to Standard Table Layout - No Resizing) */}
             <div className="overflow-x-auto rounded-2xl border border-stone-100">
               <table className="w-full text-left text-sm bg-white table-fixed">
                 <thead className="bg-[#4f093c] text-white font-bold">
@@ -2197,37 +1848,26 @@ export default function App() {
                       <th className="p-4 w-[230px]">義工資訊</th>
                       <th className="p-4 w-[160px]">備註</th>
                       <th className="p-4 w-[100px]">狀態</th>
-                      {/* v87.52: 僅在未圓滿 (active) 狀態下顯示刪除欄位 */}
-                      {dataViewType === 'active' && (
-                          <th className="p-4 text-center w-[80px]">刪除</th>
-                      )}
+                      {/* Always show delete column here since it's active data */}
+                      <th className="p-4 text-center w-[80px]">刪除</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white">
                   {filteredAdminNotes.map(n => {
                       const { isEnded } = getNoteStatus(n); 
-                      const rawContents: any = n.selected_contents;
-                      let safeContents: string[] = [];
-                      if (Array.isArray(rawContents)) {
-                          safeContents = rawContents.map((s: any) => String(s).replace(/[\[\]"]/g, '').trim()).filter(Boolean);
-                      } else if (typeof rawContents === 'string') {
-                          let s = rawContents.trim();
-                          if (s !== '[]' && s !== '{}' && s !== 'null' && s !== '""') {
-                              s = s.replace(/^\[|\]$/g, '').replace(/^\{|\}$/g, '');
-                              safeContents = s.split(',').map((item: string) => item.replace(/^"|"$/g, '').replace(/^'|'$/g, '').replace(/[\[\]"]/g, '').trim()).filter(Boolean);
-                          }
-                      }
-                      safeContents = safeContents.filter(s => s && s !== '[]');
+                      // Only render if !isEnded (active)
+                      if (isEnded) return null;
+
+                      const safeContents = safeRenderContents(n.selected_contents);
                       const hasContents = safeContents.length > 0;
                       const hasRemarks = typeof n.other_remarks === 'string' && n.other_remarks.trim().length > 0 && n.other_remarks !== 'null';
                       const hasMemo = typeof n.memo === 'string' && n.memo.trim().length > 0 && n.memo !== 'null';
                       
                       const mergedRemarks = [];
-                      if (hasContents) mergedRemarks.push(safeContents.join('、'));
+                      if (hasContents) mergedRemarks.push(safeContents);
                       if (hasRemarks) mergedRemarks.push(n.other_remarks);
 
                       let statusBadge; 
-                      // v87.52: 樣式調整 (已圓滿資料不反灰)
                       let rowStyle = "transition-colors border-b border-white"; 
                       let rowStyleObj = {};
                       let textStyle = "text-slate-800"; 
@@ -2240,21 +1880,12 @@ export default function App() {
                         textStyle = "text-stone-400"; 
                         subTextStyle = "text-stone-400"; 
                         boldStyle = "font-bold text-xl text-stone-400"; 
-                      } else if(isEnded) { 
-                        statusBadge = <span className="px-2 py-0.5 rounded text-xs font-bold w-fit bg-stone-200 text-stone-600">已圓滿</span>; 
-                        // v87.52: 已圓滿資料背景微調，文字不反灰
-                        rowStyle = "bg-stone-50/50 border-b border-white"; 
-                        // 維持正常顏色
-                        textStyle = "text-slate-800"; 
-                        subTextStyle = "text-stone-600"; 
-                        boldStyle = "font-bold text-xl text-slate-800"; 
                       } else { 
                         statusBadge = <span className={`px-2 py-0.5 rounded text-xs font-bold w-fit ${n.registration_option === '新增' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{n.registration_option}</span>;
                         rowStyle = "hover:brightness-95 transition-all border-b border-white"; 
                         rowStyleObj = { backgroundColor: CARD_BG_COLOR };
                       } 
 
-                      // v87.55: 重複判斷 Key 加入 option
                       const dupKey = `${n.activity_location}|${n.activity_name}|${n.activity_option}|${n.real_name}`;
                       const isDuplicate = !n.is_deleted && (duplicateMap[dupKey] || 0) > 1;
 
@@ -2267,7 +1898,6 @@ export default function App() {
                         </td>
                         <td className="p-4 align-top overflow-hidden break-words">
                           <div className={boldStyle}>{n.real_name}</div>
-                          {/* 法名無括號，前加 / */}
                           <div className={`text-sm font-bold mt-1 ${subTextStyle}`}>{n.dharma_name ? ` / ${n.dharma_name}` : ' / (無)'} / {n.gender}</div>
                           <div className={subTextStyle}>{n.registrant_type}</div>
                           <div className={`${n.is_deleted ? 'text-stone-400' : 'text-[#4f093c]'} font-bold`}>{n.identity}</div>
@@ -2305,7 +1935,7 @@ export default function App() {
                         <td className="p-4 align-top w-40 max-w-[10rem]">
                           <div className="flex flex-col gap-1 break-words whitespace-normal leading-tight">
                             {mergedRemarks.length > 0 && <div className={subTextStyle}>{mergedRemarks.join(' / ')}</div>}
-                            {hasMemo && <div className={`${subTextStyle} mt-2 pt-2 border-t border-stone-200/50 border-dashed`}>{n.memo}</div>}
+                            {hasMemo && <div className={`${subTextStyle} mt-2 pt-2 border-t border-stone-200/50 border-dashed`}>{String(n.memo)}</div>}
                           </div>
                         </td>
                         <td className="p-4 align-top overflow-hidden break-words">
@@ -2320,17 +1950,14 @@ export default function App() {
                             </div>
                           </div>
                         </td>
-                        {/* v87.52: 刪除欄位僅在 Active View 顯示 */}
-                        {dataViewType === 'active' && (
-                            <td className="p-4 align-top text-center overflow-hidden">
-                                <input 
-                                    type="checkbox" 
-                                    className="w-5 h-5 rounded border-stone-300 text-red-600 focus:ring-red-600 cursor-pointer"
-                                    checked={n.is_deleted} 
-                                    onChange={() => handleToggleDeleteNote(n.id, n.is_deleted)} 
-                                />
-                            </td>
-                        )}
+                        <td className="p-4 align-top text-center overflow-hidden">
+                            <input 
+                                type="checkbox" 
+                                className="w-5 h-5 rounded border-stone-300 text-red-600 focus:ring-red-600 cursor-pointer"
+                                checked={n.is_deleted} 
+                                onChange={() => handleToggleDeleteNote(n.id, n.is_deleted)} 
+                            />
+                        </td>
                       </tr>
                   );})}
                 </tbody>
@@ -2339,7 +1966,7 @@ export default function App() {
           </div>
         )}
 
-        {/* Users Tab (v87.52: Renamed to 學員) */}
+        {/* Users Tab */}
         {activeTab === 'users' && isAdmin && (
           <div className="space-y-8 animate-in fade-in">
              <div className={`p-8 rounded-[32px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}>
@@ -2384,7 +2011,7 @@ export default function App() {
           </div>
         )}
 
-        {/* Audit Tab (Restored) */}
+        {/* Audit Tab */}
         {activeTab === 'audit' && isAdmin && (
           <div className="space-y-8 animate-in fade-in">
             <div className={`p-8 rounded-[32px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}>
@@ -2428,7 +2055,7 @@ export default function App() {
           </div>
         )}
 
-        {/* Admin Settings Tab (Updated v87.59: Auto Hide Completed + Completed List + Backfill) */}
+        {/* Admin Settings Tab (Reverted - Removed Completed List) */}
         {activeTab === 'admin_settings' && isAdmin && (
            <div className={`p-10 rounded-[40px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}>
               <div className="flex justify-between items-start mb-8">
@@ -2491,7 +2118,11 @@ export default function App() {
                  {/* Column 3: Option */}
                  <div className="flex flex-col bg-white/50 rounded-3xl border border-stone-100 overflow-hidden">
                     <div className="p-3 border-b border-stone-100 bg-white"><h4 className="font-bold text-slate-700 flex items-center gap-2"><div className="w-2 h-6 bg-[#4f093c] rounded-full"></div>行程</h4></div>
+                    
+                    {/* 新增輸入框 - p-2 */}
                     <div className="p-2 flex gap-2 border-b border-stone-100"><input className="flex-1 p-2 text-sm border rounded-lg" placeholder="新行程..." disabled={!mgmtSelectedAct} value={newOption} onChange={e=>setNewOption(e.target.value)} /><button onClick={addOption} className="bg-[#4f093c] text-white p-2 rounded-lg hover:bg-[#3d072e] disabled:opacity-50 shrink-0"><Plus/></button></div>
+
+                    {/* Date Settings for Option */}
                     <div className="px-3 pt-3 pb-2 space-y-3 bg-white border-b border-stone-100">
                         <div className="space-y-1">
                             <label className="text-sm font-bold text-red-600 uppercase tracking-wider">截止報名</label>
@@ -2515,6 +2146,8 @@ export default function App() {
                  {/* Column 4: Content */}
                  <div className="flex flex-col bg-white/50 rounded-3xl border border-stone-100 overflow-hidden">
                     <div className="p-3 border-b border-stone-100 bg-white"><h4 className="font-bold text-slate-700 flex items-center gap-2"><div className="w-2 h-6 bg-[#4f093c] rounded-full"></div>內容</h4></div>
+                    
+                    {/* 新增輸入框 - p-2 */}
                     <div className="p-2 flex gap-2 border-b border-stone-100"><input className="flex-1 p-2 text-sm border rounded-lg" placeholder="新內容..." disabled={!mgmtSelectedOpt} value={newContent} onChange={e=>setNewContent(e.target.value)} /><button onClick={addContent} className="bg-[#4f093c] text-white p-2 rounded-lg hover:bg-[#3d072e] disabled:opacity-50 shrink-0"><Plus/></button></div>
 
                     <div className="flex-1 overflow-y-auto p-2 space-y-1">
@@ -2527,56 +2160,7 @@ export default function App() {
                     </div>
                  </div>
               </div>
-
-              {/* v87.59 新增：已圓滿活動列表 (v87.65 Optimized) */}
-              <div className="mt-12 bg-white rounded-3xl p-8 border border-stone-200">
-                 <div className="flex justify-between items-center mb-6">
-                    <h4 className="font-bold text-[#4f093c] text-xl flex items-center gap-2"><Archive className="w-6 h-6"/> 已圓滿活動列表 (唯讀)</h4>
-                    {/* v87.65: 新增篩選器 */}
-                    <select 
-                      className="p-2 border border-stone-300 rounded-lg text-sm text-slate-700 bg-white hover:bg-stone-50 cursor-pointer outline-none focus:ring-2 focus:ring-[#4f093c]/20 transition-all"
-                      value={completedFilterDate}
-                      onChange={(e) => setCompletedFilterDate(e.target.value)}
-                    >
-                      <option value="">請選擇圓滿年/月...</option>
-                      {completedDates.map(date => <option key={date} value={date}>{date}</option>)}
-                    </select>
-                 </div>
-
-                 <div className="overflow-x-auto rounded-2xl border border-stone-200">
-                   <table className="w-full text-left border-collapse">
-                      <thead className="bg-stone-50 border-b border-stone-200 text-stone-600">
-                          <tr>
-                            <th className="p-4 font-bold text-lg">地點 / 活動</th>
-                            <th className="p-4 font-bold text-lg">行程 & 截止/結束日期</th>
-                          </tr>
-                      </thead>
-                      <tbody className="divide-y divide-stone-100">
-                        {Object.entries(groupedCompletedActivities).map(([key, items]) => (
-                            <tr key={key} className="hover:bg-stone-50/30">
-                                <td className="p-4 font-bold text-lg text-slate-800 align-top w-1/3 border-r border-stone-100">{key}</td>
-                                <td className="p-4 align-top text-slate-800">
-                                    <div className="space-y-3">
-                                      {items.map(i => (
-                                        <div key={i.id} className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-4 p-2 rounded-lg bg-stone-50 border border-stone-100">
-                                            <span className="font-bold text-base">{i.option || '(無行程)'}</span>
-                                            <span className="text-sm font-mono text-stone-500 whitespace-nowrap">
-                                                截止: {i.option_deadline || i.activity_deadline || '-'} <span className="mx-1 text-stone-300">|</span> 結束: {i.option_end_date || i.activity_end_date}
-                                            </span>
-                                        </div>
-                                      ))}
-                                    </div>
-                                </td>
-                            </tr>
-                        ))}
-                        {Object.keys(groupedCompletedActivities).length === 0 && (
-                            <tr><td colSpan={2} className="p-8 text-center text-stone-400 italic">{completedFilterDate ? '查無符合資料' : '請選擇日期以檢視資料'}</td></tr>
-                        )}
-                      </tbody>
-                   </table>
-                 </div>
-              </div>
-
+              
               <div className="mt-20">
                  <div className="flex justify-between items-center mb-6">
                     <h3 className="text-3xl font-bold text-[#4f093c]">2、欄位管理</h3>
