@@ -457,7 +457,9 @@ const StatsBarChart = ({ title, data }: { title: string, data: Record<string, { 
 // 4. 主元件 App (Main Component)
 // ============================================================================
 export default function App() {
+  // ----------------------------------------------------------------------------
   // 1. Hooks & State
+  // ----------------------------------------------------------------------------
   const [supabaseClient, setSupabaseClient] = useState<any>(null);
   const [user, setUser] = useState<any>(null);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
@@ -490,9 +492,6 @@ export default function App() {
   const [filterAct, setFilterAct] = useState<string>(''); 
   const [searchText, setSearchText] = useState<string>('');
   
-  // 資料狀態篩選 (Admin Data Tab)
-  // const [dataViewType, setDataViewType] = useState<'active' | 'completed'>('active'); // Removed as requested
-
   // 統計頁籤的篩選器
   const [statFilterLoc, setStatFilterLoc] = useState<string>('');
   const [statFilterAct, setStatFilterAct] = useState<string>('');
@@ -502,6 +501,7 @@ export default function App() {
   // 結案頁籤篩選器
   const [completedFilterMonth, setCompletedFilterMonth] = useState<string>('');
   const [completedFilterLocAct, setCompletedFilterLocAct] = useState<string>('');
+  const [completedFilterOption, setCompletedFilterOption] = useState<string>('');
 
   const [formData, setFormData] = useState(INITIAL_FORM_DATA);
 
@@ -633,42 +633,7 @@ export default function App() {
     return all;
   }, [formData.activity_option]);
 
-  const fieldVisibility = useMemo(() => {
-    const isJingshe = formData.activity_location === '精舍';
-    const isZhongtai = formData.activity_location === '中台';
-    const isVolunteer = formData.identity === '發心義工';
-    const isBus = formData.transportation === '大車-精舍統一行程';
-    const isOneDay = formData.activity_option.includes('當天來回');
-    const needsAccommodation = formData.accommodation_option === '須安單';
-
-    return {
-      transportation: !isJingshe,
-      volunteerGroup: isVolunteer,
-      volunteerType: isZhongtai && isVolunteer,
-      volunteerDates: !isJingshe && isVolunteer, 
-      arrivalDeparture: !isJingshe && !isBus,    
-      accommodation: !isJingshe && !isBus && !isOneDay,
-      accommodationDates: (!isJingshe && !isBus && !isOneDay) && needsAccommodation 
-    };
-  }, [formData]);
-
-  const adminActivities = useMemo(() => [...new Set(hierarchyStatus.active.filter(h => h.location === mgmtSelectedLoc && h.activity).map(h => h.activity as string))].sort(), [hierarchyStatus.active, mgmtSelectedLoc]);
-  const adminOptions = useMemo(() => [...new Set(hierarchyStatus.active.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option).map(h => h.option as string))].sort(), [hierarchyStatus.active, mgmtSelectedLoc, mgmtSelectedAct]);
-  const adminContents = useMemo(() => hierarchyStatus.active.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option === mgmtSelectedOpt && h.content), [hierarchyStatus.active, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
-
-  const currentActivityDates = useMemo(() => {
-    if (!mgmtSelectedLoc || !mgmtSelectedAct) return { end: '', dead: '' };
-    const found = hierarchyData.find(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && (h.activity_end_date || h.activity_deadline));
-    return { end: found?.activity_end_date || '', dead: found?.activity_deadline || '' };
-  }, [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct]);
-
-  const currentOptionDates = useMemo(() => {
-    if (!mgmtSelectedLoc || !mgmtSelectedAct || !mgmtSelectedOpt) return { end: '', dead: '' };
-    const found = hierarchyData.find(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option === mgmtSelectedOpt && (h.option_end_date || h.option_deadline));
-    return { end: found?.option_end_date || '', dead: found?.option_deadline || '' };
-  }, [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
-
-  // UseEffect for Transport Auto-select
+  // UseEffect for Transport Auto-select (Needs filteredTransportOptions)
   useEffect(() => {
     const hasLargeBus = filteredTransportOptions.some(o => o.includes("大車"));
     setFormData(prev => ({ ...prev, transportation: hasLargeBus ? "大車-精舍統一行程" : "小車-自訂抵離寺" }));
@@ -690,6 +655,38 @@ export default function App() {
           setFormData(p => ({ ...p, end_date: p.end_date || fullDateTime, stay_end_date: p.stay_end_date || dateOnly }));
       }
   }, [formData.departure_datetime]);
+
+  // Admin UI Helpers Memos
+  const currentActivityDates = useMemo(() => {
+    if (!mgmtSelectedLoc || !mgmtSelectedAct) return { end: '', dead: '' };
+    const found = hierarchyData.find(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && (h.activity_end_date || h.activity_deadline));
+    return { end: found?.activity_end_date || '', dead: found?.activity_deadline || '' };
+  }, [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct]);
+
+  const currentOptionDates = useMemo(() => {
+    if (!mgmtSelectedLoc || !mgmtSelectedAct || !mgmtSelectedOpt) return { end: '', dead: '' };
+    const found = hierarchyData.find(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option === mgmtSelectedOpt && (h.option_end_date || h.option_deadline));
+    return { end: found?.option_end_date || '', dead: found?.option_deadline || '' };
+  }, [hierarchyData, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
+
+  const fieldVisibility = useMemo(() => {
+    const isJingshe = formData.activity_location === '精舍';
+    const isZhongtai = formData.activity_location === '中台';
+    const isVolunteer = formData.identity === '發心義工';
+    const isBus = formData.transportation === '大車-精舍統一行程';
+    const isOneDay = formData.activity_option.includes('當天來回');
+    const needsAccommodation = formData.accommodation_option === '須安單';
+
+    return {
+      transportation: !isJingshe,
+      volunteerGroup: isVolunteer,
+      volunteerType: isZhongtai && isVolunteer,
+      volunteerDates: !isJingshe && isVolunteer, 
+      arrivalDeparture: !isJingshe && !isBus,    
+      accommodation: !isJingshe && !isBus && !isOneDay,
+      accommodationDates: (!isJingshe && !isBus && !isOneDay) && needsAccommodation 
+    };
+  }, [formData]);
 
   // ----------------------------------------------------------------------------
   // 4. Logic Callbacks
@@ -1104,6 +1101,8 @@ export default function App() {
                              (n.activity_name === repNode.activity) && 
                              (n.activity_option === repNode.option);
 
+             if (!isMatch) return false;
+
              let isEnded = false;
              if (n.saved_end_date) {
                  isEnded = n.saved_end_date.startsWith(completedFilterMonth);
@@ -1125,11 +1124,19 @@ export default function App() {
      return merged.sort((a, b) => (a.node.option || '').localeCompare(b.node.option || ''));
   }, [hierarchyStatus.completed, completedFilterMonth, completedFilterLocAct, notes]);
 
+  const completedOptionChoices = useMemo(() => {
+     const options = new Set<string>();
+     selectedCompletedHierarchy.forEach(item => {
+        options.add(item.node.option || '(無行程)');
+     });
+     return [...options].sort();
+  }, [selectedCompletedHierarchy]);
+
   const selectedCompletedNotes = useMemo(() => {
       if (!completedFilterMonth || !completedFilterLocAct) return [];
       const [loc, act] = completedFilterLocAct.split(' | ');
 
-      return notes.filter(n => {
+      let targetNotes = notes.filter(n => {
           if (n.is_deleted) return false;
           if (n.activity_location !== loc || n.activity_name !== act) return false;
           
@@ -1140,10 +1147,19 @@ export default function App() {
           }
           
           if (!endDate) return false;
-          // Filter by month match
           return endDate.startsWith(completedFilterMonth);
-      }).sort((a, b) => String(a.activity_option || '').localeCompare(String(b.activity_option || '')));
-  }, [notes, completedFilterMonth, completedFilterLocAct, hierarchyData]);
+      });
+
+      if (completedFilterOption) {
+          targetNotes = targetNotes.filter(n => (n.activity_option || '(無行程)') === completedFilterOption);
+      }
+
+      return targetNotes.sort((a, b) => String(a.activity_option || '').localeCompare(String(b.activity_option || '')));
+  }, [notes, completedFilterMonth, completedFilterLocAct, completedFilterOption, hierarchyData, todayDate]);
+
+  const adminActivities = useMemo(() => [...new Set(hierarchyStatus.active.filter(h => h.location === mgmtSelectedLoc && h.activity).map(h => h.activity as string))].sort(), [hierarchyStatus.active, mgmtSelectedLoc]);
+  const adminOptions = useMemo(() => [...new Set(hierarchyStatus.active.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option).map(h => h.option as string))].sort(), [hierarchyStatus.active, mgmtSelectedLoc, mgmtSelectedAct]);
+  const adminContents = useMemo(() => hierarchyStatus.active.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option === mgmtSelectedOpt && h.content), [hierarchyStatus.active, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
 
   const filterActivityOptions = useMemo(() => {
     let source = hierarchyData;
@@ -1167,7 +1183,6 @@ export default function App() {
   const filteredAdminNotes = useMemo(() => {
     return notes.filter(n => {
         const { isEnded } = getNoteStatus(n); 
-        // Admin Data 只顯示進行中 (未圓滿)
         if (isEnded) return false;
         
         if (filterLoc && n.activity_location !== filterLoc) return false;
@@ -1175,12 +1190,22 @@ export default function App() {
         if (searchText) { const search = searchText.toLowerCase(); return ( String(n.real_name || '').toLowerCase().includes(search) || String(n.dharma_name || '').toLowerCase().includes(search) || String(n.other_remarks || '').toLowerCase().includes(search) ); }
         return true;
     }).sort((a, b) => {
-        const getStatusVal = (note: Note) => { if (note.is_deleted) return 2; const { isEnded } = getNoteStatus(note); if (isEnded) return 1; return 0; };
-        const valA = getStatusVal(a); const valB = getStatusVal(b);
-        if (valA !== valB) return valA - valB;
-        if (a.activity_location !== b.activity_location) return String(a.activity_location || '').localeCompare(String(b.activity_location || ''));
-        if (a.activity_name !== b.activity_name) return String(a.activity_name || '').localeCompare(String(b.activity_name || ''));
-        return String(a.real_name || '').localeCompare(String(b.real_name || ''));
+        // 1. 刪除排最後 (False < True)
+        if (a.is_deleted !== b.is_deleted) return a.is_deleted ? 1 : -1;
+        
+        // 2. 地點活動 (Location + Activity)
+        const locActA = (a.activity_location || '') + (a.activity_name || '');
+        const locActB = (b.activity_location || '') + (b.activity_name || '');
+        if (locActA !== locActB) return locActA.localeCompare(locActB);
+        
+        // 3. 行程 (Option)
+        if (a.activity_option !== b.activity_option) return (a.activity_option || '').localeCompare(b.activity_option || '');
+        
+        // 4. 交通 (Transportation)
+        if (a.transportation !== b.transportation) return (a.transportation || '').localeCompare(b.transportation || '');
+        
+        // 5. 姓名 (Name)
+        return (a.real_name || '').localeCompare(b.real_name || '');
     });
   }, [notes, filterLoc, filterAct, searchText, getNoteStatus]); 
 
@@ -1195,7 +1220,6 @@ export default function App() {
       if (historyFilterLoc) filtered = filtered.filter(n => n.activity_location === historyFilterLoc);
       
       return filtered.sort((a, b) => {
-          // 排序順序: 進行中 (0) -> 已圓滿 (1) -> 已刪除 (2)
           const getStatusWeight = (n: Note) => {
               if (n.is_deleted) return 2;
               const { isEnded } = getNoteStatus(n);
@@ -1208,7 +1232,6 @@ export default function App() {
           
           if (weightA !== weightB) return weightA - weightB;
 
-          // 同狀態下，依時間倒序
           const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
           const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
           return dateB - dateA;
@@ -1302,7 +1325,6 @@ export default function App() {
              <p className="text-sm text-slate-400 font-bold">{authMode === 'login' ? '會員登入' : authMode === 'signup' ? '註冊新帳號' : '密碼重設申請'}</p>
           </div>
           
-          {/* Missing Supabase Client Warning */}
           {!supabaseClient && (
             <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl text-sm font-bold flex items-start gap-2">
                <ServerCrash className="w-5 h-5 shrink-0 mt-0.5" />
@@ -1927,7 +1949,7 @@ export default function App() {
                         </td>
                         <td className="p-4 align-top w-40 max-w-[10rem]">
                           <div className="flex flex-col gap-1 break-words whitespace-normal leading-tight">
-                            {mergedRemarks.join(' / ')}
+                            {mergedRemarks.length > 0 && <div className={subTextStyle}>{mergedRemarks.join(' / ')}</div>}
                             {hasMemo && <div className={`${subTextStyle} mt-2 pt-2 border-t border-stone-200/50 border-dashed`}>{String(n.memo)}</div>}
                           </div>
                         </td>
@@ -1964,7 +1986,7 @@ export default function App() {
           <div className="space-y-8 animate-in fade-in">
              <div className={`p-10 rounded-[40px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}>
                  <div className="flex justify-between items-center mb-8">
-                     <h3 className="text-3xl font-bold text-[#4f093c] flex items-center gap-2"><Archive className="w-8 h-8"/> 已圓滿案件</h3>
+                     <h3 className="text-3xl font-bold text-[#4f093c] flex items-center gap-2"><Archive className="w-8 h-8"/> 已圓滿活動</h3>
                      <div className="flex gap-3">
                          <select 
                              className="p-3 border-none rounded-xl text-base font-bold text-stone-600 outline-none bg-white shadow-sm"
@@ -1988,8 +2010,13 @@ export default function App() {
                  </div>
 
                  {/* Summary Table */}
-                 <div className="bg-white rounded-3xl p-6 border border-stone-200 mb-10 overflow-hidden">
-                     <h4 className="font-bold text-[#4f093c] text-xl mb-4 pl-2 border-l-4 border-[#4f093c]">活動行程總表</h4>
+                 <div className="bg-white rounded-3xl p-6 border border-stone-200 mb-10 overflow-hidden" id="completed-summary-table">
+                     <div className="flex justify-between items-center mb-4 pl-2 border-l-4 border-[#4f093c]">
+                         <h4 className="font-bold text-[#4f093c] text-xl">活動行程總表</h4>
+                         <button onClick={() => downloadPDF('completed-summary-table', '活動行程總表')} className="bg-stone-100 text-stone-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-stone-200 shadow-sm flex items-center gap-1 transition-colors">
+                             <Download className="w-4 h-4"/> 匯出此表 (PDF)
+                         </button>
+                     </div>
                      {selectedCompletedHierarchy.length > 0 ? (
                          <div className="overflow-x-auto rounded-xl border border-stone-100">
                              <table className="w-full text-left text-sm">
@@ -2027,9 +2054,19 @@ export default function App() {
                      <div className="bg-white rounded-3xl p-6 border border-stone-200">
                          <div className="flex justify-between items-center mb-6 pl-2 border-l-4 border-[#4f093c]">
                              <h4 className="font-bold text-[#4f093c] text-xl">詳細報名資料列表</h4>
-                             <button onClick={() => {/* Reuse existing export logic but pass filtered data */}} className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-emerald-700 shadow-sm flex items-center gap-1">
-                                 <Download className="w-4 h-4"/> 匯出此表
-                             </button>
+                             <div className="flex items-center gap-3">
+                                 <select 
+                                     className="p-2 border border-stone-200 rounded-lg text-sm font-bold text-stone-600 outline-none bg-white shadow-sm"
+                                     value={completedFilterOption}
+                                     onChange={(e) => setCompletedFilterOption(e.target.value)}
+                                 >
+                                     <option value="">全部行程</option>
+                                     {completedOptionChoices.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                                 </select>
+                                 <button onClick={() => {/* Reuse existing export logic */}} className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-emerald-700 shadow-sm flex items-center gap-1">
+                                     <Download className="w-4 h-4"/> 匯出此表
+                                 </button>
+                             </div>
                          </div>
                          
                          <div className="overflow-x-auto rounded-xl border border-stone-100">
@@ -2091,95 +2128,6 @@ export default function App() {
                      </div>
                  )}
              </div>
-          </div>
-        )}
-
-        {/* Users Tab */}
-        {activeTab === 'users' && isAdmin && (
-          <div className="space-y-8 animate-in fade-in">
-             <div className={`p-8 rounded-[32px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}>
-                <h4 className="font-bold text-[#4f093c] mb-6 flex items-center gap-2 text-3xl"><Plus className="w-8 h-8"/> 新增使用者</h4>
-                <div className="flex flex-col md:flex-row gap-4">
-                  <input className="flex-1 p-3 border rounded-xl text-lg" placeholder="姓名" value={newUser.name} onChange={e=>setNewUser({...newUser, name: e.target.value})} />
-                  <input className="w-32 p-3 border rounded-xl text-lg" placeholder="ID後4碼" value={newUser.id4} onChange={e=>setNewUser({...newUser, id4: e.target.value})} />
-                  <input className="w-40 p-3 border rounded-xl text-lg" placeholder="密碼" value={newUser.pwd} onChange={e=>setNewUser({...newUser, pwd: e.target.value})} />
-                  <button onClick={handleCreateUser} className="bg-blue-600 text-white px-6 rounded-xl font-bold text-lg hover:bg-blue-700 shadow-md shadow-blue-200">新增</button>
-                </div>
-             </div>
-             
-             <div className={`rounded-[32px] shadow-sm border border-stone-100 overflow-hidden`} style={{ backgroundColor: CARD_BG_COLOR }}>
-                <table className="w-full text-lg text-left">
-                  <thead className="bg-[#4f093c] text-white font-bold border-b border-[#4f093c]">
-                    <tr>
-                      <th className="p-5">姓名</th>
-                      <th className="p-5">ID後4碼</th>
-                      <th className="p-5">是否為管理員</th>
-                      <th className="p-5">是否刪除</th>
-                      <th className="p-5">報名筆數</th>
-                      <th className="p-5 text-right">是否停用</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-stone-100">
-                    {allUsers.map(u => { 
-                      const count = notes.filter(n => n.user_id === u.uid).length; 
-                      return (
-                        <tr key={u.id} className="hover:bg-stone-50/50">
-                          <td className="p-5 font-bold text-[#4f093c]">{u.user_name}</td>
-                          <td className="p-5 font-mono text-stone-400">{u.id_last4}</td>
-                          <td className="p-5"><input type="checkbox" checked={u.is_admin} onChange={() => handleToggleAdmin(u.uid!, u.is_admin)} className="w-5 h-5 rounded border-stone-300 text-[#4f093c] focus:ring-[#4f093c]" /></td>
-                          <td className="p-5"><span className={`px-2 py-1 rounded text-xs font-bold ${u.is_disabled ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'}`}>{u.is_disabled ? '已停用' : '正常'}</span></td>
-                          <td className="p-5 font-bold text-stone-600 pl-8">{count}</td>
-                          <td className="p-5 text-right"><input type="checkbox" checked={u.is_disabled} onChange={() => handleToggleUserStatus(u.uid!, u.is_disabled)} className="w-5 h-5 rounded border-stone-300 text-red-600 focus:ring-red-600" /></td>
-                        </tr>
-                      ); 
-                    })}
-                  </tbody>
-                </table>
-             </div>
-          </div>
-        )}
-
-        {/* Audit Tab */}
-        {activeTab === 'audit' && isAdmin && (
-          <div className="space-y-8 animate-in fade-in">
-            <div className={`p-8 rounded-[32px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}>
-              <h2 className="text-3xl font-bold text-[#4f093c] mb-2">審核中心</h2>
-              <p className="text-sm text-stone-500 mb-8">處理用戶的密碼重設申請</p>
-              <div className="overflow-x-auto rounded-2xl border border-stone-100">
-                <table className="w-full text-left text-sm bg-white">
-                  <thead className="bg-[#4f093c] text-white font-bold">
-                    <tr>
-                      <th className="p-4">申請人姓名</th>
-                      <th className="p-4">ID後4碼</th>
-                      <th className="p-4">申請時間</th>
-                      <th className="p-4">狀態</th>
-                      <th className="p-4 text-right">操作</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-stone-200">
-                    {resetRequests.map(r => (
-                      <tr key={r.id} className="hover:bg-stone-50 transition-colors">
-                        <td className="p-4 font-bold text-lg text-slate-800">{r.user_name}</td>
-                        <td className="p-4 font-mono text-stone-600">{r.id_last4}</td>
-                        <td className="p-4 text-stone-500 font-mono text-xs">{formatDateTime(r.created_at)}</td>
-                        <td className="p-4">
-                           {r.status === 'pending' ? (<span className="text-amber-600 bg-amber-100 px-2 py-1 rounded text-xs font-bold">待審核</span>) : r.status === 'completed' ? (<span className="text-emerald-600 bg-emerald-100 px-2 py-1 rounded text-xs font-bold">已批准</span>) : (<span className="text-stone-600 bg-stone-200 px-2 py-1 rounded text-xs font-bold">已拒絕</span>)}
-                        </td>
-                        <td className="p-4 flex gap-2 justify-end">
-                          {r.status === 'pending' && (
-                            <>
-                              <button onClick={()=>handleResetAction(r, 'approve')} className="px-4 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 shadow-sm shadow-blue-200 transition-colors">批准</button>
-                              <button onClick={()=>handleResetAction(r, 'reject')} className="px-4 py-2 bg-stone-200 text-stone-700 font-bold rounded-lg hover:bg-stone-300 transition-colors">拒絕</button>
-                            </>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                    {resetRequests.length === 0 && (<tr><td colSpan={5} className="p-12 text-center text-stone-400 font-bold bg-white">目前無任何申請紀錄</td></tr>)}
-                  </tbody>
-                </table>
-              </div>
-            </div>
           </div>
         )}
 
