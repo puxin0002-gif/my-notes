@@ -1234,43 +1234,27 @@ export default function App() {
          const dharma = targetNotes.filter(n => n.identity === '參加法會').length;
 
          // 計算內容統計
-         let contentStatsStr = '';
-         if (!node.option) {
-             // 若無行程 (Option為空)，計算姓名的筆數 (依照需求)
-             const nameCounts: Record<string, number> = {};
-             targetNotes.forEach(n => {
-                 const name = n.real_name || '未命名';
-                 nameCounts[name] = (nameCounts[name] || 0) + 1;
-             });
-             // 格式化為 姓名(筆數)
-             const entries = Object.entries(nameCounts);
-             if (entries.length > 0) {
-                 contentStatsStr = entries.map(([k, v]) => `${k}(${v})`).join(', ');
-             } else {
-                 contentStatsStr = '-';
+         const contentCountMap: Record<string, number> = {};
+         targetNotes.forEach(n => {
+             const raw = n.selected_contents as any;
+             let contents: string[] = [];
+             if (Array.isArray(raw)) contents = raw.map((s: any) => String(s).replace(/[\[\]"]/g, '').trim()).filter(Boolean);
+             else if (typeof raw === 'string') { 
+                let s = raw.trim(); 
+                if (s !== '[]' && s !== '{}' && s !== 'null' && s !== '""') { 
+                    s = s.replace(/^\[|\]$/g, '').replace(/^\{|\}$/g, ''); 
+                    contents = s.split(',').map((item: string) => item.replace(/^"|"$/g, '').replace(/^'|'$/g, '').replace(/[\[\]"]/g, '').trim()).filter(Boolean); 
+                } 
              }
-         } else {
-             // 一般行程，計算勾選內容
-             const contentCountMap: Record<string, number> = {};
-             targetNotes.forEach(n => {
-                 const raw = n.selected_contents as any;
-                 let contents: string[] = [];
-                 if (Array.isArray(raw)) contents = raw.map((s: any) => String(s).replace(/[\[\]"]/g, '').trim()).filter(Boolean);
-                 else if (typeof raw === 'string') { 
-                    let s = raw.trim(); 
-                    if (s !== '[]' && s !== '{}' && s !== 'null' && s !== '""') { 
-                        s = s.replace(/^\[|\]$/g, '').replace(/^\{|\}$/g, ''); 
-                        contents = s.split(',').map((item: string) => item.replace(/^"|"$/g, '').replace(/^'|'$/g, '').replace(/[\[\]"]/g, '').trim()).filter(Boolean); 
-                    } 
-                 }
-                 contents.forEach(c => {
-                     contentCountMap[c] = (contentCountMap[c] || 0) + 1;
-                 });
+             contents.forEach(c => {
+                 contentCountMap[c] = (contentCountMap[c] || 0) + 1;
              });
-             contentStatsStr = Object.entries(contentCountMap)
-                .map(([k, v]) => `${k}(${v})`)
-                .join(', ');
-         }
+         });
+         let contentStatsStr = Object.entries(contentCountMap)
+            .map(([k, v]) => `${k}(${v})`)
+            .join(', ');
+         
+         if (!contentStatsStr) contentStatsStr = '-';
 
          result.push({
              node,
@@ -1829,7 +1813,7 @@ export default function App() {
                           </select>
                         </div>
                         {fieldVisibility.accommodationDates && (
-                          <div className="grid grid-cols-2 gap-4">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <input type="date" min={todayDate} className="w-full p-2 border rounded-lg bg-white" value={formData.stay_start_date || ''} onChange={e=>setFormData({...formData, stay_start_date: e.target.value})} />
                             <input type="date" min={formData.stay_start_date || todayDate} className="w-full p-2 border rounded-lg bg-white" value={formData.stay_end_date || ''} onChange={e=>setFormData({...formData, stay_end_date: e.target.value})} />
                           </div>
@@ -2254,7 +2238,7 @@ export default function App() {
                                          <th className="p-4 w-[180px]">地點 / 活動</th>
                                          <th className="p-4">行程</th>
                                          <th className="p-4 w-[150px]">截止 / 結束日期</th>
-                                         <th className="p-4">內容統計 / 姓名統計</th>
+                                         <th className="p-4">內容統計</th>
                                          <th className="p-4 text-center">總人數</th>
                                          <th className="p-4 text-center">義工</th>
                                          <th className="p-4 text-center">法會</th>
@@ -2315,6 +2299,7 @@ export default function App() {
                              <table className="w-full text-left text-sm table-fixed">
                                  <thead className="bg-[#4f093c] text-white font-bold">
                                      <tr>
+                                         <th className="p-3 w-[150px]">地點 / 活動</th>
                                          <th className="p-3 w-[150px]">行程</th>
                                          <th className="p-3 w-[200px]">姓名資料</th>
                                          <th className="p-3 w-[200px]">交通住宿</th>
@@ -2330,6 +2315,10 @@ export default function App() {
                                          
                                          return (
                                              <tr key={n.id} className="hover:bg-stone-50 transition-colors">
+                                                 <td className="p-3 align-top font-bold text-slate-700">
+                                                     <div>{n.activity_location}</div>
+                                                     <div className="text-xs text-stone-500 mt-1">{n.activity_name}</div>
+                                                 </td>
                                                  <td className="p-3 align-top font-bold text-blue-600">{n.activity_option}</td>
                                                  <td className="p-3 align-top">
                                                      <div className="font-bold text-slate-800 text-base">{n.real_name}</div>
@@ -2363,7 +2352,7 @@ export default function App() {
                                              </tr>
                                          );
                                      })}
-                                     {selectedCompletedNotes.length === 0 && <tr><td colSpan={6} className="p-4 text-center text-stone-400">此條件下無報名資料</td></tr>}
+                                     {selectedCompletedNotes.length === 0 && <tr><td colSpan={7} className="p-4 text-center text-stone-400">此條件下無報名資料</td></tr>}
                                  </tbody>
                              </table>
                          </div>
