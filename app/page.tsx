@@ -356,30 +356,6 @@ const ResponsiveHeader = ({ title, children, color = "bg-[#4f093c]" }: { title: 
   );
 };
 
-// 修改：帶有清除按鈕的日期輸入框 (增加右側內距防止重疊)
-const DateInputWithClear = ({ type = "datetime-local", value, onChange, min, className, ...props }: any) => (
-  <div className="relative w-full">
-    <input 
-      type={type} 
-      min={min} 
-      className={`${className} pr-16`} // 增加內距，確保文字不會被 X 按鈕遮住
-      value={value || ''} 
-      onChange={onChange} 
-      {...props}
-    />
-    {value && (
-      <button 
-        type="button"
-        onClick={() => onChange({ target: { value: '' } })} 
-        className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 hover:text-red-500 transition-colors bg-white/80 p-1.5 rounded-full z-10"
-        title="重置日期"
-      >
-        <XCircle className="w-5 h-5" />
-      </button>
-    )}
-  </div>
-);
-
 const OverviewCard = ({ title, count, icon: Icon, color }: { title: string, count: number, icon: any, color: string }) => (
     <div className="bg-white p-6 rounded-2xl shadow-sm border border-stone-100 flex items-center gap-5 break-inside-avoid">
         <div className={`p-4 rounded-full ${color} text-white`}><Icon className="w-8 h-8"/></div>
@@ -1647,7 +1623,7 @@ export default function App() {
       </div>
 
       {/* Main Content Area */}
-      <div className="w-full max-w-[1600px] mx-auto p-2 md:p-6 lg:p-10">
+      <div className="w-full max-w-[98%] mx-auto p-1 md:p-6 lg:p-8">
         
         {/* Bulletin Tab */}
         {activeTab === 'bulletin' && (
@@ -1682,7 +1658,7 @@ export default function App() {
 
         {/* Form Tab */}
         {activeTab === 'form' && (
-          <div className={`p-8 md:p-12 rounded-[40px] shadow-lg border border-stone-100 animate-in slide-in-from-bottom-4`} style={{ backgroundColor: CARD_BG_COLOR }}>
+          <div className={`p-5 md:p-12 rounded-[40px] shadow-lg border border-stone-100 animate-in slide-in-from-bottom-4`} style={{ backgroundColor: CARD_BG_COLOR }}>
              {submitStatus.disabled && (
                  <div className={`mb-8 p-4 border-l-4 font-bold rounded-r-xl flex items-center gap-3 ${submitStatus.text.includes('已圓滿') ? 'bg-stone-100 border-stone-500 text-stone-600' : 'bg-red-50 border-red-500 text-red-700'}`}>
                      <AlertTriangle className="w-5 h-5"/> {submitStatus.text}
@@ -1804,25 +1780,23 @@ export default function App() {
 
                  {fieldVisibility.arrivalDeparture && (
                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                     <div className="space-y-2">
-                       <label className="text-sm font-bold text-[#4f093c] ml-1">抵寺時間*</label>
-                       <DateInputWithClear 
-                         type="datetime-local" 
-                         min={currentDateTime} 
-                         className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white" 
-                         value={formData.arrival_datetime || ''} 
-                         onChange={(e: any) => setFormData({...formData, arrival_datetime: e.target.value})} 
-                       />
+                     <div className="space-y-1">
+                       <div className="flex justify-between items-center">
+                         <label className="text-sm font-bold text-[#4f093c] ml-1">抵寺時間*</label>
+                         {formData.arrival_datetime && (
+                            <button onClick={()=>setFormData({...formData, arrival_datetime: ''})} className="text-xs text-red-500 font-bold bg-white px-2 py-1 rounded-full border border-red-100 shadow-sm hover:bg-red-50 transition-colors">清除</button>
+                         )}
+                       </div>
+                       <input type="datetime-local" min={currentDateTime} className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white" value={formData.arrival_datetime || ''} onChange={e=>setFormData({...formData, arrival_datetime: e.target.value})} />
                      </div>
-                     <div className="space-y-2">
-                       <label className="text-sm font-bold text-[#4f093c] ml-1">離寺時間*</label>
-                       <DateInputWithClear 
-                         type="datetime-local" 
-                         min={formData.arrival_datetime || currentDateTime} 
-                         className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white" 
-                         value={formData.departure_datetime || ''} 
-                         onChange={(e: any) => setFormData({...formData, departure_datetime: e.target.value})} 
-                       />
+                     <div className="space-y-1">
+                       <div className="flex justify-between items-center">
+                         <label className="text-sm font-bold text-[#4f093c] ml-1">離寺時間*</label>
+                         {formData.departure_datetime && (
+                            <button onClick={()=>setFormData({...formData, departure_datetime: ''})} className="text-xs text-red-500 font-bold bg-white px-2 py-1 rounded-full border border-red-100 shadow-sm hover:bg-red-50 transition-colors">清除</button>
+                         )}
+                       </div>
+                       <input type="datetime-local" min={formData.arrival_datetime || currentDateTime} className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white" value={formData.departure_datetime || ''} onChange={e=>setFormData({...formData, departure_datetime: e.target.value})} />
                      </div>
                    </div>
                  )}
@@ -1848,25 +1822,23 @@ export default function App() {
                  
                  {fieldVisibility.volunteerDates && (
                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                     <div className="space-y-2">
-                       <label className="text-sm font-bold text-[#4f093c] ml-1">發心開始*</label>
-                       <DateInputWithClear 
-                         type="datetime-local" 
-                         min={currentDateTime} 
-                         className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white focus:ring-2 focus:ring-[#4f093c]/20 outline-none shadow-sm" 
-                         value={formData.start_date || ''} 
-                         onChange={(e: any) => setFormData({...formData, start_date: e.target.value})} 
-                       />
+                     <div className="space-y-1">
+                       <div className="flex justify-between items-center">
+                         <label className="text-sm font-bold text-[#4f093c] ml-1">發心開始*</label>
+                         {formData.start_date && (
+                            <button onClick={()=>setFormData({...formData, start_date: ''})} className="text-xs text-red-500 font-bold bg-white px-2 py-1 rounded-full border border-red-100 shadow-sm hover:bg-red-50 transition-colors">清除</button>
+                         )}
+                       </div>
+                       <input type="datetime-local" min={currentDateTime} className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white focus:ring-2 focus:ring-[#4f093c]/20 outline-none shadow-sm" value={formData.start_date || ''} onChange={e=>setFormData({...formData, start_date: e.target.value})} />
                      </div>
-                     <div className="space-y-2">
-                       <label className="text-sm font-bold text-[#4f093c] ml-1">發心結束*</label>
-                       <DateInputWithClear 
-                         type="datetime-local" 
-                         min={formData.start_date || currentDateTime} 
-                         className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white focus:ring-2 focus:ring-[#4f093c]/20 outline-none shadow-sm" 
-                         value={formData.end_date || ''} 
-                         onChange={(e: any) => setFormData({...formData, end_date: e.target.value})} 
-                       />
+                     <div className="space-y-1">
+                       <div className="flex justify-between items-center">
+                         <label className="text-sm font-bold text-[#4f093c] ml-1">發心結束*</label>
+                         {formData.end_date && (
+                            <button onClick={()=>setFormData({...formData, end_date: ''})} className="text-xs text-red-500 font-bold bg-white px-2 py-1 rounded-full border border-red-100 shadow-sm hover:bg-red-50 transition-colors">清除</button>
+                         )}
+                       </div>
+                       <input type="datetime-local" min={formData.start_date || currentDateTime} className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white focus:ring-2 focus:ring-[#4f093c]/20 outline-none shadow-sm" value={formData.end_date || ''} onChange={e=>setFormData({...formData, end_date: e.target.value})} />
                      </div>
                    </div>
                  )}
@@ -1882,20 +1854,24 @@ export default function App() {
                         </div>
                         {fieldVisibility.accommodationDates && (
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <DateInputWithClear 
-                              type="date" 
-                              min={todayDate} 
-                              className="w-full p-2 border rounded-lg bg-white" 
-                              value={formData.stay_start_date || ''} 
-                              onChange={(e: any) => setFormData({...formData, stay_start_date: e.target.value})} 
-                            />
-                            <DateInputWithClear 
-                              type="date" 
-                              min={formData.stay_start_date || todayDate} 
-                              className="w-full p-2 border rounded-lg bg-white" 
-                              value={formData.stay_end_date || ''} 
-                              onChange={(e: any) => setFormData({...formData, stay_end_date: e.target.value})} 
-                            />
+                            <div className="space-y-1">
+                               <div className="flex justify-between items-center">
+                                 <label className="text-xs text-stone-500 font-bold ml-1">安單開始</label>
+                                 {formData.stay_start_date && (
+                                    <button onClick={()=>setFormData({...formData, stay_start_date: ''})} className="text-[10px] text-red-500 font-bold bg-white px-2 py-0.5 rounded-full border border-red-100 shadow-sm">清除</button>
+                                 )}
+                               </div>
+                               <input type="date" min={todayDate} className="w-full p-2 border rounded-lg bg-white" value={formData.stay_start_date || ''} onChange={e=>setFormData({...formData, stay_start_date: e.target.value})} />
+                            </div>
+                            <div className="space-y-1">
+                               <div className="flex justify-between items-center">
+                                 <label className="text-xs text-stone-500 font-bold ml-1">安單結束</label>
+                                 {formData.stay_end_date && (
+                                    <button onClick={()=>setFormData({...formData, stay_end_date: ''})} className="text-[10px] text-red-500 font-bold bg-white px-2 py-0.5 rounded-full border border-red-100 shadow-sm">清除</button>
+                                 )}
+                               </div>
+                               <input type="date" min={formData.stay_start_date || todayDate} className="w-full p-2 border rounded-lg bg-white" value={formData.stay_end_date || ''} onChange={e=>setFormData({...formData, stay_end_date: e.target.value})} />
+                            </div>
                           </div>
                         )}
                     </div>
@@ -2307,8 +2283,8 @@ export default function App() {
                  {/* Detail Data Table */}
                  {selectedCompletedHierarchy.length > 0 && (
                      <div className="bg-white rounded-3xl p-6 border border-stone-200" id="completed-detail-table">
-                         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 pl-2 border-l-4 border-[#4f093c] gap-4">
-                             <h4 className="font-bold text-[#4f093c] text-xl break-words whitespace-pre-wrap">詳細報名資料列表</h4>
+                         <div className="flex flex-row flex-wrap justify-between items-center mb-6 pl-2 border-l-4 border-[#4f093c] gap-4">
+                             <h4 className="font-bold text-[#4f093c] text-xl break-words whitespace-pre-wrap flex-grow-0 md:flex-grow">詳細報名資料列表</h4>
                              <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
                                  <div className="relative flex-1 md:flex-none">
                                      <input type="text" placeholder="搜尋姓名/法名..." className="p-2 pl-8 border border-stone-200 rounded-lg text-sm font-bold text-stone-600 outline-none w-full md:w-48 focus:w-60 transition-all" value={completedSearch} onChange={e=>setCompletedSearch(e.target.value)} />
@@ -2534,7 +2510,10 @@ export default function App() {
                     <div className="p-3 border-b border-[#4f093c] bg-[#4f093c] text-white"><h4 className="font-bold flex items-center gap-2">地點</h4></div>
                     
                     {/* 新增輸入框 (移至最上方) - p-2 */}
-                    <div className="p-2 flex gap-2 border-b border-stone-100"><input className="flex-1 p-2 text-sm border rounded-lg" placeholder="新地點..." value={newLocation} onChange={e=>setNewLocation(e.target.value)} /><button onClick={addLocation} className="bg-[#4f093c] text-white p-2 rounded-lg hover:bg-[#3d072e] shrink-0"><Plus/></button></div>
+                    <div className="p-2 flex gap-2 border-b border-stone-100 items-center">
+                        <input className="flex-1 p-2 text-sm border rounded-lg min-w-0" placeholder="新地點..." value={newLocation} onChange={e=>setNewLocation(e.target.value)} />
+                        <button onClick={addLocation} className="bg-[#4f093c] text-white p-2 rounded-lg hover:bg-[#3d072e] shrink-0 w-10 h-10 flex items-center justify-center"><Plus/></button>
+                    </div>
                     
                     <div className="flex-1 overflow-y-auto p-2 space-y-1">
                         {locations.map(l => (
@@ -2551,7 +2530,10 @@ export default function App() {
                     <div className="p-3 border-b border-[#4f093c] bg-[#4f093c] text-white"><h4 className="font-bold flex items-center gap-2">活動</h4></div>
                     
                     {/* 新增輸入框 (移至最上方) - p-2 */}
-                    <div className="p-2 flex gap-2 border-b border-stone-100"><input className="flex-1 p-2 text-sm border rounded-lg" placeholder="新活動..." disabled={!mgmtSelectedLoc} value={newActivity} onChange={e=>setNewActivity(e.target.value)} /><button onClick={addActivity} className="bg-[#4f093c] text-white p-2 rounded-lg hover:bg-[#3d072e] disabled:opacity-50 shrink-0"><Plus/></button></div>
+                    <div className="p-2 flex gap-2 border-b border-stone-100 items-center">
+                        <input className="flex-1 p-2 text-sm border rounded-lg min-w-0" placeholder="新活動..." disabled={!mgmtSelectedLoc} value={newActivity} onChange={e=>setNewActivity(e.target.value)} />
+                        <button onClick={addActivity} className="bg-[#4f093c] text-white p-2 rounded-lg hover:bg-[#3d072e] disabled:opacity-50 shrink-0 w-10 h-10 flex items-center justify-center"><Plus/></button>
+                    </div>
 
                     {/* Date Settings for Activity - slightly reduced padding */}
                     <div className="px-3 pt-3 pb-2 space-y-3 bg-white border-b border-stone-100">
@@ -2580,7 +2562,10 @@ export default function App() {
                     <div className="p-3 border-b border-[#4f093c] bg-[#4f093c] text-white"><h4 className="font-bold flex items-center gap-2">行程</h4></div>
                     
                     {/* 新增輸入框 - p-2 */}
-                    <div className="p-2 flex gap-2 border-b border-stone-100"><input className="flex-1 p-2 text-sm border rounded-lg" placeholder="新行程..." disabled={!mgmtSelectedAct} value={newOption} onChange={e=>setNewOption(e.target.value)} /><button onClick={addOption} className="bg-[#4f093c] text-white p-2 rounded-lg hover:bg-[#3d072e] disabled:opacity-50 shrink-0"><Plus/></button></div>
+                    <div className="p-2 flex gap-2 border-b border-stone-100 items-center">
+                        <input className="flex-1 p-2 text-sm border rounded-lg min-w-0" placeholder="新行程..." disabled={!mgmtSelectedAct} value={newOption} onChange={e=>setNewOption(e.target.value)} />
+                        <button onClick={addOption} className="bg-[#4f093c] text-white p-2 rounded-lg hover:bg-[#3d072e] disabled:opacity-50 shrink-0 w-10 h-10 flex items-center justify-center"><Plus/></button>
+                    </div>
 
                     {/* Date Settings for Option */}
                     <div className="px-3 pt-3 pb-2 space-y-3 bg-white border-b border-stone-100">
@@ -2608,7 +2593,10 @@ export default function App() {
                     <div className="p-3 border-b border-[#4f093c] bg-[#4f093c] text-white"><h4 className="font-bold flex items-center gap-2">內容</h4></div>
                     
                     {/* 新增輸入框 - p-2 */}
-                    <div className="p-2 flex gap-2 border-b border-stone-100"><input className="flex-1 p-2 text-sm border rounded-lg" placeholder="新內容..." disabled={!mgmtSelectedOpt} value={newContent} onChange={e=>setNewContent(e.target.value)} /><button onClick={addContent} className="bg-[#4f093c] text-white p-2 rounded-lg hover:bg-[#3d072e] disabled:opacity-50 shrink-0"><Plus/></button></div>
+                    <div className="p-2 flex gap-2 border-b border-stone-100 items-center">
+                        <input className="flex-1 p-2 text-sm border rounded-lg min-w-0" placeholder="新內容..." disabled={!mgmtSelectedOpt} value={newContent} onChange={e=>setNewContent(e.target.value)} />
+                        <button onClick={addContent} className="bg-[#4f093c] text-white p-2 rounded-lg hover:bg-[#3d072e] disabled:opacity-50 shrink-0 w-10 h-10 flex items-center justify-center"><Plus/></button>
+                    </div>
 
                     <div className="flex-1 overflow-y-auto p-2 space-y-1">
                         {adminContents.map(c => (
