@@ -5,7 +5,7 @@ import {
   Bell, FileText, History, Settings, Shield, LogOut, Plus, Trash2, Check, 
   Edit, User, MapPin, Tag, ListFilter, Save, Database, Clock, Car, Info, 
   Home, UserCheck, AlertCircle, Briefcase, Layers, 
-  CheckCircle2, CheckSquare, FileSpreadsheet, Megaphone, ClipboardCheck, UserCog, Share2, Lock, Eye, EyeOff, Users, ArrowRight, RefreshCw, AlertTriangle, Image as ImageIcon, Table as TableIcon, Calendar, Filter, UploadCloud, ChevronRight, Search, KeyRound, BarChart3, PieChart, TrendingUp, Download, Archive, ServerCrash, Unlock, GripVertical, XCircle, X
+  CheckCircle2, CheckSquare, FileSpreadsheet, Megaphone, ClipboardCheck, UserCog, Share2, Lock, Eye, EyeOff, Users, ArrowRight, RefreshCw, AlertTriangle, Image as ImageIcon, Table as TableIcon, Calendar, Filter, UploadCloud, ChevronRight, Search, KeyRound, BarChart3, PieChart, TrendingUp, Download, Archive, ServerCrash, Unlock, GripVertical, XCircle
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
@@ -338,7 +338,7 @@ const CustomLogo = ({ className }: { className?: string }) => (
   <img src="/logo.png" alt="Logo" className={`${className} rounded-full object-cover border-2 border-white/20 shadow-md`} />
 );
 
-// 響應式標題組件 (手機版橫向分行)
+// 修改：響應式標題組件 (手機版橫向分行)
 const ResponsiveHeader = ({ title, children, color = "bg-[#4f093c]" }: { title: string, children?: React.ReactNode, color?: string }) => {
   return (
     <div className={`flex flex-col md:flex-row justify-between items-stretch rounded-2xl shadow-sm border border-stone-100 ${color} text-white mb-8 overflow-hidden min-h-[4rem]`}>
@@ -355,6 +355,30 @@ const ResponsiveHeader = ({ title, children, color = "bg-[#4f093c]" }: { title: 
     </div>
   );
 };
+
+// 修改：帶有清除按鈕的日期輸入框 (增加右側內距防止重疊)
+const DateInputWithClear = ({ type = "datetime-local", value, onChange, min, className, ...props }: any) => (
+  <div className="relative w-full">
+    <input 
+      type={type} 
+      min={min} 
+      className={`${className} pr-16`} // 增加內距，確保文字不會被 X 按鈕遮住
+      value={value || ''} 
+      onChange={onChange} 
+      {...props}
+    />
+    {value && (
+      <button 
+        type="button"
+        onClick={() => onChange({ target: { value: '' } })} 
+        className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 hover:text-red-500 transition-colors bg-white/80 p-1.5 rounded-full z-10"
+        title="重置日期"
+      >
+        <XCircle className="w-5 h-5" />
+      </button>
+    )}
+  </div>
+);
 
 const OverviewCard = ({ title, count, icon: Icon, color }: { title: string, count: number, icon: any, color: string }) => (
     <div className="bg-white p-6 rounded-2xl shadow-sm border border-stone-100 flex items-center gap-5 break-inside-avoid">
@@ -1576,19 +1600,21 @@ export default function App() {
     <div className="min-h-screen text-slate-800 font-sans text-xl" style={{ backgroundColor: BG_WARM_BEIGE, colorScheme: 'light' }}>
       
       {/* Top Header */}
-      <div className="bg-[#4f093c] sticky top-0 z-50 shadow-md border-b border-white/10 px-8 py-3 flex justify-between items-center">
-         <div className="flex items-center gap-4">
-            <div className="w-10 h-10 rounded-full overflow-hidden shadow-sm">
-              <CustomLogo className="w-full h-full object-cover" />
+      <div className="bg-[#4f093c] sticky top-0 z-50 shadow-md border-b border-white/10 px-4 md:px-8 py-3 flex flex-col md:flex-row justify-between items-center gap-3 md:gap-0">
+         <div className="flex items-center justify-between w-full md:w-auto gap-4">
+            <div className="flex items-center gap-4">
+                <div className="w-10 h-10 rounded-full overflow-hidden shadow-sm flex-shrink-0">
+                  <CustomLogo className="w-full h-full object-cover" />
+                </div>
+                <span className="font-bold text-xl text-white tracking-wide truncate">嗨～ {getDisplayNameOnly(user?.email)}</span>
             </div>
-            <span className="font-bold text-xl text-white tracking-wide">嗨～ {getDisplayNameOnly(user?.email)}</span>
-            {isAdmin && <span className="bg-amber-100 text-amber-800 text-xs px-2 py-1 rounded-full font-bold border border-amber-200">管理者</span>}
+            {isAdmin && <span className="bg-amber-100 text-amber-800 text-xs px-2 py-1 rounded-full font-bold border border-amber-200 flex-shrink-0">管理者</span>}
          </div>
-         <div className="flex items-center gap-3">
-           <button onClick={() => setShowPwdModal(true)} className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-xl font-bold text-sm transition-colors backdrop-blur-sm flex items-center gap-2">
+         <div className="flex items-center gap-3 w-full md:w-auto">
+           <button onClick={() => setShowPwdModal(true)} className="flex-1 md:flex-none justify-center bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-xl font-bold text-sm transition-colors backdrop-blur-sm flex items-center gap-2">
              <KeyRound className="w-4 h-4" /> 修改密碼
            </button>
-           <button onClick={handleLogout} className="bg-white/10 hover:bg-white/20 text-white px-5 py-2 rounded-xl font-bold text-sm transition-colors backdrop-blur-sm flex items-center gap-2">
+           <button onClick={handleLogout} className="flex-1 md:flex-none justify-center bg-white/10 hover:bg-white/20 text-white px-5 py-2 rounded-xl font-bold text-sm transition-colors backdrop-blur-sm flex items-center gap-2">
              <LogOut className="w-4 h-4" /> 登出
            </button>
          </div>
@@ -1621,7 +1647,7 @@ export default function App() {
       </div>
 
       {/* Main Content Area */}
-      <div className="max-w-7xl mx-auto p-3 md:p-10">
+      <div className="max-w-7xl mx-auto p-6 md:p-10">
         
         {/* Bulletin Tab */}
         {activeTab === 'bulletin' && (
@@ -1779,22 +1805,24 @@ export default function App() {
                  {fieldVisibility.arrivalDeparture && (
                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                      <div className="space-y-2">
-                       <div className="flex justify-between items-center mb-1 ml-1">
-                           <label className="text-sm font-bold text-[#4f093c]">抵寺時間*</label>
-                           {formData.arrival_datetime && (
-                               <button type="button" onClick={() => setFormData({...formData, arrival_datetime: ''})} className="text-xs text-red-500 font-bold flex items-center gap-1 hover:bg-red-50 px-2 py-1 rounded-full transition-colors"><XCircle size={14}/>清除</button>
-                           )}
-                       </div>
-                       <input type="datetime-local" min={currentDateTime} className="w-full p-2 text-lg border border-blue-200 rounded-xl bg-white" value={formData.arrival_datetime || ''} onChange={e=>setFormData({...formData, arrival_datetime: e.target.value})} />
+                       <label className="text-sm font-bold text-[#4f093c] ml-1">抵寺時間*</label>
+                       <DateInputWithClear 
+                         type="datetime-local" 
+                         min={currentDateTime} 
+                         className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white" 
+                         value={formData.arrival_datetime || ''} 
+                         onChange={(e: any) => setFormData({...formData, arrival_datetime: e.target.value})} 
+                       />
                      </div>
                      <div className="space-y-2">
-                       <div className="flex justify-between items-center mb-1 ml-1">
-                           <label className="text-sm font-bold text-[#4f093c]">離寺時間*</label>
-                           {formData.departure_datetime && (
-                               <button type="button" onClick={() => setFormData({...formData, departure_datetime: ''})} className="text-xs text-red-500 font-bold flex items-center gap-1 hover:bg-red-50 px-2 py-1 rounded-full transition-colors"><XCircle size={14}/>清除</button>
-                           )}
-                       </div>
-                       <input type="datetime-local" min={formData.arrival_datetime || currentDateTime} className="w-full p-2 text-lg border border-blue-200 rounded-xl bg-white" value={formData.departure_datetime || ''} onChange={e=>setFormData({...formData, departure_datetime: e.target.value})} />
+                       <label className="text-sm font-bold text-[#4f093c] ml-1">離寺時間*</label>
+                       <DateInputWithClear 
+                         type="datetime-local" 
+                         min={formData.arrival_datetime || currentDateTime} 
+                         className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white" 
+                         value={formData.departure_datetime || ''} 
+                         onChange={(e: any) => setFormData({...formData, departure_datetime: e.target.value})} 
+                       />
                      </div>
                    </div>
                  )}
@@ -1821,22 +1849,24 @@ export default function App() {
                  {fieldVisibility.volunteerDates && (
                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                      <div className="space-y-2">
-                       <div className="flex justify-between items-center mb-1 ml-1">
-                           <label className="text-sm font-bold text-[#4f093c]">發心開始*</label>
-                           {formData.start_date && (
-                               <button type="button" onClick={() => setFormData({...formData, start_date: ''})} className="text-xs text-red-500 font-bold flex items-center gap-1 hover:bg-red-50 px-2 py-1 rounded-full transition-colors"><XCircle size={14}/>清除</button>
-                           )}
-                       </div>
-                       <input type="datetime-local" min={currentDateTime} className="w-full p-2 text-lg border border-blue-200 rounded-xl bg-white focus:ring-2 focus:ring-[#4f093c]/20 outline-none shadow-sm" value={formData.start_date || ''} onChange={e=>setFormData({...formData, start_date: e.target.value})} />
+                       <label className="text-sm font-bold text-[#4f093c] ml-1">發心開始*</label>
+                       <DateInputWithClear 
+                         type="datetime-local" 
+                         min={currentDateTime} 
+                         className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white focus:ring-2 focus:ring-[#4f093c]/20 outline-none shadow-sm" 
+                         value={formData.start_date || ''} 
+                         onChange={(e: any) => setFormData({...formData, start_date: e.target.value})} 
+                       />
                      </div>
                      <div className="space-y-2">
-                       <div className="flex justify-between items-center mb-1 ml-1">
-                           <label className="text-sm font-bold text-[#4f093c]">發心結束*</label>
-                           {formData.end_date && (
-                               <button type="button" onClick={() => setFormData({...formData, end_date: ''})} className="text-xs text-red-500 font-bold flex items-center gap-1 hover:bg-red-50 px-2 py-1 rounded-full transition-colors"><XCircle size={14}/>清除</button>
-                           )}
-                       </div>
-                       <input type="datetime-local" min={formData.start_date || currentDateTime} className="w-full p-2 text-lg border border-blue-200 rounded-xl bg-white focus:ring-2 focus:ring-[#4f093c]/20 outline-none shadow-sm" value={formData.end_date || ''} onChange={e=>setFormData({...formData, end_date: e.target.value})} />
+                       <label className="text-sm font-bold text-[#4f093c] ml-1">發心結束*</label>
+                       <DateInputWithClear 
+                         type="datetime-local" 
+                         min={formData.start_date || currentDateTime} 
+                         className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white focus:ring-2 focus:ring-[#4f093c]/20 outline-none shadow-sm" 
+                         value={formData.end_date || ''} 
+                         onChange={(e: any) => setFormData({...formData, end_date: e.target.value})} 
+                       />
                      </div>
                    </div>
                  )}
@@ -1852,24 +1882,20 @@ export default function App() {
                         </div>
                         {fieldVisibility.accommodationDates && (
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                               <div className="flex justify-between items-center mb-1 ml-1">
-                                   <label className="text-xs font-bold text-stone-500">安單開始</label>
-                                   {formData.stay_start_date && (
-                                       <button type="button" onClick={() => setFormData({...formData, stay_start_date: ''})} className="text-xs text-red-500 font-bold flex items-center gap-1 hover:bg-red-50 px-2 py-1 rounded-full transition-colors"><XCircle size={14}/>清除</button>
-                                   )}
-                               </div>
-                               <input type="date" min={todayDate} className="w-full p-2 border rounded-lg bg-white" value={formData.stay_start_date || ''} onChange={e=>setFormData({...formData, stay_start_date: e.target.value})} />
-                            </div>
-                            <div className="space-y-2">
-                               <div className="flex justify-between items-center mb-1 ml-1">
-                                   <label className="text-xs font-bold text-stone-500">安單結束</label>
-                                   {formData.stay_end_date && (
-                                       <button type="button" onClick={() => setFormData({...formData, stay_end_date: ''})} className="text-xs text-red-500 font-bold flex items-center gap-1 hover:bg-red-50 px-2 py-1 rounded-full transition-colors"><XCircle size={14}/>清除</button>
-                                   )}
-                               </div>
-                               <input type="date" min={formData.stay_start_date || todayDate} className="w-full p-2 border rounded-lg bg-white" value={formData.stay_end_date || ''} onChange={e=>setFormData({...formData, stay_end_date: e.target.value})} />
-                            </div>
+                            <DateInputWithClear 
+                              type="date" 
+                              min={todayDate} 
+                              className="w-full p-2 border rounded-lg bg-white" 
+                              value={formData.stay_start_date || ''} 
+                              onChange={(e: any) => setFormData({...formData, stay_start_date: e.target.value})} 
+                            />
+                            <DateInputWithClear 
+                              type="date" 
+                              min={formData.stay_start_date || todayDate} 
+                              className="w-full p-2 border rounded-lg bg-white" 
+                              value={formData.stay_end_date || ''} 
+                              onChange={(e: any) => setFormData({...formData, stay_end_date: e.target.value})} 
+                            />
                           </div>
                         )}
                     </div>
@@ -1906,6 +1932,7 @@ export default function App() {
              </ResponsiveHeader>
              
              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+               {/* 歷史卡片內容與之前相同 */}
                {sortedHistoryNotes.map(n => {
                  const status = getCardStatus(n);
                  const isInactive = status.isInactive;
@@ -1924,21 +1951,16 @@ export default function App() {
                                 {n.activity_location} <span className="text-stone-300 mx-1">|</span> {n.activity_name}
                               </h3>
                           </div>
-                          <div className={`mb-4 ${isInactive ? 'text-stone-400' : 'text-slate-800'}`}>
-                              {/* 姓名/法名/性別 - 強制同一行 */}
-                              <div className="flex items-baseline flex-nowrap whitespace-nowrap overflow-hidden text-ellipsis gap-1">
-                                  <span className="text-xl font-bold">{n.real_name}</span>
-                                  <span className="text-base font-bold opacity-70 truncate">
-                                      {n.dharma_name ? ` / ${n.dharma_name}` : ' / (無)'} <span className="mx-1 text-stone-400">/</span> {n.gender}
-                                  </span>
-                              </div>
-                              {/* 身分/屬性 - 下一行 */}
-                              <div className="flex items-center gap-2 mt-1">
-                                  <span className={`text-sm font-bold ${isInactive ? 'text-stone-400' : 'text-[#7A2E40]'}`}>
-                                    {n.identity === '參加法會' ? '法會' : (n.identity === '發心義工' ? '義工' : n.identity)}
-                                  </span>
-                                  <span className={`text-xs px-2 py-1 rounded-full ${isInactive ? 'bg-stone-200/50 text-stone-400' : 'bg-stone-100 text-stone-500'}`}>{n.registrant_type}</span>
-                              </div>
+                          <div className={`flex items-baseline gap-2 mb-4 ${isInactive ? 'text-stone-400' : 'text-slate-800'}`}>
+                              <span className="text-xl font-bold">{n.real_name}</span>
+                              <span className="text-base font-bold opacity-70">
+                                  {n.dharma_name ? ` / ${n.dharma_name}` : ' / (無)'} <span className="mx-1 text-stone-400">/</span> {n.gender}
+                              </span>
+                              
+                              <span className={`text-sm font-bold ml-auto ${isInactive ? 'text-stone-400' : 'text-[#7A2E40]'}`}>
+                                {n.identity === '參加法會' ? '法會' : (n.identity === '發心義工' ? '義工' : n.identity)}
+                              </span>
+                              <span className={`text-xs px-2 py-1 rounded-full ${isInactive ? 'bg-stone-200/50 text-stone-400' : 'bg-stone-100 text-stone-500'}`}>{n.registrant_type}</span>
                           </div>
                           
                           <div className={`space-y-3 ${isInactive ? 'opacity-70 pointer-events-none' : ''}`}>
@@ -2280,18 +2302,18 @@ export default function App() {
                  {/* Detail Data Table */}
                  {selectedCompletedHierarchy.length > 0 && (
                      <div className="bg-white rounded-3xl p-6 border border-stone-200" id="completed-detail-table">
-                         <div className="flex justify-between items-center mb-6 pl-2 border-l-4 border-[#4f093c]">
-                             <h4 className="font-bold text-[#4f093c] text-xl">詳細報名資料列表</h4>
-                             <div className="flex items-center gap-3">
-                                 <div className="relative">
-                                     <input type="text" placeholder="搜尋姓名/法名..." className="p-2 pl-8 border border-stone-200 rounded-lg text-sm font-bold text-stone-600 outline-none w-48 focus:w-60 transition-all" value={completedSearch} onChange={e=>setCompletedSearch(e.target.value)} />
+                         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 pl-2 border-l-4 border-[#4f093c] gap-4">
+                             <h4 className="font-bold text-[#4f093c] text-xl break-words whitespace-pre-wrap">詳細報名資料列表</h4>
+                             <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+                                 <div className="relative flex-1 md:flex-none">
+                                     <input type="text" placeholder="搜尋姓名/法名..." className="p-2 pl-8 border border-stone-200 rounded-lg text-sm font-bold text-stone-600 outline-none w-full md:w-48 focus:w-60 transition-all" value={completedSearch} onChange={e=>setCompletedSearch(e.target.value)} />
                                      <Search className="w-4 h-4 absolute left-2 top-1/2 -translate-y-1/2 text-stone-400"/>
                                  </div>
                                  <button onClick={() => downloadPDF('completed-detail-table', '詳細報名資料列表')} className="bg-stone-100 text-stone-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-stone-200 shadow-sm flex items-center gap-1 transition-colors">
-                                     <Download className="w-4 h-4"/> 匯出 (PDF)
+                                     <Download className="w-4 h-4"/> <span className="hidden md:inline">匯出 (PDF)</span><span className="md:hidden">PDF</span>
                                  </button>
                                  <button onClick={() => handleExport()} className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-emerald-700 shadow-sm flex items-center gap-1">
-                                     <FileSpreadsheet className="w-4 h-4"/> 匯出 (Excel)
+                                     <FileSpreadsheet className="w-4 h-4"/> <span className="hidden md:inline">匯出 (Excel)</span><span className="md:hidden">Excel</span>
                                  </button>
                              </div>
                          </div>
@@ -2501,9 +2523,9 @@ export default function App() {
                  </div>
               </div>
               
-              <div className="grid grid-cols-1 lg:grid-cols-4 gap-3 h-[600px]">
+              <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 lg:gap-3 h-auto lg:h-[600px]">
                  {/* Column 1: Location */}
-                 <div className="flex flex-col bg-white/50 rounded-3xl border border-stone-100 overflow-hidden">
+                 <div className="flex flex-col bg-white/50 rounded-3xl border border-stone-100 overflow-hidden min-h-[500px] lg:min-h-0">
                     <div className="p-3 border-b border-[#4f093c] bg-[#4f093c] text-white"><h4 className="font-bold flex items-center gap-2">地點</h4></div>
                     
                     {/* 新增輸入框 (移至最上方) - p-2 */}
@@ -2520,7 +2542,7 @@ export default function App() {
                  </div>
 
                  {/* Column 2: Activity */}
-                 <div className="flex flex-col bg-white/50 rounded-3xl border border-stone-100 overflow-hidden">
+                 <div className="flex flex-col bg-white/50 rounded-3xl border border-stone-100 overflow-hidden min-h-[500px] lg:min-h-0">
                     <div className="p-3 border-b border-[#4f093c] bg-[#4f093c] text-white"><h4 className="font-bold flex items-center gap-2">活動</h4></div>
                     
                     {/* 新增輸入框 (移至最上方) - p-2 */}
@@ -2549,7 +2571,7 @@ export default function App() {
                  </div>
 
                  {/* Column 3: Option */}
-                 <div className="flex flex-col bg-white/50 rounded-3xl border border-stone-100 overflow-hidden">
+                 <div className="flex flex-col bg-white/50 rounded-3xl border border-stone-100 overflow-hidden min-h-[500px] lg:min-h-0">
                     <div className="p-3 border-b border-[#4f093c] bg-[#4f093c] text-white"><h4 className="font-bold flex items-center gap-2">行程</h4></div>
                     
                     {/* 新增輸入框 - p-2 */}
@@ -2577,7 +2599,7 @@ export default function App() {
                  </div>
 
                  {/* Column 4: Content */}
-                 <div className="flex flex-col bg-white/50 rounded-3xl border border-stone-100 overflow-hidden">
+                 <div className="flex flex-col bg-white/50 rounded-3xl border border-stone-100 overflow-hidden min-h-[500px] lg:min-h-0">
                     <div className="p-3 border-b border-[#4f093c] bg-[#4f093c] text-white"><h4 className="font-bold flex items-center gap-2">內容</h4></div>
                     
                     {/* 新增輸入框 - p-2 */}
