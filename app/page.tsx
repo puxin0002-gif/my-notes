@@ -5,7 +5,7 @@ import {
   Bell, FileText, History, Settings, Shield, LogOut, Plus, Trash2, Check, 
   Edit, User, MapPin, Tag, ListFilter, Save, Database, Clock, Car, Info, 
   Home, UserCheck, AlertCircle, Briefcase, Layers, 
-  CheckCircle2, CheckSquare, FileSpreadsheet, Megaphone, ClipboardCheck, UserCog, Share2, Lock, Eye, EyeOff, Users, ArrowRight, RefreshCw, AlertTriangle, Image as ImageIcon, Table as TableIcon, Calendar, Filter, UploadCloud, ChevronRight, Search, KeyRound, BarChart3, PieChart, TrendingUp, Download, Archive, ServerCrash, Unlock, GripVertical
+  CheckCircle2, CheckSquare, FileSpreadsheet, Megaphone, ClipboardCheck, UserCog, Share2, Lock, Eye, EyeOff, Users, ArrowRight, RefreshCw, AlertTriangle, Image as ImageIcon, Table as TableIcon, Calendar, Filter, UploadCloud, ChevronRight, Search, KeyRound, BarChart3, PieChart, TrendingUp, Download, Archive, ServerCrash, Unlock, GripVertical, XCircle
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
@@ -38,14 +38,14 @@ const INITIAL_FORM_DATA = {
   stay_start_date: '', stay_end_date: ''
 };
 
-// 用於管理資料列表的預設欄寬
+// 用於管理資料列表的預設欄寬 (調整以容納7欄)
 const DEFAULT_COL_WIDTHS = {
-  col1: 200, // 活動行程
-  col2: 250, // 基本資料
-  col3: 230, // 交通/住宿
-  col4: 230, // 義工資訊
-  col5: 160, // 備註
-  col6: 140, // 狀態
+  col1: 180, // 活動行程
+  col2: 200, // 基本資料
+  col3: 200, // 交通/住宿
+  col4: 200, // 義工資訊
+  col5: 150, // 備註
+  col6: 120, // 狀態
 };
 
 interface FieldDefinition {
@@ -144,7 +144,7 @@ interface UserPermission {
   is_disabled: boolean;
   uid?: string;
   created_at?: string;
-  memo?: string; // Added memo field
+  memo?: string; 
 }
 
 interface ResetRequest {
@@ -336,6 +336,50 @@ const downloadPDF = async (elementId: string, title: string) => {
 
 const CustomLogo = ({ className }: { className?: string }) => (
   <img src="/logo.png" alt="Logo" className={`${className} rounded-full object-cover border-2 border-white/20 shadow-md`} />
+);
+
+// 新增：響應式標題組件 (手機版直式)
+const ResponsiveHeader = ({ title, children, color = "bg-[#4f093c]" }: { title: string, children?: React.ReactNode, color?: string }) => {
+  return (
+    <div className={`flex flex-row justify-between items-stretch rounded-2xl shadow-sm border border-stone-100 ${color} text-white mb-8 overflow-hidden min-h-[4rem]`}>
+       {/* 標題區域：手機版直式，桌機版橫式 */}
+       <div className="flex items-center justify-center p-3 md:px-6 bg-black/10 md:bg-transparent">
+          <h3 className="font-bold text-lg md:text-2xl flex flex-col md:flex-row gap-1 leading-none text-center">
+             {title.split('').map((char, i) => (
+                <span key={i} className="block md:inline">{char}</span>
+             ))}
+          </h3>
+       </div>
+       {/* 內容區域 (右側) */}
+       <div className="flex-1 flex items-center justify-end p-2 md:px-6 overflow-x-auto">
+          {children}
+       </div>
+    </div>
+  );
+};
+
+// 新增：帶有清除按鈕的日期輸入框
+const DateInputWithClear = ({ type = "datetime-local", value, onChange, min, className, ...props }: any) => (
+  <div className="relative w-full">
+    <input 
+      type={type} 
+      min={min} 
+      className={`${className} pr-10`} // Make room for icon
+      value={value || ''} 
+      onChange={onChange} 
+      {...props}
+    />
+    {value && (
+      <button 
+        type="button"
+        onClick={() => onChange({ target: { value: '' } })} 
+        className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 hover:text-red-500 transition-colors bg-transparent p-1 rounded-full"
+        title="重置日期"
+      >
+        <XCircle className="w-5 h-5 bg-white rounded-full" />
+      </button>
+    )}
+  </div>
 );
 
 const OverviewCard = ({ title, count, icon: Icon, color }: { title: string, count: number, icon: any, color: string }) => (
@@ -1762,11 +1806,23 @@ export default function App() {
                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                      <div className="space-y-2">
                        <label className="text-sm font-bold text-[#4f093c] ml-1">抵寺時間*</label>
-                       <input type="datetime-local" min={currentDateTime} className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white" value={formData.arrival_datetime || ''} onChange={e=>setFormData({...formData, arrival_datetime: e.target.value})} />
+                       <DateInputWithClear 
+                         type="datetime-local" 
+                         min={currentDateTime} 
+                         className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white" 
+                         value={formData.arrival_datetime || ''} 
+                         onChange={(e: any) => setFormData({...formData, arrival_datetime: e.target.value})} 
+                       />
                      </div>
                      <div className="space-y-2">
                        <label className="text-sm font-bold text-[#4f093c] ml-1">離寺時間*</label>
-                       <input type="datetime-local" min={formData.arrival_datetime || currentDateTime} className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white" value={formData.departure_datetime || ''} onChange={e=>setFormData({...formData, departure_datetime: e.target.value})} />
+                       <DateInputWithClear 
+                         type="datetime-local" 
+                         min={formData.arrival_datetime || currentDateTime} 
+                         className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white" 
+                         value={formData.departure_datetime || ''} 
+                         onChange={(e: any) => setFormData({...formData, departure_datetime: e.target.value})} 
+                       />
                      </div>
                    </div>
                  )}
@@ -1794,11 +1850,23 @@ export default function App() {
                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                      <div className="space-y-2">
                        <label className="text-sm font-bold text-[#4f093c] ml-1">發心開始*</label>
-                       <input type="datetime-local" min={currentDateTime} className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white focus:ring-2 focus:ring-[#4f093c]/20 outline-none shadow-sm" value={formData.start_date || ''} onChange={e=>setFormData({...formData, start_date: e.target.value})} />
+                       <DateInputWithClear 
+                         type="datetime-local" 
+                         min={currentDateTime} 
+                         className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white focus:ring-2 focus:ring-[#4f093c]/20 outline-none shadow-sm" 
+                         value={formData.start_date || ''} 
+                         onChange={(e: any) => setFormData({...formData, start_date: e.target.value})} 
+                       />
                      </div>
                      <div className="space-y-2">
                        <label className="text-sm font-bold text-[#4f093c] ml-1">發心結束*</label>
-                       <input type="datetime-local" min={formData.start_date || currentDateTime} className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white focus:ring-2 focus:ring-[#4f093c]/20 outline-none shadow-sm" value={formData.end_date || ''} onChange={e=>setFormData({...formData, end_date: e.target.value})} />
+                       <DateInputWithClear 
+                         type="datetime-local" 
+                         min={formData.start_date || currentDateTime} 
+                         className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white focus:ring-2 focus:ring-[#4f093c]/20 outline-none shadow-sm" 
+                         value={formData.end_date || ''} 
+                         onChange={(e: any) => setFormData({...formData, end_date: e.target.value})} 
+                       />
                      </div>
                    </div>
                  )}
@@ -1814,8 +1882,20 @@ export default function App() {
                         </div>
                         {fieldVisibility.accommodationDates && (
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <input type="date" min={todayDate} className="w-full p-2 border rounded-lg bg-white" value={formData.stay_start_date || ''} onChange={e=>setFormData({...formData, stay_start_date: e.target.value})} />
-                            <input type="date" min={formData.stay_start_date || todayDate} className="w-full p-2 border rounded-lg bg-white" value={formData.stay_end_date || ''} onChange={e=>setFormData({...formData, stay_end_date: e.target.value})} />
+                            <DateInputWithClear 
+                              type="date" 
+                              min={todayDate} 
+                              className="w-full p-2 border rounded-lg bg-white" 
+                              value={formData.stay_start_date || ''} 
+                              onChange={(e: any) => setFormData({...formData, stay_start_date: e.target.value})} 
+                            />
+                            <DateInputWithClear 
+                              type="date" 
+                              min={formData.stay_start_date || todayDate} 
+                              className="w-full p-2 border rounded-lg bg-white" 
+                              value={formData.stay_end_date || ''} 
+                              onChange={(e: any) => setFormData({...formData, stay_end_date: e.target.value})} 
+                            />
                           </div>
                         )}
                     </div>
@@ -1836,27 +1916,26 @@ export default function App() {
 
         {/* History Tab */}
         {activeTab === 'history' && (
-          <div className="space-y-8">
-             <div className={`flex justify-between items-center px-6 py-4 rounded-2xl shadow-sm border border-stone-100 bg-[#4f093c] text-white`}>
-                 <h3 className="font-bold text-lg flex items-center gap-2"><History className="w-5 h-5"/> 歷史紀錄</h3>
+          <div className="space-y-8 animate-in fade-in">
+             <ResponsiveHeader title="歷史紀錄">
                  <div className="flex items-center gap-2">
                     <div className="relative">
                       <input type="text" placeholder="搜尋..." className="p-2 pl-8 border-none rounded-xl text-base font-bold text-stone-600 outline-none w-40 focus:w-60 transition-all bg-white/90 focus:bg-white" value={historySearch} onChange={e=>setHistorySearch(e.target.value)} />
                       <Search className="w-4 h-4 absolute left-2 top-1/2 -translate-y-1/2 text-stone-400"/>
                     </div>
-                    <Filter className="w-4 h-4 text-white/80"/>
+                    <Filter className="w-4 h-4 text-white/80 hidden md:block"/>
                     <select className="p-2 pl-4 pr-8 border-none bg-white/20 rounded-xl text-base font-bold text-white outline-none cursor-pointer hover:bg-white/30 transition-colors [&>option]:text-stone-600" value={historyFilterLoc} onChange={e=>setHistoryFilterLoc(e.target.value)}>
                        <option value="">全部地點</option>
                        {locations.map(l => <option key={l} value={l}>{l}</option>)}
                     </select>
                  </div>
-             </div>
+             </ResponsiveHeader>
              
              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+               {/* 歷史卡片內容與之前相同 */}
                {sortedHistoryNotes.map(n => {
                  const status = getCardStatus(n);
                  const isInactive = status.isInactive;
-                 
                  const rawContents: any = n.selected_contents;
                  const safeContents = safeRenderContents(rawContents);
                  const hasContents = safeContents.length > 0;
@@ -1866,16 +1945,12 @@ export default function App() {
                  return (
                    <div key={n.id} className={`rounded-[24px] shadow-sm border overflow-hidden ${isInactive ? 'bg-stone-50 border-stone-200' : 'hover:shadow-md transition-all border-stone-100'}`} style={{ backgroundColor: isInactive ? '#f5f5f4' : CARD_BG_COLOR }}>
                       <div className="relative p-6 pb-0">
-                          
-                          {/* 第一行：狀態與地點活動 */}
                           <div className="flex items-center gap-2 mb-3">
                               <span className={`px-3 py-1 rounded-lg text-xs font-bold text-white ${status.color}`}>{status.text}</span>
                               <h3 className={`text-xl font-bold ${isInactive ? 'text-stone-400' : 'text-slate-800'}`}>
                                 {n.activity_location} <span className="text-stone-300 mx-1">|</span> {n.activity_name}
                               </h3>
                           </div>
-
-                          {/* 第二行：姓名+法名+性別 */}
                           <div className={`flex items-baseline gap-2 mb-4 ${isInactive ? 'text-stone-400' : 'text-slate-800'}`}>
                               <span className="text-xl font-bold">{n.real_name}</span>
                               <span className="text-base font-bold opacity-70">
@@ -1889,13 +1964,9 @@ export default function App() {
                           </div>
                           
                           <div className={`space-y-3 ${isInactive ? 'opacity-70 pointer-events-none' : ''}`}>
-                             
-                             {/* 第三行：行程選項 */}
                              <div className={`text-sm font-bold border-l-[3px] pl-2 ${isInactive ? 'text-stone-400 border-stone-300' : 'text-blue-600 border-blue-600'}`}>
                                  {n.activity_option}
                              </div>
-
-                             {/* 第四行：勾選內容與自訂備註合併顯示框 */}
                              {(hasContents || hasRemarks) && (
                                 <div className={`rounded-lg p-3 space-y-1 ${isInactive ? 'bg-stone-100/50 border border-stone-200' : 'bg-orange-50 border border-orange-100'}`}>
                                     {hasContents && (
@@ -1912,7 +1983,6 @@ export default function App() {
                                     )}
                                 </div>
                              )}
-                             
                              <div className="text-sm pt-2 border-t border-stone-100 grid grid-cols-1 gap-1">
                                 {n.transportation && <p className={isInactive ? 'text-stone-400' : 'text-stone-600'}><span className="font-bold opacity-70">交通：</span> {n.transportation}</p>}
                                 {(n.arrival_datetime || n.departure_datetime) && (
@@ -1921,14 +1991,12 @@ export default function App() {
                                         <div>離：{n.departure_datetime ? formatDateTime(n.departure_datetime) : '-'}</div>
                                     </div>
                                 )}
-
                                 {n.identity === '發心義工' && (
                                     <p className={isInactive ? 'text-stone-400' : 'text-stone-600'}>
                                         <span className="font-bold opacity-70">組別：</span> 
                                         {simplifyVolunteerType(n.volunteer_type)}{n.volunteer_group ? ` - ${n.volunteer_group}` : ''}
                                     </p>
                                 )}
-
                                 {(n.start_date || n.end_date) && (
                                     <div className={`text-xs p-2 rounded font-mono ${isInactive ? 'bg-stone-100 text-stone-400' : 'bg-blue-50/50 text-blue-800'}`}>
                                         <div className="font-bold opacity-50 mb-1">發心時間：</div>
@@ -1937,10 +2005,8 @@ export default function App() {
                                     </div>
                                 )}
                                 <p className={`mt-1 ${isInactive ? 'text-stone-400' : 'text-stone-600'}`}><span className="font-bold opacity-70">安單：</span> {n.accommodation_option || '不安單'} {n.accommodation_option === '須安單' ? `(${n.stay_start_date} ~ ${n.stay_end_date})` : ''}</p>
-                                
                                 {n.memo && <div className={`mt-2 text-xs italic ${isInactive ? 'text-stone-300' : 'text-stone-400'}`}>其他備註: {String(n.memo)}</div>}
                              </div>
-                             
                              <div className="pt-2 flex justify-between items-end">
                                 <div className={`text-xs font-mono ${isInactive ? 'text-stone-300' : 'text-stone-400'}`}>{n.created_at ? n.created_at.slice(0, 16).replace('T', ' ') : ''}</div>
                                 {!isInactive && (
@@ -1968,31 +2034,28 @@ export default function App() {
         {/* Statistics Tab */}
         {activeTab === 'statistics' && isAdmin && (
           <div className={`p-8 rounded-[32px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}>
-            <div className="flex justify-between items-center mb-8">
-              <h3 className="text-3xl font-bold text-[#4f093c]">報名統計 (進行中)</h3>
-              <div className="flex gap-3 items-center">
-                {/* 狀態切換按鈕移除，預設只顯示進行中 */}
-                <select className="p-2 bg-white border-none rounded-xl text-base font-bold text-stone-600 outline-none" value={statFilterLoc} onChange={e => { setStatFilterLoc(e.target.value); setStatFilterAct(''); }}>
-                  <option value="">所有地點</option>
-                  {locations.map(l => <option key={l} value={l}>{l}</option>)}
-                </select>
-                <select className="p-2 bg-white border-none rounded-xl text-base font-bold text-stone-600 outline-none max-w-[12rem] truncate" value={statFilterAct} onChange={e => setStatFilterAct(e.target.value)} disabled={!statFilterLoc}>
-                    <option value="">{statFilterLoc ? '所有活動' : '請先選地點'}</option>
-                    {statActivityOptions.map(a => <option key={a} value={a}>{a}</option>)}
-                </select>
-                <select className="p-2 bg-white border-none rounded-xl text-base font-bold text-stone-600 outline-none max-w-[12rem] truncate" value={statFilterOpt} onChange={e => setStatFilterOpt(e.target.value)} disabled={!statFilterAct}>
-                    <option value="">{statFilterAct ? '所有行程' : '請先選活動'}</option>
-                    {statOptionOptions.map(o => <option key={o} value={o}>{o}</option>)}
-                </select>
-
-                <button 
-                    onClick={() => downloadPDF('stats-content-area', `${statFilterLoc || '所有地點'} - ${statFilterAct || '所有活動'} 統計表`)}
-                    className="bg-stone-100 hover:bg-stone-200 text-stone-600 px-5 py-2 rounded-xl text-lg font-bold flex items-center gap-2 transition-colors shadow-sm ml-2"
-                >
-                    <Download className="w-5 h-5"/> 下載 PDF
-                </button>
-              </div>
-            </div>
+            <ResponsiveHeader title="報名統計(進行中)">
+                <div className="flex gap-2 items-center overflow-x-auto">
+                    <select className="p-2 bg-white border-none rounded-xl text-base font-bold text-stone-600 outline-none min-w-[8rem]" value={statFilterLoc} onChange={e => { setStatFilterLoc(e.target.value); setStatFilterAct(''); }}>
+                        <option value="">所有地點</option>
+                        {locations.map(l => <option key={l} value={l}>{l}</option>)}
+                    </select>
+                    <select className="p-2 bg-white border-none rounded-xl text-base font-bold text-stone-600 outline-none min-w-[8rem] max-w-[10rem] truncate" value={statFilterAct} onChange={e => setStatFilterAct(e.target.value)} disabled={!statFilterLoc}>
+                        <option value="">{statFilterLoc ? '所有活動' : '請先選地點'}</option>
+                        {statActivityOptions.map(a => <option key={a} value={a}>{a}</option>)}
+                    </select>
+                    <select className="p-2 bg-white border-none rounded-xl text-base font-bold text-stone-600 outline-none min-w-[8rem] max-w-[10rem] truncate" value={statFilterOpt} onChange={e => setStatFilterOpt(e.target.value)} disabled={!statFilterAct}>
+                        <option value="">{statFilterAct ? '所有行程' : '請先選活動'}</option>
+                        {statOptionOptions.map(o => <option key={o} value={o}>{o}</option>)}
+                    </select>
+                    <button 
+                        onClick={() => downloadPDF('stats-content-area', `${statFilterLoc || '所有地點'} - ${statFilterAct || '所有活動'} 統計表`)}
+                        className="bg-stone-100 hover:bg-stone-200 text-stone-600 px-3 py-2 rounded-xl text-sm font-bold flex items-center gap-1 transition-colors shadow-sm ml-2 shrink-0"
+                    >
+                        <Download className="w-4 h-4"/> PDF
+                    </button>
+                </div>
+            </ResponsiveHeader>
 
             <div id="stats-content-area">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
@@ -2006,42 +2069,33 @@ export default function App() {
                 </div>
 
                 <div className="space-y-10">
-                   <div>
-                       <StatsBarChart title="各場人數 (地點活動)" data={statisticsData.byLocationActivity} />
-                   </div>
-                   <div>
-                       <StatsBarChart title="各行程人數 (行程)" data={statisticsData.byOption} />
-                   </div>
-                   <div>
-                       <StatsBarChart title="交通方式人數" data={statisticsData.byTransport} />
-                   </div>
-                   <div>
-                       <StatsBarChart title="勾選內容統計" data={statisticsData.byContent} />
-                   </div>
+                   <div><StatsBarChart title="各場人數 (地點活動)" data={statisticsData.byLocationActivity} /></div>
+                   <div><StatsBarChart title="各行程人數 (行程)" data={statisticsData.byOption} /></div>
+                   <div><StatsBarChart title="交通方式人數" data={statisticsData.byTransport} /></div>
+                   <div><StatsBarChart title="勾選內容統計" data={statisticsData.byContent} /></div>
                 </div>
             </div>
           </div>
         )}
 
-        {/* Admin Data Tab (Removed Completed toggle) */}
+        {/* Admin Data Tab */}
         {activeTab === 'admin_data' && isAdmin && (
           <div className={`p-8 rounded-[32px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}>
-            <div className="flex justify-between items-center mb-8">
-              <h3 className="text-3xl font-bold text-[#4f093c]">資料總覽 (進行中)</h3>
-              <div className="flex gap-3 items-center">
-                <select className="p-2 bg-white border-none rounded-xl text-base font-bold text-stone-600 outline-none" value={filterLoc} onChange={e => { setFilterLoc(e.target.value); setFilterAct(''); }}><option value="">所有地點</option>{locations.map(l => <option key={l} value={l}>{l}</option>)}</select>
-                <select className="p-2 bg-white border-none rounded-xl text-base font-bold text-stone-600 outline-none max-w-[12rem] truncate" value={filterAct} onChange={e => setFilterAct(e.target.value)} disabled={!filterLoc}><option value="">{filterLoc ? '所有活動' : '請先選地點'}</option>{filterActivityOptions.map(a => <option key={a} value={a}>{a}</option>)}</select>
-                <div className="relative">
-                  <input type="text" placeholder="搜尋..." className="p-2 pl-8 border-none rounded-xl text-base font-bold text-stone-600 outline-none" value={searchText} onChange={e=>setSearchText(e.target.value)} />
-                  <Search className="w-4 h-4 absolute left-2 top-1/2 -translate-y-1/2 text-stone-400"/>
+            <ResponsiveHeader title="資料總覽(進行中)">
+                <div className="flex gap-2 items-center overflow-x-auto">
+                    <select className="p-2 bg-white border-none rounded-xl text-base font-bold text-stone-600 outline-none min-w-[8rem]" value={filterLoc} onChange={e => { setFilterLoc(e.target.value); setFilterAct(''); }}><option value="">所有地點</option>{locations.map(l => <option key={l} value={l}>{l}</option>)}</select>
+                    <select className="p-2 bg-white border-none rounded-xl text-base font-bold text-stone-600 outline-none min-w-[8rem] max-w-[10rem] truncate" value={filterAct} onChange={e => setFilterAct(e.target.value)} disabled={!filterLoc}><option value="">{filterLoc ? '所有活動' : '請先選地點'}</option>{filterActivityOptions.map(a => <option key={a} value={a}>{a}</option>)}</select>
+                    <div className="relative min-w-[10rem]">
+                        <input type="text" placeholder="搜尋..." className="p-2 pl-8 border-none rounded-xl text-base font-bold text-stone-600 outline-none w-full" value={searchText} onChange={e=>setSearchText(e.target.value)} />
+                        <Search className="w-4 h-4 absolute left-2 top-1/2 -translate-y-1/2 text-stone-400"/>
+                    </div>
+                    <button onClick={handleExport} className="bg-emerald-600 text-white px-3 py-2 rounded-xl flex items-center gap-1 text-sm font-bold hover:bg-emerald-700 shadow-md shrink-0">匯出</button>
                 </div>
-                <button onClick={handleExport} className="bg-emerald-600 text-white px-5 py-2 rounded-xl flex items-center gap-2 text-base font-bold hover:bg-emerald-700 shadow-md shadow-emerald-200">匯出資料</button>
-              </div>
-            </div>
+            </ResponsiveHeader>
             
             {/* Table (Resizable Columns) */}
             <div className="overflow-x-auto rounded-2xl border border-stone-100">
-              <table className="w-full text-left text-sm bg-white table-fixed">
+              <table className="w-full text-left text-sm bg-white table-fixed" style={{ minWidth: '1200px' }}>
                 <thead className="bg-[#4f093c] text-white font-bold">
                   <tr>
                       {[
@@ -2066,41 +2120,33 @@ export default function App() {
                           </div>
                         </th>
                       ))}
-                      {/* Always show delete column here since it's active data */}
                       <th className="p-4 text-center w-[80px] min-w-[80px] sticky right-0 bg-[#4f093c] z-10 shadow-[-5px_0_10px_-5px_rgba(0,0,0,0.1)]">刪除</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white">
                   {filteredAdminNotes.map(n => {
                       const { isEnded } = getNoteStatus(n); 
-                      // Only render if !isEnded (active)
                       if (isEnded) return null;
 
                       const safeContents = safeRenderContents(n.selected_contents);
                       const hasContents = safeContents.length > 0;
                       const hasRemarks = typeof n.other_remarks === 'string' && n.other_remarks.trim().length > 0 && n.other_remarks !== 'null';
                       const hasMemo = typeof n.memo === 'string' && n.memo.trim().length > 0 && n.memo !== 'null';
-                      
                       const mergedRemarks = [];
                       if (hasContents) mergedRemarks.push(safeContents);
                       if (hasRemarks) mergedRemarks.push(n.other_remarks);
 
                       let statusBadge; 
-                      let rowStyle = "transition-colors border-b border-white"; 
                       let rowStyleObj = {};
-                      let textStyle = "text-slate-800"; 
                       let subTextStyle = "text-stone-600"; 
                       let boldStyle = "font-bold text-xl text-slate-800"; 
                       
                       if(n.is_deleted) { 
                         statusBadge = <span className="px-2 py-0.5 rounded text-xs font-bold w-fit bg-red-100 text-red-700">已刪除</span>; 
-                        rowStyle = "bg-stone-100 border-b border-white"; 
-                        textStyle = "text-stone-400"; 
                         subTextStyle = "text-stone-400"; 
                         boldStyle = "font-bold text-xl text-stone-400"; 
                       } else { 
                         statusBadge = <span className={`px-2 py-0.5 rounded text-xs font-bold w-fit ${n.registration_option === '新增' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{n.registration_option}</span>;
-                        rowStyle = "hover:brightness-95 transition-all border-b border-white"; 
                         rowStyleObj = { backgroundColor: CARD_BG_COLOR };
                       } 
 
@@ -2108,7 +2154,7 @@ export default function App() {
                       const isDuplicate = !n.is_deleted && (duplicateMap[dupKey] || 0) > 1;
 
                       return (
-                      <tr key={n.id} className={rowStyle} style={rowStyleObj}>
+                      <tr key={n.id} className={n.is_deleted ? "bg-stone-100 border-b border-white" : "hover:brightness-95 transition-all border-b border-white"} style={rowStyleObj}>
                         <td className="p-4 align-top overflow-hidden break-words">
                           <div className={boldStyle}>{n.activity_location}</div>
                           <div className={boldStyle}>{n.activity_name}</div>
@@ -2188,51 +2234,34 @@ export default function App() {
         {activeTab === 'completed_cases' && isAdmin && (
           <div className="space-y-8 animate-in fade-in">
              <div className={`p-10 rounded-[40px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}>
-                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
-                     <h3 className="text-3xl font-bold text-[#4f093c] flex items-center gap-2"><Archive className="w-8 h-8"/> 已圓滿活動</h3>
-                     <div className="flex flex-wrap gap-3">
-                         <select 
-                             className="p-3 border-none rounded-xl text-base font-bold text-stone-600 outline-none bg-white shadow-sm"
-                             value={completedFilterMonth}
-                             onChange={(e) => { setCompletedFilterMonth(e.target.value); setCompletedFilterLocAct(''); setCompletedFilterOption(''); }}
-                         >
+                 <ResponsiveHeader title="已圓滿活動">
+                     <div className="flex flex-wrap gap-2 items-center">
+                         <select className="p-2 border-none rounded-xl text-base font-bold text-stone-600 outline-none bg-white shadow-sm" value={completedFilterMonth} onChange={(e) => { setCompletedFilterMonth(e.target.value); setCompletedFilterLocAct(''); setCompletedFilterOption(''); }}>
                              <option value="">請選擇年月...</option>
                              {availableCompletedMonths.map(m => <option key={m} value={m}>{m}</option>)}
                          </select>
-
-                         <select 
-                             className="p-3 border-none rounded-xl text-base font-bold text-stone-600 outline-none bg-white shadow-sm max-w-[15rem] truncate"
-                             value={completedFilterLocAct}
-                             onChange={(e) => { setCompletedFilterLocAct(e.target.value); setCompletedFilterOption(''); }}
-                             disabled={!completedFilterMonth}
-                         >
+                         <select className="p-2 border-none rounded-xl text-base font-bold text-stone-600 outline-none bg-white shadow-sm max-w-[12rem] truncate" value={completedFilterLocAct} onChange={(e) => { setCompletedFilterLocAct(e.target.value); setCompletedFilterOption(''); }} disabled={!completedFilterMonth}>
                              <option value="">請選擇活動...</option>
                              {availableCompletedLocActs.map(la => <option key={la} value={la}>{la}</option>)}
                          </select>
-
-                         <select 
-                             className="p-3 border-none rounded-xl text-base font-bold text-stone-600 outline-none bg-white shadow-sm max-w-[10rem] truncate"
-                             value={completedFilterOption}
-                             onChange={(e) => setCompletedFilterOption(e.target.value)}
-                             disabled={!completedFilterLocAct}
-                         >
+                         <select className="p-2 border-none rounded-xl text-base font-bold text-stone-600 outline-none bg-white shadow-sm max-w-[10rem] truncate" value={completedFilterOption} onChange={(e) => setCompletedFilterOption(e.target.value)} disabled={!completedFilterLocAct}>
                              <option value="">全部行程</option>
                              {completedOptionChoices.map(opt => <option key={opt} value={opt}>{opt}</option>)}
                          </select>
                      </div>
-                 </div>
+                 </ResponsiveHeader>
 
                  {/* Summary Table */}
                  <div className="bg-white rounded-3xl p-6 border border-stone-200 mb-10 overflow-hidden" id="completed-summary-table">
                      <div className="flex justify-between items-center mb-4 pl-2 border-l-4 border-[#4f093c]">
                          <h4 className="font-bold text-[#4f093c] text-xl">活動行程總表</h4>
                          <button onClick={() => downloadPDF('completed-summary-table', '活動行程總表')} className="bg-stone-100 text-stone-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-stone-200 shadow-sm flex items-center gap-1 transition-colors">
-                             <Download className="w-4 h-4"/> 匯出此表 (PDF)
+                             <Download className="w-4 h-4"/> 匯出 (PDF)
                          </button>
                      </div>
                      {selectedCompletedHierarchy.length > 0 ? (
                          <div className="overflow-x-auto rounded-xl border border-stone-100">
-                             <table className="w-full text-left text-sm">
+                             <table className="w-full text-left text-sm" style={{ minWidth: '900px' }}>
                                  <thead className="bg-[#4f093c] text-white font-bold">
                                      <tr>
                                          <th className="p-4 w-[180px]">地點 / 活動</th>
@@ -2277,13 +2306,7 @@ export default function App() {
                              <h4 className="font-bold text-[#4f093c] text-xl">詳細報名資料列表</h4>
                              <div className="flex items-center gap-3">
                                  <div className="relative">
-                                     <input 
-                                         type="text" 
-                                         placeholder="搜尋姓名/法名..." 
-                                         className="p-2 pl-8 border border-stone-200 rounded-lg text-sm font-bold text-stone-600 outline-none w-48 focus:w-60 transition-all" 
-                                         value={completedSearch} 
-                                         onChange={e=>setCompletedSearch(e.target.value)} 
-                                     />
+                                     <input type="text" placeholder="搜尋姓名/法名..." className="p-2 pl-8 border border-stone-200 rounded-lg text-sm font-bold text-stone-600 outline-none w-48 focus:w-60 transition-all" value={completedSearch} onChange={e=>setCompletedSearch(e.target.value)} />
                                      <Search className="w-4 h-4 absolute left-2 top-1/2 -translate-y-1/2 text-stone-400"/>
                                  </div>
                                  <button onClick={() => downloadPDF('completed-detail-table', '詳細報名資料列表')} className="bg-stone-100 text-stone-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-stone-200 shadow-sm flex items-center gap-1 transition-colors">
@@ -2296,7 +2319,7 @@ export default function App() {
                          </div>
                          
                          <div className="overflow-x-auto rounded-xl border border-stone-100">
-                             <table className="w-full text-left text-sm table-fixed">
+                             <table className="w-full text-left text-sm table-fixed" style={{ minWidth: '1200px' }}>
                                  <thead className="bg-[#4f093c] text-white font-bold">
                                      <tr>
                                          <th className="p-3 w-[150px]">地點 / 活動</th>
@@ -2366,13 +2389,12 @@ export default function App() {
         {activeTab === 'users' && isAdmin && (
           <div className="space-y-8 animate-in fade-in">
              <div className={`p-8 rounded-[32px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}>
-                <div className="flex justify-between items-center mb-6">
-                    <h4 className="font-bold text-[#4f093c] flex items-center gap-2 text-3xl"><Plus className="w-8 h-8"/> 新增使用者</h4>
+                <ResponsiveHeader title="新增使用者">
                     <div className="relative">
                       <input type="text" placeholder="搜尋姓名/ID..." className="p-2 pl-8 border-none rounded-xl text-base font-bold text-stone-600 outline-none w-48 focus:w-64 transition-all bg-white shadow-sm" value={usersSearch} onChange={e=>setUsersSearch(e.target.value)} />
                       <Search className="w-4 h-4 absolute left-2 top-1/2 -translate-y-1/2 text-stone-400"/>
                     </div>
-                </div>
+                </ResponsiveHeader>
                 <div className="flex flex-col md:flex-row gap-4 mb-8">
                   <input className="flex-1 p-3 border rounded-xl text-lg" placeholder="姓名" value={newUser.name} onChange={e=>setNewUser({...newUser, name: e.target.value})} />
                   <input className="w-32 p-3 border rounded-xl text-lg" placeholder="ID後4碼" value={newUser.id4} onChange={e=>setNewUser({...newUser, id4: e.target.value})} />
@@ -2382,45 +2404,47 @@ export default function App() {
              </div>
              
              <div className={`rounded-[32px] shadow-sm border border-stone-100 overflow-hidden`} style={{ backgroundColor: CARD_BG_COLOR }}>
-                <table className="w-full text-lg text-left">
-                  <thead className="bg-[#4f093c] text-white font-bold border-b border-[#4f093c]">
-                    <tr>
-                      <th className="p-5">姓名</th>
-                      <th className="p-5">ID後4碼</th>
-                      <th className="p-5">備註</th>
-                      <th className="p-5">是否為管理員</th>
-                      <th className="p-5">是否刪除</th>
-                      <th className="p-5">報名筆數</th>
-                      <th className="p-5 text-right">是否停用</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-stone-100">
-                    {filteredUsers.map(u => { 
-                      const count = notes.filter(n => n.user_id === u.uid).length; 
-                      return (
-                        <tr key={u.id} className="hover:bg-stone-50/50">
-                          <td className="p-5 font-bold text-[#4f093c]">{u.user_name}</td>
-                          <td className="p-5 font-mono text-stone-400">{u.id_last4}</td>
-                          <td className="p-5">
-                             <input 
-                                className="bg-transparent border-b border-dashed border-stone-300 focus:border-[#4f093c] outline-none text-stone-600 text-base w-full" 
-                                placeholder="新增備註..."
-                                defaultValue={u.memo || ''}
-                                onBlur={(e) => handleUpdateUserMemo(u.uid!, e.target.value)}
-                             />
-                          </td>
-                          <td className="p-5"><input type="checkbox" checked={u.is_admin} onChange={() => handleToggleAdmin(u.uid!, u.is_admin)} className="w-5 h-5 rounded border-stone-300 text-[#4f093c] focus:ring-[#4f093c]" /></td>
-                          <td className="p-5"><span className={`px-2 py-1 rounded text-xs font-bold ${u.is_disabled ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'}`}>{u.is_disabled ? '已停用' : '正常'}</span></td>
-                          <td className="p-5 font-bold text-stone-600 pl-8">{count}</td>
-                          <td className="p-5 text-right"><input type="checkbox" checked={u.is_disabled} onChange={() => handleToggleUserStatus(u.uid!, u.is_disabled)} className="w-5 h-5 rounded border-stone-300 text-red-600 focus:ring-red-600" /></td>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-lg text-left" style={{ minWidth: '800px' }}>
+                      <thead className="bg-[#4f093c] text-white font-bold border-b border-[#4f093c]">
+                        <tr>
+                          <th className="p-5">姓名</th>
+                          <th className="p-5">ID後4碼</th>
+                          <th className="p-5">備註</th>
+                          <th className="p-5">是否為管理員</th>
+                          <th className="p-5">是否刪除</th>
+                          <th className="p-5">報名筆數</th>
+                          <th className="p-5 text-right">是否停用</th>
                         </tr>
-                      ); 
-                    })}
-                    {filteredUsers.length === 0 && (
-                        <tr><td colSpan={7} className="p-8 text-center text-stone-400">找不到符合的使用者</td></tr>
-                    )}
-                  </tbody>
-                </table>
+                      </thead>
+                      <tbody className="divide-y divide-stone-100">
+                        {filteredUsers.map(u => { 
+                          const count = notes.filter(n => n.user_id === u.uid).length; 
+                          return (
+                            <tr key={u.id} className="hover:bg-stone-50/50">
+                              <td className="p-5 font-bold text-[#4f093c]">{u.user_name}</td>
+                              <td className="p-5 font-mono text-stone-400">{u.id_last4}</td>
+                              <td className="p-5">
+                                 <input 
+                                    className="bg-transparent border-b border-dashed border-stone-300 focus:border-[#4f093c] outline-none text-stone-600 text-base w-full" 
+                                    placeholder="新增備註..."
+                                    defaultValue={u.memo || ''}
+                                    onBlur={(e) => handleUpdateUserMemo(u.uid!, e.target.value)}
+                                 />
+                              </td>
+                              <td className="p-5"><input type="checkbox" checked={u.is_admin} onChange={() => handleToggleAdmin(u.uid!, u.is_admin)} className="w-5 h-5 rounded border-stone-300 text-[#4f093c] focus:ring-[#4f093c]" /></td>
+                              <td className="p-5"><span className={`px-2 py-1 rounded text-xs font-bold ${u.is_disabled ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'}`}>{u.is_disabled ? '已停用' : '正常'}</span></td>
+                              <td className="p-5 font-bold text-stone-600 pl-8">{count}</td>
+                              <td className="p-5 text-right"><input type="checkbox" checked={u.is_disabled} onChange={() => handleToggleUserStatus(u.uid!, u.is_disabled)} className="w-5 h-5 rounded border-stone-300 text-red-600 focus:ring-red-600" /></td>
+                            </tr>
+                          ); 
+                        })}
+                        {filteredUsers.length === 0 && (
+                            <tr><td colSpan={7} className="p-8 text-center text-stone-400">找不到符合的使用者</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                </div>
              </div>
           </div>
         )}
@@ -2429,16 +2453,15 @@ export default function App() {
         {activeTab === 'audit' && isAdmin && (
           <div className="space-y-8 animate-in fade-in">
             <div className={`p-8 rounded-[32px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}>
-              <div className="flex justify-between items-center mb-2">
-                  <h2 className="text-3xl font-bold text-[#4f093c]">審核中心</h2>
+              <ResponsiveHeader title="審核中心">
                   <div className="relative">
                       <input type="text" placeholder="搜尋申請人..." className="p-2 pl-8 border-none rounded-xl text-base font-bold text-stone-600 outline-none w-48 focus:w-64 transition-all bg-white shadow-sm" value={auditSearch} onChange={e=>setAuditSearch(e.target.value)} />
                       <Search className="w-4 h-4 absolute left-2 top-1/2 -translate-y-1/2 text-stone-400"/>
                   </div>
-              </div>
+              </ResponsiveHeader>
               <p className="text-sm text-stone-500 mb-8">處理用戶的密碼重設申請</p>
               <div className="overflow-x-auto rounded-2xl border border-stone-100">
-                <table className="w-full text-left text-sm bg-white">
+                <table className="w-full text-left text-sm bg-white" style={{ minWidth: '800px' }}>
                   <thead className="bg-[#4f093c] text-white font-bold">
                     <tr>
                       <th className="p-4">申請人姓名</th>
@@ -2482,23 +2505,22 @@ export default function App() {
         {/* Admin Settings Tab (Reverted - Removed Completed List) */}
         {activeTab === 'admin_settings' && isAdmin && (
            <div className={`p-10 rounded-[40px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}>
-              <div className="flex justify-between items-start mb-8 bg-[#4f093c] p-6 rounded-2xl shadow-md">
-                 <div>
-                    <h3 className="text-3xl font-bold text-white mb-2">1、報名行程設定</h3>
-                    <p className="text-sm text-white/70 mb-2">設定地點、活動、行程層級與日期控制</p>
-                    <div className="flex items-center gap-2">
-                        <button 
-                            onClick={() => setShowCompletedSettings(!showCompletedSettings)}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all border ${showCompletedSettings ? 'bg-orange-100 text-orange-700 border-orange-200' : 'bg-white/20 text-white border-white/30 hover:bg-white/30'}`}
-                        >
-                            {showCompletedSettings ? <Unlock className="w-3 h-3"/> : <Lock className="w-3 h-3"/>}
-                            {showCompletedSettings ? '已顯示圓滿行程 (可修改日期)' : '僅顯示進行中行程 (點此修改已圓滿日期)'}
-                        </button>
-                    </div>
-                 </div>
-                 <button onClick={handlePublishSettings} className="bg-white text-[#4f093c] px-6 py-3 rounded-xl font-bold text-base shadow-md hover:bg-stone-100 flex items-center gap-2 transition-all shrink-0">
-                    <UploadCloud className="w-5 h-5" /> 發佈設定
+              <ResponsiveHeader title="1、報名行程設定">
+                 <button onClick={handlePublishSettings} className="bg-white text-[#4f093c] px-4 py-2 rounded-xl font-bold text-sm shadow-md hover:bg-stone-100 flex items-center gap-2 transition-all shrink-0">
+                    <UploadCloud className="w-4 h-4" /> 發佈
                  </button>
+              </ResponsiveHeader>
+              
+              <div className="mb-8">
+                 <div className="flex items-center gap-2">
+                    <button 
+                        onClick={() => setShowCompletedSettings(!showCompletedSettings)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all border ${showCompletedSettings ? 'bg-orange-100 text-orange-700 border-orange-200' : 'bg-white/20 text-[#4f093c] border-white/30 hover:bg-white/30'}`}
+                    >
+                        {showCompletedSettings ? <Unlock className="w-3 h-3"/> : <Lock className="w-3 h-3"/>}
+                        {showCompletedSettings ? '已顯示圓滿行程 (可修改日期)' : '僅顯示進行中行程 (點此修改已圓滿日期)'}
+                    </button>
+                 </div>
               </div>
               
               <div className="grid grid-cols-1 lg:grid-cols-4 gap-3 h-[600px]">
@@ -2595,16 +2617,15 @@ export default function App() {
               </div>
               
               <div className="mt-20">
-                 <div className="flex justify-between items-center mb-6 bg-[#4f093c] p-6 rounded-2xl shadow-md">
-                    <h3 className="text-3xl font-bold text-white">2、欄位管理</h3>
+                 <ResponsiveHeader title="2、欄位管理">
                     <div className="flex gap-2">
-                        <button onClick={handlePublishSettings} className="bg-white text-[#4f093c] px-6 py-3 rounded-xl font-bold text-base shadow-md hover:bg-stone-100 flex items-center gap-2 transition-all shrink-0">
-                          <UploadCloud className="w-5 h-5" /> 發佈設定
+                        <button onClick={handlePublishSettings} className="bg-white text-[#4f093c] px-4 py-2 rounded-xl font-bold text-sm shadow-md hover:bg-stone-100 flex items-center gap-2 transition-all shrink-0">
+                          <UploadCloud className="w-4 h-4" /> 發佈
                         </button>
                     </div>
-                 </div>
+                 </ResponsiveHeader>
                  <div className="overflow-x-auto rounded-[40px] border border-stone-100 shadow-sm">
-                    <table className="w-full text-left text-sm bg-white">
+                    <table className="w-full text-left text-sm bg-white" style={{ minWidth: '800px' }}>
                        <thead className="bg-[#4f093c] text-white font-bold border-b border-stone-200">
                           <tr>
                             <th className="p-6">欄位名稱 (Key)</th>
