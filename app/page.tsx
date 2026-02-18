@@ -5,12 +5,12 @@ import {
   Bell, FileText, History, Settings, Shield, LogOut, Plus, Trash2, Check, 
   Edit, User, MapPin, Tag, ListFilter, Save, Database, Clock, Car, Info, 
   Home, UserCheck, AlertCircle, Briefcase, Layers, 
-  CheckCircle2, CheckSquare, FileSpreadsheet, Megaphone, ClipboardCheck, UserCog, Share2, Lock, Eye, EyeOff, Users, ArrowRight, RefreshCw, AlertTriangle, Image as ImageIcon, Table as TableIcon, Calendar, Filter, UploadCloud, ChevronRight, Search, KeyRound, BarChart3, PieChart, TrendingUp, Download, Archive, ServerCrash
+  CheckCircle2, CheckSquare, FileSpreadsheet, Megaphone, ClipboardCheck, UserCog, Share2, Lock, Eye, EyeOff, Users, ArrowRight, RefreshCw, AlertTriangle, Image as ImageIcon, Table as TableIcon, Calendar, Filter, UploadCloud, ChevronRight, Search, KeyRound, BarChart3, PieChart, TrendingUp, Download, Archive, ServerCrash, Unlock, GripVertical
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
 // ============================================================================
-// 1. 全域型別與常數 (Global Types & Constants)
+// 1. 全域型別與常數
 // ============================================================================
 declare global {
   interface Window {
@@ -36,6 +36,16 @@ const INITIAL_FORM_DATA = {
   arrival_datetime: '', departure_datetime: '', volunteer_group: '', 
   start_date: '', end_date: '', accommodation_option: '不安單', 
   stay_start_date: '', stay_end_date: ''
+};
+
+// 用於管理資料列表的預設欄寬
+const DEFAULT_COL_WIDTHS = {
+  col1: 200, // 活動行程
+  col2: 250, // 基本資料
+  col3: 230, // 交通/住宿
+  col4: 230, // 義工資訊
+  col5: 160, // 備註
+  col6: 140, // 狀態
 };
 
 interface FieldDefinition {
@@ -134,6 +144,7 @@ interface UserPermission {
   is_disabled: boolean;
   uid?: string;
   created_at?: string;
+  memo?: string; // Added memo field
 }
 
 interface ResetRequest {
@@ -146,7 +157,7 @@ interface ResetRequest {
 }
 
 // ============================================================================
-// 2. 輔助函式 (Helper Functions)
+// 2. 輔助函式
 // ============================================================================
 
 const encodeName = (name: string): string => {
@@ -291,25 +302,23 @@ const downloadPDF = async (elementId: string, title: string) => {
         const pdf = new jsPDF('p', 'mm', 'a4');
         const pdfWidth = pdf.internal.pageSize.getWidth();
         const pdfHeight = pdf.internal.pageSize.getHeight();
-        const imgHeight = (pdf.getImageProperties(imgData).height * pdfWidth) / pdf.getImageProperties(imgData).width;
         
         const pageHeight = pdfHeight - 20;
-        let heightLeft = imgHeight;
+        let heightLeft = (pdf.getImageProperties(imgData).height * pdfWidth) / pdf.getImageProperties(imgData).width;
         let position = 10; 
         let pageNum = 1;
 
-        pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, imgHeight);
+        pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, heightLeft);
         pdf.setFontSize(10);
         pdf.text(`Page ${pageNum}`, pdfWidth / 2, pdfHeight - 10, { align: 'center' });
 
         heightLeft -= pageHeight;
 
         while (heightLeft >= 0) {
-           position = heightLeft - imgHeight;
            pdf.addPage();
            pageNum++;
            const yPos = - (pageHeight * (pageNum - 1)) + 10; 
-           pdf.addImage(imgData, 'PNG', 0, yPos, pdfWidth, imgHeight);
+           pdf.addImage(imgData, 'PNG', 0, yPos, pdfWidth, (pdf.getImageProperties(imgData).height * pdfWidth) / pdf.getImageProperties(imgData).width);
            pdf.text(`Page ${pageNum}`, pdfWidth / 2, pdfHeight - 10, { align: 'center' });
            heightLeft -= pageHeight;
         }
@@ -322,7 +331,7 @@ const downloadPDF = async (elementId: string, title: string) => {
 };
 
 // ============================================================================
-// 3. 子組件 (Sub-Components)
+// 3. 子組件
 // ============================================================================
 
 const CustomLogo = ({ className }: { className?: string }) => (
@@ -486,6 +495,7 @@ export default function App() {
   const [todayDate, setTodayDate] = useState('');
   const [currentDateTime, setCurrentDateTime] = useState('');
   const [historyFilterLoc, setHistoryFilterLoc] = useState<string>('');
+  const [historySearch, setHistorySearch] = useState<string>('');
   
   // 資料頁籤的篩選器
   const [filterLoc, setFilterLoc] = useState<string>('');
@@ -502,6 +512,11 @@ export default function App() {
   const [completedFilterMonth, setCompletedFilterMonth] = useState<string>('');
   const [completedFilterLocAct, setCompletedFilterLocAct] = useState<string>('');
   const [completedFilterOption, setCompletedFilterOption] = useState<string>('');
+  const [completedSearch, setCompletedSearch] = useState<string>('');
+
+  // 學員與審核頁籤的搜尋
+  const [usersSearch, setUsersSearch] = useState<string>('');
+  const [auditSearch, setAuditSearch] = useState<string>('');
 
   const [formData, setFormData] = useState(INITIAL_FORM_DATA);
 
@@ -515,8 +530,15 @@ export default function App() {
   const [mgmtSelectedLoc, setMgmtSelectedLoc] = useState<string>('');
   const [mgmtSelectedAct, setMgmtSelectedAct] = useState<string>('');
   const [mgmtSelectedOpt, setMgmtSelectedOpt] = useState<string>('');
+  const [showCompletedSettings, setShowCompletedSettings] = useState<boolean>(false);
   
   const [newUser, setNewUser] = useState({ name: '', id4: '', pwd: '' });
+
+  // Column resizing state
+  const [colWidths, setColWidths] = useState(DEFAULT_COL_WIDTHS);
+  const resizingCol = useRef<string | null>(null);
+  const startX = useRef<number>(0);
+  const startWidth = useRef<number>(0);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -524,6 +546,16 @@ export default function App() {
   useEffect(() => {
     setTodayDate(getLocalTodayDate());
     setCurrentDateTime(getLocalTodayDateTime());
+
+    // Load saved column widths
+    const savedWidths = localStorage.getItem('adminTableColWidths');
+    if (savedWidths) {
+      try {
+        setColWidths(JSON.parse(savedWidths));
+      } catch (e) {
+        console.error("Failed to parse saved column widths", e);
+      }
+    }
 
     const loadSupabase = () => {
       const script = document.createElement('script');
@@ -603,6 +635,36 @@ export default function App() {
       return () => { supabaseClient.removeChannel(channel); };
     }
   }, [user, fetchData, supabaseClient]);
+
+  // Column Resizing Logic
+  const startResize = (e: React.MouseEvent, colKey: string) => {
+    e.preventDefault();
+    resizingCol.current = colKey;
+    startX.current = e.pageX;
+    startWidth.current = colWidths[colKey as keyof typeof colWidths];
+    
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  };
+
+  const handleMouseMove = (e: MouseEvent) => {
+    if (resizingCol.current) {
+      const diff = e.pageX - startX.current;
+      const newWidth = Math.max(50, startWidth.current + diff);
+      setColWidths(prev => ({
+        ...prev,
+        [resizingCol.current!]: newWidth
+      }));
+    }
+  };
+
+  const handleMouseUp = () => {
+    document.removeEventListener('mousemove', handleMouseMove);
+    document.removeEventListener('mouseup', handleMouseUp);
+    resizingCol.current = null;
+    // Save to localStorage
+    localStorage.setItem('adminTableColWidths', JSON.stringify(colWidths));
+  };
 
   // ----------------------------------------------------------------------------
   // 3. Memos (Computations for Logic) - Defined BEFORE usage
@@ -814,8 +876,6 @@ export default function App() {
     
     setLoading(true);
     const email = encodeName(username + idLast4) + FAKE_DOMAIN;
-    const finalIdLast4 = idLast4.trim();
-    const finalUsername = username.trim();
 
     try {
         if (authMode === 'login') {
@@ -827,26 +887,27 @@ export default function App() {
 
         } else if (authMode === 'signup') {
             if (!password) { setLoading(false); return alert('請設定密碼'); }
-            if(!confirm(`確認註冊資料：\n姓名：${finalUsername}\nID後4碼：${finalIdLast4}\n\n請確認無誤後送出。`)) { setLoading(false); return; }
+            // Fixed: Use username and idLast4 directly
+            if(!confirm(`確認註冊資料：\n姓名：${username}\nID後4碼：${idLast4}\n\n請確認無誤後送出。`)) { setLoading(false); return; }
             
             const { data, error } = await supabaseClient.auth.signUp({
                 email, password,
-                options: { data: { user_name: finalUsername, id_last4: finalIdLast4, full_name: finalUsername } }
+                options: { data: { user_name: username, id_last4: idLast4, full_name: username } }
             });
             if (error) throw error;
             if (data.user) {
                 alert(`註冊成功！系統將自動建立資料。`);
                 if (data.session) {
                     setUser(data.user);
-                    setFormData(prev => ({ ...prev, real_name: finalUsername }));
+                    setFormData(prev => ({ ...prev, real_name: username }));
                 } else { alert('請檢查信箱並點擊驗證連結。'); }
             }
         } else if (authMode === 'forgot') {
             const { data: uData, error: fetchErr } = await supabaseClient
                 .from('user_permissions')
                 .select('uid')
-                .eq('user_name', finalUsername)
-                .eq('id_last4', finalIdLast4)
+                .eq('user_name', username)
+                .eq('id_last4', idLast4)
                 .maybeSingle();
 
             if (fetchErr) throw fetchErr;
@@ -858,8 +919,8 @@ export default function App() {
             }
 
             const { error } = await supabaseClient.from('reset_requests').insert([{
-                user_name: finalUsername, 
-                id_last4: finalIdLast4, 
+                user_name: username, 
+                id_last4: idLast4, 
                 uid: uData.uid, 
                 status: 'pending', 
                 created_at: new Date().toISOString()
@@ -959,6 +1020,16 @@ export default function App() {
   const handleToggleUserStatus = async (uid: string, currentStatus: boolean) => { if (!supabaseClient) return; await supabaseClient.from('user_permissions').update({ is_disabled: !currentStatus }).eq('uid', uid); fetchData(); };
   const handleToggleAdmin = async (uid: string, currentStatus: boolean) => { if (!supabaseClient) return; const { error } = await supabaseClient.from('user_permissions').update({ is_admin: !currentStatus }).eq('uid', uid); if (error) alert("更新失敗：" + error.message); else fetchData(); };
 
+  const handleUpdateUserMemo = async (uid: string, memo: string) => {
+      if (!supabaseClient) return;
+      const { error } = await supabaseClient.from('user_permissions').update({ memo }).eq('uid', uid);
+      if (error) alert("備註更新失敗：" + error.message);
+      else {
+          // Optimistic update
+          setAllUsers(prev => prev.map(u => u.uid === uid ? { ...u, memo } : u));
+      }
+  };
+
   const handleResetAction = async (req: ResetRequest, action: 'approve' | 'reject') => {
     if (!supabaseClient) return;
     if (action === 'approve') {
@@ -996,8 +1067,18 @@ export default function App() {
     } catch (err: any) { alert('建立失敗: ' + err.message); }
   };
 
-  const handleUpdateActivityDate = async (field: 'activity_end_date' | 'activity_deadline', val: string) => { if (!supabaseClient || !mgmtSelectedLoc || !mgmtSelectedAct) return; const { error } = await supabaseClient.from('activity_hierarchy').update({ [field]: val }).eq('location', mgmtSelectedLoc).eq('activity', mgmtSelectedAct); if(error) console.error(error); };
-  const handleUpdateOptionDate = async (field: 'option_end_date' | 'option_deadline', val: string) => { if (!supabaseClient || !mgmtSelectedLoc || !mgmtSelectedAct || !mgmtSelectedOpt) return; const { error } = await supabaseClient.from('activity_hierarchy').update({ [field]: val }).eq('location', mgmtSelectedLoc).eq('activity', mgmtSelectedAct).eq('option', mgmtSelectedOpt); if(error) console.error(error); };
+  const handleUpdateActivityDate = async (field: 'activity_end_date' | 'activity_deadline', val: string) => { 
+      if (!supabaseClient || !mgmtSelectedLoc || !mgmtSelectedAct) return; 
+      const { error } = await supabaseClient.from('activity_hierarchy').update({ [field]: val }).eq('location', mgmtSelectedLoc).eq('activity', mgmtSelectedAct); 
+      if(error) console.error(error); 
+      else fetchData(); 
+  };
+  const handleUpdateOptionDate = async (field: 'option_end_date' | 'option_deadline', val: string) => { 
+      if (!supabaseClient || !mgmtSelectedLoc || !mgmtSelectedAct || !mgmtSelectedOpt) return; 
+      const { error } = await supabaseClient.from('activity_hierarchy').update({ [field]: val }).eq('location', mgmtSelectedLoc).eq('activity', mgmtSelectedAct).eq('option', mgmtSelectedOpt); 
+      if(error) console.error(error); 
+      else fetchData(); 
+  };
   const handlePublishSettings = () => { alert("設定已發佈！前台表單選項已更新。"); fetchData(); };
   const handleUpdateFieldConfig = async (key: string, field: string, value: any) => { if (!supabaseClient) return; setFieldConfigs(prev => prev.map(f => f.field_key === key ? { ...f, [field]: value } : f)); const current = fieldConfigs.find(f => f.field_key === key); if (current) { await supabaseClient.from('field_definitions').upsert({ ...current, [field]: value }, { onConflict: 'field_key' }); } };
   
@@ -1073,93 +1154,189 @@ export default function App() {
       return [...locActs].sort();
   }, [hierarchyStatus.completed, completedFilterMonth]);
 
-  const selectedCompletedHierarchy = useMemo(() => {
+  const completedOptionChoices = useMemo(() => {
      if (!completedFilterMonth || !completedFilterLocAct) return [];
      const [loc, act] = completedFilterLocAct.split(' | ');
-     
      const filtered = hierarchyStatus.completed.filter(h => {
          const date = h.option_end_date || h.activity_end_date;
          return date && date.startsWith(completedFilterMonth) && h.location === loc && h.activity === act;
      });
      
-     const merged: { node: ActivityHierarchy, counts: { total: number, vol: number, dharma: number } }[] = [];
-     const groups: Record<string, ActivityHierarchy[]> = {};
-     filtered.forEach(h => {
-         const key = `${h.option || '(無行程)'}`;
-         if (!groups[key]) groups[key] = [];
-         groups[key].push(h);
+     const options = new Set<string>();
+     filtered.forEach(item => {
+        options.add(item.option || '(無行程)');
+     });
+     return [...options].sort();
+  }, [hierarchyStatus.completed, completedFilterMonth, completedFilterLocAct]);
+
+  // 重構: 結案總表邏輯 - 合併相同的 Loc|Act|Opt 並計算內容
+  const selectedCompletedHierarchy = useMemo(() => {
+     if (!completedFilterMonth) return [];
+     
+     // 1. 篩選符合月份的階層資料
+     let rawFiltered = hierarchyStatus.completed.filter(h => {
+         const date = h.option_end_date || h.activity_end_date;
+         return date && date.startsWith(completedFilterMonth);
      });
 
-     Object.values(groups).forEach(groupNodes => {
-         const repNode = groupNodes[0];
-         let total = 0, vol = 0, dharma = 0;
+     if (completedFilterLocAct) {
+         const [loc, act] = completedFilterLocAct.split(' | ');
+         rawFiltered = rawFiltered.filter(h => h.location === loc && h.activity === act);
+     }
+     
+     if (completedFilterOption) {
+        rawFiltered = rawFiltered.filter(h => (h.option || '(無行程)') === completedFilterOption);
+     }
+
+     // 2. 建立合併對應表
+     const mergedMap = new Map();
+
+     rawFiltered.forEach(node => {
+         const key = `${node.location}|${node.activity}|${node.option || '(無行程)'}`;
+         if (!mergedMap.has(key)) {
+             mergedMap.set(key, {
+                 node: node, // 代表性的節點
+                 dates: { dead: node.option_deadline || node.activity_deadline, end: node.option_end_date || node.activity_end_date }
+             });
+         }
+     });
+
+     // 3. 針對每個唯一的行程計算統計
+     const result = [];
+     
+     for (const [key, item] of mergedMap) {
+         const { node, dates } = item;
          
+         // 找出所有符合此 Key 的報名資料
          const targetNotes = notes.filter(n => {
              if (n.is_deleted) return false;
              
-             const isMatch = (n.activity_location === repNode.location) && 
-                             (n.activity_name === repNode.activity) && 
-                             (n.activity_option === repNode.option);
-
-             if (!isMatch) return false;
-
-             let isEnded = false;
-             if (n.saved_end_date) {
-                 isEnded = n.saved_end_date.startsWith(completedFilterMonth);
-             } else {
-                 const hDate = repNode.option_end_date || repNode.activity_end_date;
-                 isEnded = hDate ? hDate.startsWith(completedFilterMonth) : false;
+             // 確保報名資料符合月份
+             let nEndDate = n.saved_end_date;
+             if (!nEndDate) {
+                 // 這裡需要寬鬆比較，因為系統 null 和報名 "" 應視為相同
+                 const hNode = hierarchyData.find(h => 
+                     h.location === n.activity_location && 
+                     h.activity === n.activity_name && 
+                     (h.option || '') === (n.activity_option || '')
+                 );
+                 nEndDate = hNode?.option_end_date || hNode?.activity_end_date;
              }
-             
-             return isMatch && isEnded;
+             if (!nEndDate || !nEndDate.startsWith(completedFilterMonth)) return false;
+
+             const nOpt = n.activity_option || '(無行程)';
+             const nKey = `${n.activity_location}|${n.activity_name}|${nOpt}`;
+             return nKey === key;
          });
 
-         total = targetNotes.length;
-         vol = targetNotes.filter(n => n.identity === '發心義工').length;
-         dharma = targetNotes.filter(n => n.identity === '參加法會').length;
+         const total = targetNotes.length;
+         const vol = targetNotes.filter(n => n.identity === '發心義工').length;
+         const dharma = targetNotes.filter(n => n.identity === '參加法會').length;
 
-         merged.push({ node: repNode, counts: { total, vol, dharma } });
+         // 計算內容統計
+         let contentStatsStr = '';
+         if (!node.option) {
+             // 若無行程 (Option為空)，計算姓名的筆數 (依照需求)
+             const nameCounts: Record<string, number> = {};
+             targetNotes.forEach(n => {
+                 const name = n.real_name || '未命名';
+                 nameCounts[name] = (nameCounts[name] || 0) + 1;
+             });
+             // 格式化為 姓名(筆數)
+             const entries = Object.entries(nameCounts);
+             if (entries.length > 0) {
+                 contentStatsStr = entries.map(([k, v]) => `${k}(${v})`).join(', ');
+             } else {
+                 contentStatsStr = '-';
+             }
+         } else {
+             // 一般行程，計算勾選內容
+             const contentCountMap: Record<string, number> = {};
+             targetNotes.forEach(n => {
+                 const raw = n.selected_contents as any;
+                 let contents: string[] = [];
+                 if (Array.isArray(raw)) contents = raw.map((s: any) => String(s).replace(/[\[\]"]/g, '').trim()).filter(Boolean);
+                 else if (typeof raw === 'string') { 
+                    let s = raw.trim(); 
+                    if (s !== '[]' && s !== '{}' && s !== 'null' && s !== '""') { 
+                        s = s.replace(/^\[|\]$/g, '').replace(/^\{|\}$/g, ''); 
+                        contents = s.split(',').map((item: string) => item.replace(/^"|"$/g, '').replace(/^'|'$/g, '').replace(/[\[\]"]/g, '').trim()).filter(Boolean); 
+                    } 
+                 }
+                 contents.forEach(c => {
+                     contentCountMap[c] = (contentCountMap[c] || 0) + 1;
+                 });
+             });
+             contentStatsStr = Object.entries(contentCountMap)
+                .map(([k, v]) => `${k}(${v})`)
+                .join(', ');
+         }
+
+         result.push({
+             node,
+             dates,
+             counts: { total, vol, dharma },
+             contentStats: contentStatsStr
+         });
+     }
+
+     return result.sort((a, b) => {
+         const locComp = a.node.location.localeCompare(b.node.location);
+         if (locComp !== 0) return locComp;
+         const actComp = (a.node.activity || '').localeCompare(b.node.activity || '');
+         if (actComp !== 0) return actComp;
+         return (a.node.option || '').localeCompare(b.node.option || '');
      });
-
-     return merged.sort((a, b) => (a.node.option || '').localeCompare(b.node.option || ''));
-  }, [hierarchyStatus.completed, completedFilterMonth, completedFilterLocAct, notes]);
-
-  const completedOptionChoices = useMemo(() => {
-     const options = new Set<string>();
-     selectedCompletedHierarchy.forEach(item => {
-        options.add(item.node.option || '(無行程)');
-     });
-     return [...options].sort();
-  }, [selectedCompletedHierarchy]);
+  }, [hierarchyStatus.completed, completedFilterMonth, completedFilterLocAct, completedFilterOption, notes, hierarchyData]);
 
   const selectedCompletedNotes = useMemo(() => {
-      if (!completedFilterMonth || !completedFilterLocAct) return [];
-      const [loc, act] = completedFilterLocAct.split(' | ');
-
+      if (!completedFilterMonth) return [];
+      
       let targetNotes = notes.filter(n => {
           if (n.is_deleted) return false;
-          if (n.activity_location !== loc || n.activity_name !== act) return false;
           
           let endDate = n.saved_end_date;
           if (!endDate) {
-               const hNode = hierarchyData.find(h => h.location === n.activity_location && h.activity === n.activity_name && h.option === n.activity_option);
+               const hNode = hierarchyData.find(h => 
+                   h.location === n.activity_location && 
+                   h.activity === n.activity_name && 
+                   (h.option || '') === (n.activity_option || '')
+               );
                endDate = hNode?.option_end_date || hNode?.activity_end_date;
           }
-          
-          if (!endDate) return false;
-          return endDate.startsWith(completedFilterMonth);
+          if (!endDate || !endDate.startsWith(completedFilterMonth)) return false;
+
+          if (completedFilterLocAct) {
+              const [loc, act] = completedFilterLocAct.split(' | ');
+              if (n.activity_location !== loc || n.activity_name !== act) return false;
+          }
+
+          if (completedFilterOption) {
+              if ((n.activity_option || '(無行程)') !== completedFilterOption) return false;
+          }
+
+          if (completedSearch) {
+              const s = completedSearch.toLowerCase();
+              return (n.real_name && n.real_name.toLowerCase().includes(s)) ||
+                     (n.dharma_name && n.dharma_name.toLowerCase().includes(s)) ||
+                     (n.other_remarks && n.other_remarks.toLowerCase().includes(s));
+          }
+
+          return true;
       });
 
-      if (completedFilterOption) {
-          targetNotes = targetNotes.filter(n => (n.activity_option || '(無行程)') === completedFilterOption);
-      }
-
       return targetNotes.sort((a, b) => String(a.activity_option || '').localeCompare(String(b.activity_option || '')));
-  }, [notes, completedFilterMonth, completedFilterLocAct, completedFilterOption, hierarchyData, todayDate]);
+  }, [notes, completedFilterMonth, completedFilterLocAct, completedFilterOption, completedSearch, hierarchyData]);
 
-  const adminActivities = useMemo(() => [...new Set(hierarchyStatus.active.filter(h => h.location === mgmtSelectedLoc && h.activity).map(h => h.activity as string))].sort(), [hierarchyStatus.active, mgmtSelectedLoc]);
-  const adminOptions = useMemo(() => [...new Set(hierarchyStatus.active.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option).map(h => h.option as string))].sort(), [hierarchyStatus.active, mgmtSelectedLoc, mgmtSelectedAct]);
-  const adminContents = useMemo(() => hierarchyStatus.active.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option === mgmtSelectedOpt && h.content), [hierarchyStatus.active, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
+  // SETTINGS MEMOS with TOGGLE Logic
+  const settingsSourceData = useMemo(() => {
+      if (showCompletedSettings) return hierarchyData;
+      return hierarchyStatus.active;
+  }, [showCompletedSettings, hierarchyData, hierarchyStatus.active]);
+
+  const adminActivities = useMemo(() => [...new Set(settingsSourceData.filter(h => h.location === mgmtSelectedLoc && h.activity).map(h => h.activity as string))].sort(), [settingsSourceData, mgmtSelectedLoc]);
+  const adminOptions = useMemo(() => [...new Set(settingsSourceData.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option).map(h => h.option as string))].sort(), [settingsSourceData, mgmtSelectedLoc, mgmtSelectedAct]);
+  const adminContents = useMemo(() => settingsSourceData.filter(h => h.location === mgmtSelectedLoc && h.activity === mgmtSelectedAct && h.option === mgmtSelectedOpt && h.content), [settingsSourceData, mgmtSelectedLoc, mgmtSelectedAct, mgmtSelectedOpt]);
 
   const filterActivityOptions = useMemo(() => {
     let source = hierarchyData;
@@ -1183,6 +1360,7 @@ export default function App() {
   const filteredAdminNotes = useMemo(() => {
     return notes.filter(n => {
         const { isEnded } = getNoteStatus(n); 
+        // Admin Data 只顯示進行中 (未圓滿)
         if (isEnded) return false;
         
         if (filterLoc && n.activity_location !== filterLoc) return false;
@@ -1218,7 +1396,13 @@ export default function App() {
   const sortedHistoryNotes = useMemo(() => {
       let filtered = notes.filter(n => n.user_id === user?.id);
       if (historyFilterLoc) filtered = filtered.filter(n => n.activity_location === historyFilterLoc);
-      
+      if (historySearch) {
+          const s = historySearch.toLowerCase();
+          filtered = filtered.filter(n => 
+              (n.real_name && n.real_name.toLowerCase().includes(s)) ||
+              (n.activity_name && n.activity_name.toLowerCase().includes(s))
+          );
+      }
       return filtered.sort((a, b) => {
           const getStatusWeight = (n: Note) => {
               if (n.is_deleted) return 2;
@@ -1226,17 +1410,32 @@ export default function App() {
               if (isEnded) return 1;
               return 0;
           };
-          
           const weightA = getStatusWeight(a);
           const weightB = getStatusWeight(b);
-          
           if (weightA !== weightB) return weightA - weightB;
-
           const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
           const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
           return dateB - dateA;
       });
-  }, [notes, user, historyFilterLoc, getNoteStatus]);
+  }, [notes, user, historyFilterLoc, historySearch, getNoteStatus]);
+
+  const filteredUsers = useMemo(() => {
+      if (!usersSearch) return allUsers;
+      const s = usersSearch.toLowerCase();
+      return allUsers.filter(u => 
+          (u.user_name && u.user_name.toLowerCase().includes(s)) ||
+          (u.id_last4 && u.id_last4.includes(s))
+      );
+  }, [allUsers, usersSearch]);
+
+  const filteredAudits = useMemo(() => {
+      if (!auditSearch) return resetRequests;
+      const s = auditSearch.toLowerCase();
+      return resetRequests.filter(r => 
+          (r.user_name && r.user_name.toLowerCase().includes(s)) ||
+          (r.id_last4 && r.id_last4.includes(s))
+      );
+  }, [resetRequests, auditSearch]);
 
   const statisticsData = useMemo(() => {
     const baseData = notes.filter(n => !n.is_deleted);
@@ -1329,8 +1528,8 @@ export default function App() {
             <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl text-sm font-bold flex items-start gap-2">
                <ServerCrash className="w-5 h-5 shrink-0 mt-0.5" />
                <div>
-                  系統無法連線至資料庫。<br/>
-                  <span className="text-xs font-normal text-red-500">請確認環境變數 (URL/KEY) 設定正確。</span>
+                  無法連結資料庫<br/>
+                  <span className="text-xs font-normal text-red-500">請檢查環境變數或網路設定。</span>
                </div>
             </div>
           )}
@@ -1576,7 +1775,7 @@ export default function App() {
                  </div>
 
                  {fieldVisibility.arrivalDeparture && (
-                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-4 bg-white/50 rounded-2xl border border-blue-100">
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                      <div className="space-y-2">
                        <label className="text-sm font-bold text-[#4f093c] ml-1">抵寺時間*</label>
                        <input type="datetime-local" min={currentDateTime} className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white" value={formData.arrival_datetime || ''} onChange={e=>setFormData({...formData, arrival_datetime: e.target.value})} />
@@ -1608,7 +1807,7 @@ export default function App() {
                  )}
                  
                  {fieldVisibility.volunteerDates && (
-                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-4 bg-white/50 rounded-2xl border border-blue-100">
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                      <div className="space-y-2">
                        <label className="text-sm font-bold text-[#4f093c] ml-1">發心開始*</label>
                        <input type="datetime-local" min={currentDateTime} className="w-full p-3 text-lg border border-blue-200 rounded-xl bg-white focus:ring-2 focus:ring-[#4f093c]/20 outline-none shadow-sm" value={formData.start_date || ''} onChange={e=>setFormData({...formData, start_date: e.target.value})} />
@@ -1621,7 +1820,7 @@ export default function App() {
                  )}
 
                  {fieldVisibility.accommodation && (
-                    <div className="p-4 bg-white/50 rounded-xl border border-stone-200 space-y-4">
+                    <div className="space-y-4">
                         <div className="space-y-2">
                           <label className="text-sm font-bold text-[#4f093c]">安單選項</label>
                           <select className="w-full p-3 text-lg border rounded-xl bg-white" value={formData.accommodation_option || ''} onChange={e=>setFormData({...formData, accommodation_option: e.target.value})}>
@@ -1654,11 +1853,15 @@ export default function App() {
         {/* History Tab */}
         {activeTab === 'history' && (
           <div className="space-y-8">
-             <div className={`flex justify-between items-center px-6 py-4 rounded-2xl shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}>
-                 <h3 className="font-bold text-[#4f093c] text-lg flex items-center gap-2"><History className="w-5 h-5"/> 歷史紀錄</h3>
+             <div className={`flex justify-between items-center px-6 py-4 rounded-2xl shadow-sm border border-stone-100 bg-[#4f093c] text-white`}>
+                 <h3 className="font-bold text-lg flex items-center gap-2"><History className="w-5 h-5"/> 歷史紀錄</h3>
                  <div className="flex items-center gap-2">
-                    <Filter className="w-4 h-4 text-stone-400"/>
-                    <select className="p-2 pl-4 pr-8 border-none bg-white/50 rounded-xl text-base font-bold text-stone-600 outline-none cursor-pointer hover:bg-white transition-colors" value={historyFilterLoc} onChange={e=>setHistoryFilterLoc(e.target.value)}>
+                    <div className="relative">
+                      <input type="text" placeholder="搜尋..." className="p-2 pl-8 border-none rounded-xl text-base font-bold text-stone-600 outline-none w-40 focus:w-60 transition-all bg-white/90 focus:bg-white" value={historySearch} onChange={e=>setHistorySearch(e.target.value)} />
+                      <Search className="w-4 h-4 absolute left-2 top-1/2 -translate-y-1/2 text-stone-400"/>
+                    </div>
+                    <Filter className="w-4 h-4 text-white/80"/>
+                    <select className="p-2 pl-4 pr-8 border-none bg-white/20 rounded-xl text-base font-bold text-white outline-none cursor-pointer hover:bg-white/30 transition-colors [&>option]:text-stone-600" value={historyFilterLoc} onChange={e=>setHistoryFilterLoc(e.target.value)}>
                        <option value="">全部地點</option>
                        {locations.map(l => <option key={l} value={l}>{l}</option>)}
                     </select>
@@ -1852,19 +2055,35 @@ export default function App() {
               </div>
             </div>
             
-            {/* Table (Reverted to Standard Table Layout - No Resizing) */}
+            {/* Table (Resizable Columns) */}
             <div className="overflow-x-auto rounded-2xl border border-stone-100">
               <table className="w-full text-left text-sm bg-white table-fixed">
                 <thead className="bg-[#4f093c] text-white font-bold">
                   <tr>
-                      <th className="p-4 w-[200px]">活動行程</th>
-                      <th className="p-4 w-[250px]">基本資料</th>
-                      <th className="p-4 w-[230px]">交通/住宿</th>
-                      <th className="p-4 w-[230px]">義工資訊</th>
-                      <th className="p-4 w-[160px]">備註</th>
-                      <th className="p-4 w-[100px]">狀態</th>
+                      {[
+                        { key: 'col1', label: '活動行程' },
+                        { key: 'col2', label: '基本資料' },
+                        { key: 'col3', label: '交通/住宿' },
+                        { key: 'col4', label: '義工資訊' },
+                        { key: 'col5', label: '備註' },
+                        { key: 'col6', label: '狀態' }
+                      ].map((col) => (
+                        <th 
+                          key={col.key} 
+                          className="p-4 relative group select-none" 
+                          style={{ width: colWidths[col.key as keyof typeof colWidths] }}
+                        >
+                          {col.label}
+                          <div 
+                            className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-white/20 group-hover:bg-white/10 z-10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                            onMouseDown={(e) => startResize(e, col.key)}
+                          >
+                            <GripVertical className="w-3 h-3 text-white/50" />
+                          </div>
+                        </th>
+                      ))}
                       {/* Always show delete column here since it's active data */}
-                      <th className="p-4 text-center w-[80px]">刪除</th>
+                      <th className="p-4 text-center w-[80px] min-w-[80px] sticky right-0 bg-[#4f093c] z-10 shadow-[-5px_0_10px_-5px_rgba(0,0,0,0.1)]">刪除</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white">
@@ -1949,7 +2168,7 @@ export default function App() {
                         </td>
                         <td className="p-4 align-top w-40 max-w-[10rem]">
                           <div className="flex flex-col gap-1 break-words whitespace-normal leading-tight">
-                            {mergedRemarks.length > 0 && <div className={subTextStyle}>{mergedRemarks.join(' / ')}</div>}
+                            {mergedRemarks.join(' / ')}
                             {hasMemo && <div className={`${subTextStyle} mt-2 pt-2 border-t border-stone-200/50 border-dashed`}>{String(n.memo)}</div>}
                           </div>
                         </td>
@@ -1957,15 +2176,15 @@ export default function App() {
                           <div className="flex flex-col gap-1">
                             <div className="flex items-center gap-1 flex-wrap">
                                 {statusBadge}
-                                {isDuplicate && <span className="text-red-600 text-xs font-bold bg-red-100 px-1.5 py-0.5 rounded-full border border-red-200 w-fit">(重複)</span>}
+                                {isDuplicate && <span className="text-red-600 text-xs font-bold bg-red-100 px-1.5 py-0.5 rounded-full border border-red-200 w-fit">重複</span>}
                             </div>
-                            <div className="text-xs opacity-70 mt-1">
-                              <div>{n.sign_name}</div>
-                              <div>{formatDateTime(n.created_at)}</div>
+                            <div className="text-xs text-stone-500 mt-2 space-y-1">
+                              <div className="font-bold">報名者: {n.sign_name}</div>
+                              <div className="opacity-70">{formatDateTime(n.created_at)}</div>
                             </div>
                           </div>
                         </td>
-                        <td className="p-4 align-top text-center overflow-hidden">
+                        <td className="p-4 align-top text-center overflow-hidden sticky right-0 bg-inherit shadow-[-5px_0_10px_-5px_rgba(0,0,0,0.1)]">
                             <input 
                                 type="checkbox" 
                                 className="w-5 h-5 rounded border-stone-300 text-red-600 focus:ring-red-600 cursor-pointer"
@@ -1985,13 +2204,13 @@ export default function App() {
         {activeTab === 'completed_cases' && isAdmin && (
           <div className="space-y-8 animate-in fade-in">
              <div className={`p-10 rounded-[40px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}>
-                 <div className="flex justify-between items-center mb-8">
+                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
                      <h3 className="text-3xl font-bold text-[#4f093c] flex items-center gap-2"><Archive className="w-8 h-8"/> 已圓滿活動</h3>
-                     <div className="flex gap-3">
+                     <div className="flex flex-wrap gap-3">
                          <select 
                              className="p-3 border-none rounded-xl text-base font-bold text-stone-600 outline-none bg-white shadow-sm"
                              value={completedFilterMonth}
-                             onChange={(e) => { setCompletedFilterMonth(e.target.value); setCompletedFilterLocAct(''); }}
+                             onChange={(e) => { setCompletedFilterMonth(e.target.value); setCompletedFilterLocAct(''); setCompletedFilterOption(''); }}
                          >
                              <option value="">請選擇年月...</option>
                              {availableCompletedMonths.map(m => <option key={m} value={m}>{m}</option>)}
@@ -2000,11 +2219,21 @@ export default function App() {
                          <select 
                              className="p-3 border-none rounded-xl text-base font-bold text-stone-600 outline-none bg-white shadow-sm max-w-[15rem] truncate"
                              value={completedFilterLocAct}
-                             onChange={(e) => setCompletedFilterLocAct(e.target.value)}
+                             onChange={(e) => { setCompletedFilterLocAct(e.target.value); setCompletedFilterOption(''); }}
                              disabled={!completedFilterMonth}
                          >
                              <option value="">請選擇活動...</option>
                              {availableCompletedLocActs.map(la => <option key={la} value={la}>{la}</option>)}
+                         </select>
+
+                         <select 
+                             className="p-3 border-none rounded-xl text-base font-bold text-stone-600 outline-none bg-white shadow-sm max-w-[10rem] truncate"
+                             value={completedFilterOption}
+                             onChange={(e) => setCompletedFilterOption(e.target.value)}
+                             disabled={!completedFilterLocAct}
+                         >
+                             <option value="">全部行程</option>
+                             {completedOptionChoices.map(opt => <option key={opt} value={opt}>{opt}</option>)}
                          </select>
                      </div>
                  </div>
@@ -2022,8 +2251,10 @@ export default function App() {
                              <table className="w-full text-left text-sm">
                                  <thead className="bg-[#4f093c] text-white font-bold">
                                      <tr>
+                                         <th className="p-4 w-[180px]">地點 / 活動</th>
                                          <th className="p-4">行程</th>
-                                         <th className="p-4">截止 / 結束日期</th>
+                                         <th className="p-4 w-[150px]">截止 / 結束日期</th>
+                                         <th className="p-4">內容統計 / 姓名統計</th>
                                          <th className="p-4 text-center">總人數</th>
                                          <th className="p-4 text-center">義工</th>
                                          <th className="p-4 text-center">法會</th>
@@ -2032,10 +2263,16 @@ export default function App() {
                                  <tbody>
                                      {selectedCompletedHierarchy.map((item, idx) => (
                                          <tr key={idx} className={`${idx % 2 === 0 ? 'bg-white' : 'bg-stone-100'} hover:bg-stone-200 transition-colors`}>
-                                             <td className="p-4 font-bold text-slate-800">{item.node.option || '(無行程)'}</td>
-                                             <td className="p-4 font-mono text-stone-500">
-                                                 {item.node.option_deadline || item.node.activity_deadline || '-'} / {item.node.option_end_date || item.node.activity_end_date}
+                                             <td className="p-4 font-bold text-slate-800">
+                                                 <div>{item.node.location}</div>
+                                                 <div className="text-xs text-stone-500 mt-1">{item.node.activity}</div>
                                              </td>
+                                             <td className="p-4 font-bold text-slate-800">{item.node.option || '(無行程)'}</td>
+                                             <td className="p-4 font-mono text-stone-500 text-xs">
+                                                 <div className="text-red-400">截止: {item.dates.dead || '-'}</div>
+                                                 <div className="text-emerald-600 font-bold mt-1">結束: {item.dates.end}</div>
+                                             </td>
+                                             <td className="p-4 text-stone-600 text-xs font-bold whitespace-pre-wrap">{item.contentStats || '-'}</td>
                                              <td className="p-4 text-center font-bold text-lg text-slate-800">{item.counts.total}</td>
                                              <td className="p-4 text-center font-bold text-orange-600">{item.counts.vol}</td>
                                              <td className="p-4 text-center font-bold text-blue-600">{item.counts.dharma}</td>
@@ -2051,27 +2288,32 @@ export default function App() {
 
                  {/* Detail Data Table */}
                  {selectedCompletedHierarchy.length > 0 && (
-                     <div className="bg-white rounded-3xl p-6 border border-stone-200">
+                     <div className="bg-white rounded-3xl p-6 border border-stone-200" id="completed-detail-table">
                          <div className="flex justify-between items-center mb-6 pl-2 border-l-4 border-[#4f093c]">
                              <h4 className="font-bold text-[#4f093c] text-xl">詳細報名資料列表</h4>
                              <div className="flex items-center gap-3">
-                                 <select 
-                                     className="p-2 border border-stone-200 rounded-lg text-sm font-bold text-stone-600 outline-none bg-white shadow-sm"
-                                     value={completedFilterOption}
-                                     onChange={(e) => setCompletedFilterOption(e.target.value)}
-                                 >
-                                     <option value="">全部行程</option>
-                                     {completedOptionChoices.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                                 </select>
-                                 <button onClick={() => {/* Reuse existing export logic */}} className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-emerald-700 shadow-sm flex items-center gap-1">
-                                     <Download className="w-4 h-4"/> 匯出此表
+                                 <div className="relative">
+                                     <input 
+                                         type="text" 
+                                         placeholder="搜尋姓名/法名..." 
+                                         className="p-2 pl-8 border border-stone-200 rounded-lg text-sm font-bold text-stone-600 outline-none w-48 focus:w-60 transition-all" 
+                                         value={completedSearch} 
+                                         onChange={e=>setCompletedSearch(e.target.value)} 
+                                     />
+                                     <Search className="w-4 h-4 absolute left-2 top-1/2 -translate-y-1/2 text-stone-400"/>
+                                 </div>
+                                 <button onClick={() => downloadPDF('completed-detail-table', '詳細報名資料列表')} className="bg-stone-100 text-stone-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-stone-200 shadow-sm flex items-center gap-1 transition-colors">
+                                     <Download className="w-4 h-4"/> 匯出 (PDF)
+                                 </button>
+                                 <button onClick={() => handleExport()} className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-emerald-700 shadow-sm flex items-center gap-1">
+                                     <FileSpreadsheet className="w-4 h-4"/> 匯出 (Excel)
                                  </button>
                              </div>
                          </div>
                          
                          <div className="overflow-x-auto rounded-xl border border-stone-100">
                              <table className="w-full text-left text-sm table-fixed">
-                                 <thead className="bg-stone-100 text-stone-600 font-bold">
+                                 <thead className="bg-[#4f093c] text-white font-bold">
                                      <tr>
                                          <th className="p-3 w-[150px]">行程</th>
                                          <th className="p-3 w-[200px]">姓名資料</th>
@@ -2131,15 +2373,141 @@ export default function App() {
           </div>
         )}
 
+        {/* Users Tab */}
+        {activeTab === 'users' && isAdmin && (
+          <div className="space-y-8 animate-in fade-in">
+             <div className={`p-8 rounded-[32px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}>
+                <div className="flex justify-between items-center mb-6">
+                    <h4 className="font-bold text-[#4f093c] flex items-center gap-2 text-3xl"><Plus className="w-8 h-8"/> 新增使用者</h4>
+                    <div className="relative">
+                      <input type="text" placeholder="搜尋姓名/ID..." className="p-2 pl-8 border-none rounded-xl text-base font-bold text-stone-600 outline-none w-48 focus:w-64 transition-all bg-white shadow-sm" value={usersSearch} onChange={e=>setUsersSearch(e.target.value)} />
+                      <Search className="w-4 h-4 absolute left-2 top-1/2 -translate-y-1/2 text-stone-400"/>
+                    </div>
+                </div>
+                <div className="flex flex-col md:flex-row gap-4 mb-8">
+                  <input className="flex-1 p-3 border rounded-xl text-lg" placeholder="姓名" value={newUser.name} onChange={e=>setNewUser({...newUser, name: e.target.value})} />
+                  <input className="w-32 p-3 border rounded-xl text-lg" placeholder="ID後4碼" value={newUser.id4} onChange={e=>setNewUser({...newUser, id4: e.target.value})} />
+                  <input className="w-40 p-3 border rounded-xl text-lg" placeholder="密碼" value={newUser.pwd} onChange={e=>setNewUser({...newUser, pwd: e.target.value})} />
+                  <button onClick={handleCreateUser} className="bg-blue-600 text-white px-6 rounded-xl font-bold text-lg hover:bg-blue-700 shadow-md shadow-blue-200">新增</button>
+                </div>
+             </div>
+             
+             <div className={`rounded-[32px] shadow-sm border border-stone-100 overflow-hidden`} style={{ backgroundColor: CARD_BG_COLOR }}>
+                <table className="w-full text-lg text-left">
+                  <thead className="bg-[#4f093c] text-white font-bold border-b border-[#4f093c]">
+                    <tr>
+                      <th className="p-5">姓名</th>
+                      <th className="p-5">ID後4碼</th>
+                      <th className="p-5">備註</th>
+                      <th className="p-5">是否為管理員</th>
+                      <th className="p-5">是否刪除</th>
+                      <th className="p-5">報名筆數</th>
+                      <th className="p-5 text-right">是否停用</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-stone-100">
+                    {filteredUsers.map(u => { 
+                      const count = notes.filter(n => n.user_id === u.uid).length; 
+                      return (
+                        <tr key={u.id} className="hover:bg-stone-50/50">
+                          <td className="p-5 font-bold text-[#4f093c]">{u.user_name}</td>
+                          <td className="p-5 font-mono text-stone-400">{u.id_last4}</td>
+                          <td className="p-5">
+                             <input 
+                                className="bg-transparent border-b border-dashed border-stone-300 focus:border-[#4f093c] outline-none text-stone-600 text-base w-full" 
+                                placeholder="新增備註..."
+                                defaultValue={u.memo || ''}
+                                onBlur={(e) => handleUpdateUserMemo(u.uid!, e.target.value)}
+                             />
+                          </td>
+                          <td className="p-5"><input type="checkbox" checked={u.is_admin} onChange={() => handleToggleAdmin(u.uid!, u.is_admin)} className="w-5 h-5 rounded border-stone-300 text-[#4f093c] focus:ring-[#4f093c]" /></td>
+                          <td className="p-5"><span className={`px-2 py-1 rounded text-xs font-bold ${u.is_disabled ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'}`}>{u.is_disabled ? '已停用' : '正常'}</span></td>
+                          <td className="p-5 font-bold text-stone-600 pl-8">{count}</td>
+                          <td className="p-5 text-right"><input type="checkbox" checked={u.is_disabled} onChange={() => handleToggleUserStatus(u.uid!, u.is_disabled)} className="w-5 h-5 rounded border-stone-300 text-red-600 focus:ring-red-600" /></td>
+                        </tr>
+                      ); 
+                    })}
+                    {filteredUsers.length === 0 && (
+                        <tr><td colSpan={7} className="p-8 text-center text-stone-400">找不到符合的使用者</td></tr>
+                    )}
+                  </tbody>
+                </table>
+             </div>
+          </div>
+        )}
+
+        {/* Audit Tab */}
+        {activeTab === 'audit' && isAdmin && (
+          <div className="space-y-8 animate-in fade-in">
+            <div className={`p-8 rounded-[32px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}>
+              <div className="flex justify-between items-center mb-2">
+                  <h2 className="text-3xl font-bold text-[#4f093c]">審核中心</h2>
+                  <div className="relative">
+                      <input type="text" placeholder="搜尋申請人..." className="p-2 pl-8 border-none rounded-xl text-base font-bold text-stone-600 outline-none w-48 focus:w-64 transition-all bg-white shadow-sm" value={auditSearch} onChange={e=>setAuditSearch(e.target.value)} />
+                      <Search className="w-4 h-4 absolute left-2 top-1/2 -translate-y-1/2 text-stone-400"/>
+                  </div>
+              </div>
+              <p className="text-sm text-stone-500 mb-8">處理用戶的密碼重設申請</p>
+              <div className="overflow-x-auto rounded-2xl border border-stone-100">
+                <table className="w-full text-left text-sm bg-white">
+                  <thead className="bg-[#4f093c] text-white font-bold">
+                    <tr>
+                      <th className="p-4">申請人姓名</th>
+                      <th className="p-4">ID後4碼</th>
+                      <th className="p-4">學員備註</th>
+                      <th className="p-4">申請時間</th>
+                      <th className="p-4">狀態</th>
+                      <th className="p-4 text-right">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-stone-200">
+                    {filteredAudits.map(r => {
+                      const userMemo = allUsers.find(u => u.uid === r.uid)?.memo || '-';
+                      return (
+                      <tr key={r.id} className="hover:bg-stone-50 transition-colors">
+                        <td className="p-4 font-bold text-lg text-slate-800">{r.user_name}</td>
+                        <td className="p-4 font-mono text-stone-600">{r.id_last4}</td>
+                        <td className="p-4 text-stone-500 italic">{userMemo}</td>
+                        <td className="p-4 text-stone-500 font-mono text-xs">{formatDateTime(r.created_at)}</td>
+                        <td className="p-4">
+                           {r.status === 'pending' ? (<span className="text-amber-600 bg-amber-100 px-2 py-1 rounded text-xs font-bold">待審核</span>) : r.status === 'completed' ? (<span className="text-emerald-600 bg-emerald-100 px-2 py-1 rounded text-xs font-bold">已批准</span>) : (<span className="text-stone-600 bg-stone-200 px-2 py-1 rounded text-xs font-bold">已拒絕</span>)}
+                        </td>
+                        <td className="p-4 flex gap-2 justify-end">
+                          {r.status === 'pending' && (
+                            <>
+                              <button onClick={()=>handleResetAction(r, 'approve')} className="px-4 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 shadow-sm shadow-blue-200 transition-colors">批准</button>
+                              <button onClick={()=>handleResetAction(r, 'reject')} className="px-4 py-2 bg-stone-200 text-stone-700 font-bold rounded-lg hover:bg-stone-300 transition-colors">拒絕</button>
+                            </>
+                          )}
+                        </td>
+                      </tr>
+                    )})}
+                    {filteredAudits.length === 0 && (<tr><td colSpan={6} className="p-12 text-center text-stone-400 font-bold bg-white">目前無相關申請紀錄</td></tr>)}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Admin Settings Tab (Reverted - Removed Completed List) */}
         {activeTab === 'admin_settings' && isAdmin && (
            <div className={`p-10 rounded-[40px] shadow-sm border border-stone-100`} style={{ backgroundColor: CARD_BG_COLOR }}>
-              <div className="flex justify-between items-start mb-8">
+              <div className="flex justify-between items-start mb-8 bg-[#4f093c] p-6 rounded-2xl shadow-md">
                  <div>
-                    <h3 className="text-3xl font-bold text-[#4f093c] mb-2">1、報名行程設定</h3>
-                    <p className="text-sm text-stone-400 mb-10">設定地點、活動、行程層級與日期控制 (已自動隱藏圓滿活動)</p>
+                    <h3 className="text-3xl font-bold text-white mb-2">1、報名行程設定</h3>
+                    <p className="text-sm text-white/70 mb-2">設定地點、活動、行程層級與日期控制</p>
+                    <div className="flex items-center gap-2">
+                        <button 
+                            onClick={() => setShowCompletedSettings(!showCompletedSettings)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all border ${showCompletedSettings ? 'bg-orange-100 text-orange-700 border-orange-200' : 'bg-white/20 text-white border-white/30 hover:bg-white/30'}`}
+                        >
+                            {showCompletedSettings ? <Unlock className="w-3 h-3"/> : <Lock className="w-3 h-3"/>}
+                            {showCompletedSettings ? '已顯示圓滿行程 (可修改日期)' : '僅顯示進行中行程 (點此修改已圓滿日期)'}
+                        </button>
+                    </div>
                  </div>
-                 <button onClick={handlePublishSettings} className="bg-[#4f093c] text-white px-6 py-3 rounded-xl font-bold text-base shadow-md hover:bg-[#3d072e] flex items-center gap-2 transition-all shrink-0">
+                 <button onClick={handlePublishSettings} className="bg-white text-[#4f093c] px-6 py-3 rounded-xl font-bold text-base shadow-md hover:bg-stone-100 flex items-center gap-2 transition-all shrink-0">
                     <UploadCloud className="w-5 h-5" /> 發佈設定
                  </button>
               </div>
@@ -2147,7 +2515,7 @@ export default function App() {
               <div className="grid grid-cols-1 lg:grid-cols-4 gap-3 h-[600px]">
                  {/* Column 1: Location */}
                  <div className="flex flex-col bg-white/50 rounded-3xl border border-stone-100 overflow-hidden">
-                    <div className="p-3 border-b border-stone-100 bg-white"><h4 className="font-bold text-slate-700 flex items-center gap-2"><div className="w-2 h-6 bg-[#4f093c] rounded-full"></div>地點</h4></div>
+                    <div className="p-3 border-b border-[#4f093c] bg-[#4f093c] text-white"><h4 className="font-bold flex items-center gap-2">地點</h4></div>
                     
                     {/* 新增輸入框 (移至最上方) - p-2 */}
                     <div className="p-2 flex gap-2 border-b border-stone-100"><input className="flex-1 p-2 text-sm border rounded-lg" placeholder="新地點..." value={newLocation} onChange={e=>setNewLocation(e.target.value)} /><button onClick={addLocation} className="bg-[#4f093c] text-white p-2 rounded-lg hover:bg-[#3d072e] shrink-0"><Plus/></button></div>
@@ -2164,7 +2532,7 @@ export default function App() {
 
                  {/* Column 2: Activity */}
                  <div className="flex flex-col bg-white/50 rounded-3xl border border-stone-100 overflow-hidden">
-                    <div className="p-3 border-b border-stone-100 bg-white"><h4 className="font-bold text-slate-700 flex items-center gap-2"><div className="w-2 h-6 bg-[#4f093c] rounded-full"></div>活動</h4></div>
+                    <div className="p-3 border-b border-[#4f093c] bg-[#4f093c] text-white"><h4 className="font-bold flex items-center gap-2">活動</h4></div>
                     
                     {/* 新增輸入框 (移至最上方) - p-2 */}
                     <div className="p-2 flex gap-2 border-b border-stone-100"><input className="flex-1 p-2 text-sm border rounded-lg" placeholder="新活動..." disabled={!mgmtSelectedLoc} value={newActivity} onChange={e=>setNewActivity(e.target.value)} /><button onClick={addActivity} className="bg-[#4f093c] text-white p-2 rounded-lg hover:bg-[#3d072e] disabled:opacity-50 shrink-0"><Plus/></button></div>
@@ -2193,7 +2561,7 @@ export default function App() {
 
                  {/* Column 3: Option */}
                  <div className="flex flex-col bg-white/50 rounded-3xl border border-stone-100 overflow-hidden">
-                    <div className="p-3 border-b border-stone-100 bg-white"><h4 className="font-bold text-slate-700 flex items-center gap-2"><div className="w-2 h-6 bg-[#4f093c] rounded-full"></div>行程</h4></div>
+                    <div className="p-3 border-b border-[#4f093c] bg-[#4f093c] text-white"><h4 className="font-bold flex items-center gap-2">行程</h4></div>
                     
                     {/* 新增輸入框 - p-2 */}
                     <div className="p-2 flex gap-2 border-b border-stone-100"><input className="flex-1 p-2 text-sm border rounded-lg" placeholder="新行程..." disabled={!mgmtSelectedAct} value={newOption} onChange={e=>setNewOption(e.target.value)} /><button onClick={addOption} className="bg-[#4f093c] text-white p-2 rounded-lg hover:bg-[#3d072e] disabled:opacity-50 shrink-0"><Plus/></button></div>
@@ -2221,7 +2589,7 @@ export default function App() {
 
                  {/* Column 4: Content */}
                  <div className="flex flex-col bg-white/50 rounded-3xl border border-stone-100 overflow-hidden">
-                    <div className="p-3 border-b border-stone-100 bg-white"><h4 className="font-bold text-slate-700 flex items-center gap-2"><div className="w-2 h-6 bg-[#4f093c] rounded-full"></div>內容</h4></div>
+                    <div className="p-3 border-b border-[#4f093c] bg-[#4f093c] text-white"><h4 className="font-bold flex items-center gap-2">內容</h4></div>
                     
                     {/* 新增輸入框 - p-2 */}
                     <div className="p-2 flex gap-2 border-b border-stone-100"><input className="flex-1 p-2 text-sm border rounded-lg" placeholder="新內容..." disabled={!mgmtSelectedOpt} value={newContent} onChange={e=>setNewContent(e.target.value)} /><button onClick={addContent} className="bg-[#4f093c] text-white p-2 rounded-lg hover:bg-[#3d072e] disabled:opacity-50 shrink-0"><Plus/></button></div>
@@ -2238,17 +2606,17 @@ export default function App() {
               </div>
               
               <div className="mt-20">
-                 <div className="flex justify-between items-center mb-6">
-                    <h3 className="text-3xl font-bold text-[#4f093c]">2、欄位管理</h3>
+                 <div className="flex justify-between items-center mb-6 bg-[#4f093c] p-6 rounded-2xl shadow-md">
+                    <h3 className="text-3xl font-bold text-white">2、欄位管理</h3>
                     <div className="flex gap-2">
-                        <button onClick={handlePublishSettings} className="bg-[#4f093c] text-white px-6 py-3 rounded-xl font-bold text-base shadow-md hover:bg-[#3d072e] flex items-center gap-2 transition-all shrink-0">
+                        <button onClick={handlePublishSettings} className="bg-white text-[#4f093c] px-6 py-3 rounded-xl font-bold text-base shadow-md hover:bg-stone-100 flex items-center gap-2 transition-all shrink-0">
                           <UploadCloud className="w-5 h-5" /> 發佈設定
                         </button>
                     </div>
                  </div>
                  <div className="overflow-x-auto rounded-[40px] border border-stone-100 shadow-sm">
                     <table className="w-full text-left text-sm bg-white">
-                       <thead className="bg-stone-50 text-stone-600 font-bold border-b border-stone-200">
+                       <thead className="bg-[#4f093c] text-white font-bold border-b border-stone-200">
                           <tr>
                             <th className="p-6">欄位名稱 (Key)</th>
                             <th className="p-6">顯示標籤 (Label)</th>
