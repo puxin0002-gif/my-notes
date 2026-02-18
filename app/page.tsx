@@ -38,7 +38,7 @@ const INITIAL_FORM_DATA = {
   stay_start_date: '', stay_end_date: ''
 };
 
-// 用於管理資料列表的預設欄寬 (調整以容納7欄)
+// 用於管理資料列表的預設欄寬
 const DEFAULT_COL_WIDTHS = {
   col1: 180, // 活動行程
   col2: 200, // 基本資料
@@ -338,33 +338,31 @@ const CustomLogo = ({ className }: { className?: string }) => (
   <img src="/logo.png" alt="Logo" className={`${className} rounded-full object-cover border-2 border-white/20 shadow-md`} />
 );
 
-// 新增：響應式標題組件 (手機版直式)
+// 修改：響應式標題組件 (手機版橫向分行)
 const ResponsiveHeader = ({ title, children, color = "bg-[#4f093c]" }: { title: string, children?: React.ReactNode, color?: string }) => {
   return (
-    <div className={`flex flex-row justify-between items-stretch rounded-2xl shadow-sm border border-stone-100 ${color} text-white mb-8 overflow-hidden min-h-[4rem]`}>
-       {/* 標題區域：手機版直式，桌機版橫式 */}
-       <div className="flex items-center justify-center p-3 md:px-6 bg-black/10 md:bg-transparent">
-          <h3 className="font-bold text-lg md:text-2xl flex flex-col md:flex-row gap-1 leading-none text-center">
-             {title.split('').map((char, i) => (
-                <span key={i} className="block md:inline">{char}</span>
-             ))}
+    <div className={`flex flex-col md:flex-row justify-between items-stretch rounded-2xl shadow-sm border border-stone-100 ${color} text-white mb-8 overflow-hidden min-h-[4rem]`}>
+       {/* 標題區域：保持橫向，文字可換行 */}
+       <div className="flex items-center justify-center md:justify-start p-4 md:px-6 bg-black/10 md:bg-transparent">
+          <h3 className="font-bold text-xl md:text-2xl text-center md:text-left leading-tight break-words whitespace-pre-wrap">
+             {title}
           </h3>
        </div>
        {/* 內容區域 (右側) */}
-       <div className="flex-1 flex items-center justify-end p-2 md:px-6 overflow-x-auto">
+       <div className="flex-1 flex items-center justify-center md:justify-end p-4 md:px-6 overflow-x-auto">
           {children}
        </div>
     </div>
   );
 };
 
-// 新增：帶有清除按鈕的日期輸入框
+// 修改：帶有清除按鈕的日期輸入框 (增加右側內距防止重疊)
 const DateInputWithClear = ({ type = "datetime-local", value, onChange, min, className, ...props }: any) => (
   <div className="relative w-full">
     <input 
       type={type} 
       min={min} 
-      className={`${className} pr-10`} // Make room for icon
+      className={`${className} pr-16`} // 增加內距，確保文字不會被 X 按鈕遮住
       value={value || ''} 
       onChange={onChange} 
       {...props}
@@ -373,10 +371,10 @@ const DateInputWithClear = ({ type = "datetime-local", value, onChange, min, cla
       <button 
         type="button"
         onClick={() => onChange({ target: { value: '' } })} 
-        className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 hover:text-red-500 transition-colors bg-transparent p-1 rounded-full"
+        className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 hover:text-red-500 transition-colors bg-white/80 p-1.5 rounded-full z-10"
         title="重置日期"
       >
-        <XCircle className="w-5 h-5 bg-white rounded-full" />
+        <XCircle className="w-5 h-5" />
       </button>
     )}
   </div>
@@ -2323,10 +2321,10 @@ export default function App() {
                                  <thead className="bg-[#4f093c] text-white font-bold">
                                      <tr>
                                          <th className="p-3 w-[150px]">地點 / 活動</th>
-                                         <th className="p-3 w-[150px]">行程</th>
-                                         <th className="p-3 w-[200px]">姓名資料</th>
-                                         <th className="p-3 w-[200px]">交通住宿</th>
-                                         <th className="p-3 w-[200px]">義工資訊</th>
+                                         <th className="p-3 w-[120px]">行程</th>
+                                         <th className="p-3 w-[180px]">姓名資料</th>
+                                         <th className="p-3 w-[180px]">交通住宿</th>
+                                         <th className="p-3 w-[180px]">義工資訊</th>
                                          <th className="p-3 w-[150px]">備註</th>
                                          <th className="p-3 w-[120px]">填表資訊</th>
                                      </tr>
