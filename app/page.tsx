@@ -409,7 +409,7 @@ const IdentityRatioChart = ({ data }: { data: Record<string, { dharma_m: number,
                 <PieChart className="w-6 h-6"/> 身分比例結構圖
             </h4>
             
-            <div className="flex w-full h-32 rounded-2xl overflow-hidden shadow-inner font-bold text-white relative text-lg">
+            <div className="flex w-full h-80 md:h-32 rounded-2xl overflow-hidden shadow-inner font-bold text-white relative text-lg">
                 <div style={{ width: `${dharmaPct}%` }} className="h-full flex flex-col transition-all duration-500">
                     <div className="flex-1 bg-blue-600 flex items-center justify-center relative group">
                         <div className="z-10 drop-shadow-md text-center"><div>參加法會</div><div className="text-2xl">{totalDharma}人 ({dharmaPct.toFixed(1)}%)</div></div>
@@ -1647,7 +1647,7 @@ export default function App() {
       </div>
 
       {/* Main Content Area */}
-      <div className="max-w-7xl mx-auto p-6 md:p-10">
+      <div className="w-full max-w-[1600px] mx-auto p-2 md:p-6 lg:p-10">
         
         {/* Bulletin Tab */}
         {activeTab === 'bulletin' && (
@@ -1951,13 +1951,18 @@ export default function App() {
                                 {n.activity_location} <span className="text-stone-300 mx-1">|</span> {n.activity_name}
                               </h3>
                           </div>
-                          <div className={`flex items-baseline gap-2 mb-4 ${isInactive ? 'text-stone-400' : 'text-slate-800'}`}>
+                          
+                          {/* 姓名/法名/性別 */}
+                          <div className={`mb-2 ${isInactive ? 'text-stone-400' : 'text-slate-800'}`}>
                               <span className="text-xl font-bold">{n.real_name}</span>
-                              <span className="text-base font-bold opacity-70">
+                              <span className="text-base font-bold opacity-70 ml-2">
                                   {n.dharma_name ? ` / ${n.dharma_name}` : ' / (無)'} <span className="mx-1 text-stone-400">/</span> {n.gender}
                               </span>
-                              
-                              <span className={`text-sm font-bold ml-auto ${isInactive ? 'text-stone-400' : 'text-[#7A2E40]'}`}>
+                          </div>
+
+                          {/* 身分/屬性 */}
+                          <div className={`mb-4 flex items-center gap-2 ${isInactive ? 'text-stone-400' : 'text-slate-800'}`}>
+                              <span className={`text-sm font-bold ${isInactive ? 'text-stone-400' : 'text-[#7A2E40]'}`}>
                                 {n.identity === '參加法會' ? '法會' : (n.identity === '發心義工' ? '義工' : n.identity)}
                               </span>
                               <span className={`text-xs px-2 py-1 rounded-full ${isInactive ? 'bg-stone-200/50 text-stone-400' : 'bg-stone-100 text-stone-500'}`}>{n.registrant_type}</span>
@@ -2264,31 +2269,31 @@ export default function App() {
                              <table className="w-full text-left text-sm" style={{ minWidth: '900px' }}>
                                  <thead className="bg-[#4f093c] text-white font-bold">
                                      <tr>
-                                         <th className="p-4 w-[180px]">地點 / 活動</th>
-                                         <th className="p-4">行程</th>
-                                         <th className="p-4 w-[150px]">截止 / 結束日期</th>
-                                         <th className="p-4">內容統計</th>
-                                         <th className="p-4 text-center">總人數</th>
-                                         <th className="p-4 text-center">義工</th>
-                                         <th className="p-4 text-center">法會</th>
+                                         <th className="p-4 w-[180px] whitespace-nowrap">地點 / 活動</th>
+                                         <th className="p-4 whitespace-nowrap">行程</th>
+                                         <th className="p-4 w-[150px] whitespace-nowrap">截止 / 結束日期</th>
+                                         <th className="p-4 whitespace-nowrap">內容統計</th>
+                                         <th className="p-4 text-center whitespace-nowrap">總人數</th>
+                                         <th className="p-4 text-center whitespace-nowrap">義工</th>
+                                         <th className="p-4 text-center whitespace-nowrap">法會</th>
                                      </tr>
                                  </thead>
                                  <tbody>
                                      {selectedCompletedHierarchy.map((item, idx) => (
                                          <tr key={idx} className={`${idx % 2 === 0 ? 'bg-white' : 'bg-stone-100'} hover:bg-stone-200 transition-colors`}>
-                                             <td className="p-4 font-bold text-slate-800">
+                                             <td className="p-4 font-bold text-slate-800 whitespace-nowrap">
                                                  <div>{item.node.location}</div>
                                                  <div className="text-xs text-stone-500 mt-1">{item.node.activity}</div>
                                              </td>
-                                             <td className="p-4 font-bold text-slate-800">{item.node.option || '(無行程)'}</td>
-                                             <td className="p-4 font-mono text-stone-500 text-xs">
+                                             <td className="p-4 font-bold text-slate-800 whitespace-nowrap">{item.node.option || '(無行程)'}</td>
+                                             <td className="p-4 font-mono text-stone-500 text-xs whitespace-nowrap">
                                                  <div className="text-red-400">截止: {item.dates.dead || '-'}</div>
                                                  <div className="text-emerald-600 font-bold mt-1">結束: {item.dates.end}</div>
                                              </td>
-                                             <td className="p-4 text-stone-600 text-xs font-bold whitespace-pre-wrap">{item.contentStats || '-'}</td>
-                                             <td className="p-4 text-center font-bold text-lg text-slate-800">{item.counts.total}</td>
-                                             <td className="p-4 text-center font-bold text-orange-600">{item.counts.vol}</td>
-                                             <td className="p-4 text-center font-bold text-blue-600">{item.counts.dharma}</td>
+                                             <td className="p-4 text-stone-600 text-xs font-bold whitespace-nowrap">{item.contentStats || '-'}</td>
+                                             <td className="p-4 text-center font-bold text-lg text-slate-800 whitespace-nowrap">{item.counts.total}</td>
+                                             <td className="p-4 text-center font-bold text-orange-600 whitespace-nowrap">{item.counts.vol}</td>
+                                             <td className="p-4 text-center font-bold text-blue-600 whitespace-nowrap">{item.counts.dharma}</td>
                                          </tr>
                                      ))}
                                  </tbody>
